@@ -1,6 +1,58 @@
 import { describe, expect, it } from "bun:test";
-import { findNonSystemDependencies, hasAvx512Markers } from "../../../scripts/ci-release-verify-natives";
+import {
+	findNonSystemDependencies,
+	hasAvx512Markers,
+	readMachODependencies,
+} from "../../../scripts/ci-release-verify-natives";
 import { buildZigArgs } from "../scripts/zig-safe-wrapper";
+
+const LC_LOAD_DYLIB = 0x0c;
+const LC_LOAD_WEAK_DYLIB = 0x80000018;
+
+/** Builds a minimal 64-bit Mach-O image carrying the given dylib load commands. */
+function machO(dependencies: ReadonlyArray<{ name: string; command?: number }>): Uint8Array {
+	const headerSize = 32;
+	const commands = dependencies.map(({ name, command }) => {
+		const raw = new TextEncoder().encode(`${name}\0`);
+		const nameOffset = 24;
+		const size = nameOffset + raw.byteLength;
+		const padded = size + ((8 - (size % 8)) % 8);
+		return { raw, nameOffset, size: padded, command: command ?? LC_LOAD_DYLIB };
+	});
+	const commandsSize = commands.reduce((sum, command) => sum + command.size, 0);
+	const bytes = new Uint8Array(headerSize + commandsSize);
+	const view = new DataView(bytes.buffer);
+	view.setUint32(0, 0xfeedfacf, true); // MH_MAGIC_64 (little-endian on disk)
+	view.setUint32(16, commands.length, true);
+	view.setUint32(20, commandsSize, true);
+	let cursor = headerSize;
+	for (const command of commands) {
+		view.setUint32(cursor, command.command, true);
+		view.setUint32(cursor + 4, command.size, true);
+		view.setUint32(cursor + 8, command.nameOffset, true);
+		bytes.set(command.raw, cursor + command.nameOffset);
+		cursor += command.size;
+	}
+	return bytes;
+}
+
+/** Wraps thin images in a fat header (big-endian), as lipo would produce. */
+function fatMachO(slices: readonly Uint8Array[]): Uint8Array {
+	const headerSize = 8 + slices.length * 20;
+	const bytes = new Uint8Array(headerSize + slices.reduce((sum, slice) => sum + slice.byteLength, 0));
+	const view = new DataView(bytes.buffer);
+	view.setUint32(0, 0xcafebabe, false); // FAT_MAGIC
+	view.setUint32(4, slices.length, false);
+	let offset = headerSize;
+	slices.forEach((slice, index) => {
+		const entry = 8 + index * 20;
+		view.setUint32(entry + 8, offset, false);
+		view.setUint32(entry + 12, slice.byteLength, false);
+		bytes.set(slice, offset);
+		offset += slice.byteLength;
+	});
+	return bytes;
+}
 
 describe("native build safety", () => {
 	describe("buildZigArgs", () => {
@@ -46,37 +98,61 @@ describe("native build safety", () => {
 		});
 	});
 
-	describe("findNonSystemDependencies", () => {
-		it("flags a non-system (e.g. Homebrew) dependency", () => {
-			const dump = [
-				"/repo/packages/natives/native/cornfield_natives.darwin-arm64.node:",
-				"\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.100.2)",
-				"\t/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib (compatibility version 16.0.0, current version 16.0.0)",
-			].join("\n");
-			expect(findNonSystemDependencies(dump)).toEqual(["/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib"]);
+	describe("readMachODependencies", () => {
+		it("reads dylib load commands from a thin 64-bit image", () => {
+			const bytes = machO([{ name: "/usr/lib/libSystem.B.dylib" }, { name: "@rpath/libpcre2-8.0.dylib" }]);
+			expect(readMachODependencies(bytes, "addon.node")).toEqual([
+				"/usr/lib/libSystem.B.dylib",
+				"@rpath/libpcre2-8.0.dylib",
+			]);
 		});
 
-		it("accepts system libraries/frameworks and the addon's own install_name", () => {
-			const dump = [
-				"/repo/packages/natives/native/cornfield_natives.darwin-arm64.node:",
-				"\t/repo/target/aarch64-apple-darwin/ci/deps/libcornfield_natives.dylib (compatibility version 0.0.0, current version 0.0.0)",
-				"\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.100.2)",
-				"\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)",
-				"\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 2420.0.0)",
-			].join("\n");
-			expect(findNonSystemDependencies(dump)).toEqual([]);
+		it("reads weak-linked dependencies too — a missing weak dylib still breaks loading", () => {
+			const bytes = machO([{ name: "/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib", command: LC_LOAD_WEAK_DYLIB }]);
+			expect(readMachODependencies(bytes, "addon.node")).toEqual(["/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib"]);
+		});
+
+		it("reads every architecture slice of a fat image", () => {
+			const fat = fatMachO([
+				machO([{ name: "/usr/lib/libSystem.B.dylib" }]),
+				machO([{ name: "/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib" }]),
+			]);
+			expect(readMachODependencies(fat, "addon.node").sort()).toEqual(
+				["/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib", "/usr/lib/libSystem.B.dylib"].sort(),
+			);
+		});
+
+		it("rejects a non-Mach-O image rather than reporting zero dependencies", () => {
+			expect(() =>
+				readMachODependencies(new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0]), "addon.node"),
+			).toThrow(/not a Mach-O image/);
+			expect(() => readMachODependencies(new Uint8Array([1, 2, 3]), "addon.node")).toThrow(/too small/);
+		});
+	});
+
+	describe("findNonSystemDependencies", () => {
+		it("flags a non-system (e.g. Homebrew) dependency", () => {
+			expect(
+				findNonSystemDependencies(["/usr/lib/libSystem.B.dylib", "/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib"]),
+			).toEqual(["/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib"]);
+		});
+
+		it("accepts system libraries and frameworks", () => {
+			expect(
+				findNonSystemDependencies([
+					"/usr/lib/libSystem.B.dylib",
+					"/usr/lib/libobjc.A.dylib",
+					"/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+				]),
+			).toEqual([]);
 		});
 
 		it("flags an rpath dependency: user machines cannot be assumed to provide it", () => {
-			const dump = [
-				"binary:",
-				"\t@rpath/libpcre2-8.0.dylib (compatibility version 16.0.0, current version 16.0.0)",
-			].join("\n");
-			expect(findNonSystemDependencies(dump)).toEqual(["@rpath/libpcre2-8.0.dylib"]);
+			expect(findNonSystemDependencies(["@rpath/libpcre2-8.0.dylib"])).toEqual(["@rpath/libpcre2-8.0.dylib"]);
 		});
 
-		it("ignores the header line and blank lines", () => {
-			expect(findNonSystemDependencies("\n/repo/x.node:\n\n")).toEqual([]);
+		it("returns nothing for an image with no dependencies", () => {
+			expect(findNonSystemDependencies([])).toEqual([]);
 		});
 	});
 });

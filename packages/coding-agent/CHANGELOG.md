@@ -28,6 +28,8 @@
 
 - **`write` 写 `xd://` 设备时对象形态 content 被 schema 拒收，设备路径永远不可达**（`src/tools/write.ts`、`scripts/verify-xdev-mounting.ts`；2 文件 +87/−18）：`content` 原为 `Type.String()`，而设备调用天然是对象入参（模型按提示词理解就该传对象），于是「用 `write` 执行设备」这条路径在**模型 → schema 校验层**就被挡下，走不到 `#writeXdDevice`（实测两个不同模型均报参数错误）。门禁此前直调 `WriteTool.execute` 并传字符串化 JSON，恰好绕过这一层，所以一路全绿。现 `content` 为 `string | object`：设备分支两种都吃（字符串 → JSON5 解析，对象直接用），**普通文件写入仍只接受字符串并给出明确报错**（`write content must be a string for non-device writes: object content is only valid with an xd:// path`），不静默 stringify。门禁 Case 6 改为经 `validateToolArguments` → `execute`（镜像 `agent-loop.ts` 的真实路径）。**已接受的代价**：`prepareSchemaForCCA`（仅 provider 广告层）把 `string|object` 塌缩为 `string`，且 `write` 对 OpenAI 系 provider 因对象变体无法表达而退化为非 strict。
 
+- **发布门禁在 Linux 上根本跑不起来：darwin addon 链接检查写死了 `otool`**（`scripts/ci-release-verify-natives.ts`、`packages/natives/test/build-safety.test.ts`）：v1.1.4 的 preflight 实测暴露——验 darwin 产物的 `release` job 跑在 ubuntu 上，`Bun.which("otool")` 取不到就抛错，整条发布矩阵在打 tag 前死掉（**这正是 preflight 存在的意义：没打 tag、没发布**）。改为进程内解析 Mach-O 加载命令（`LC_LOAD_DYLIB` / `LC_LOAD_WEAK_DYLIB` / `LC_REEXPORT_DYLIB`，含 fat 多架构切片），不再依赖任何外部工具——出货门禁在任何宿主上都会真的执行，而不是被跳过。顺带判定更准：`otool -L` 的首行是该 dylib 自身的 install_name（`LC_ID_DYLIB`），旧实现要靠正则把它滤掉；读加载命令天然不含自引用，真去链一个外部 `libcornfield_natives.dylib` 现在会被抓出来。
+
 ### Removed
 
 - **MCP 会话侧 discovery 的最后一层残留**（`src/mcp/discoverable-tool-metadata.ts`、`src/session/agent-session.ts`、`src/session/session-manager.ts`、`src/tools/index.ts`、`src/sdk.ts`；8 文件 +9/−1296，含删除一个 788 行用例文件）：`search_tool_bm25` 工具、`mcp.discoveryMode` 设置项与其测试全部移除，`/mcp` 注册表刷新保留——清理后仓库不再存在「设置入口已删、代码路径仍在」的残留。另补回归测试：旧 `mcp_tool_selection` 配置条目仍可加载（不炸启动）。

@@ -46,11 +46,22 @@ export function hasAvx512Markers(disassembly: string): boolean {
 }
 
 const DARWIN_SYSTEM_PREFIXES = ["/usr/lib/", "/System/"];
-/** The addon's own install_name — `otool -L` lists it as a self-reference. */
-const SELF_INSTALL_NAME = /(^|\/)libcornfield_natives\.dylib$/;
+
+const MH_MAGIC = 0xfeedface;
+const MH_CIGAM = 0xcefaedfe;
+const MH_MAGIC_64 = 0xfeedfacf;
+const MH_CIGAM_64 = 0xcffaedfe;
+const FAT_MAGIC = 0xcafebabe;
+const FAT_CIGAM = 0xbebafeca;
+
+/** Load commands that introduce a dependency on another dylib. */
+const DYLIB_COMMANDS = new Set([0x0c, 0x80000018, 0x8000001f]);
+const MACH_HEADER_64_SIZE = 32;
+const MACH_HEADER_SIZE = 28;
+const FAT_ARCH_SIZE = 20;
 
 /**
- * Non-system dynamic dependencies reported by `otool -L`.
+ * Dynamic dependencies of a Mach-O image, read from its own load commands.
  *
  * A released binary may only link libraries every user machine already has. A
  * dependency such as `/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib` makes the
@@ -58,33 +69,90 @@ const SELF_INSTALL_NAME = /(^|\/)libcornfield_natives\.dylib$/;
  * pcre2-sys picked up the local library instead of its bundled sources; fixed by
  * pinning `PCRE2_SYS_STATIC=1` in `.cargo/config.toml`. This check is what makes
  * that invariant hold for the next dependency too.
+ *
+ * Parsed in-process instead of shelling out to `otool -L` because the job that
+ * verifies the shipped darwin addon runs on Linux, where otool does not exist
+ * (measured 2026-09-12: the v1.1.4 preflight died on exactly that gap). Reading
+ * the load commands works on any host, so the shipping gate is never skipped.
  */
-export function findNonSystemDependencies(otoolOutput: string): string[] {
-	const deps: string[] = [];
-	for (const rawLine of otoolOutput.split("\n")) {
-		const line = rawLine.trim();
-		if (line === "" || line.endsWith(":")) continue;
-		const match = /^([/@][^\s(]*)/.exec(line);
-		if (!match) continue;
-		const dep = match[1] ?? "";
-		if (dep === "") continue;
-		if (DARWIN_SYSTEM_PREFIXES.some((prefix) => dep.startsWith(prefix))) continue;
-		if (SELF_INSTALL_NAME.test(dep)) continue;
-		deps.push(dep);
+export function readMachODependencies(bytes: Uint8Array, label: string): string[] {
+	if (bytes.byteLength < 8) {
+		throw new Error(`${label}: too small to be a Mach-O image`);
 	}
-	return deps;
+
+	const magic = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, false);
+	if (magic !== FAT_MAGIC && magic !== FAT_CIGAM) {
+		return readThinMachODependencies(bytes, 0, label);
+	}
+
+	// Fat binaries carry one slice per architecture; every slice ships, so every
+	// slice has to satisfy the linkage contract.
+	// Fat header fields (fat_header/fat_arch) are big-endian; FAT_CIGAM is the
+	// byte-swapped variant. Note the DataView flag is littleEndian, not bigEndian —
+	// naming it after the header's byte order is what inverted this read once.
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const littleEndian = magic === FAT_CIGAM;
+	const sliceCount = view.getUint32(4, littleEndian);
+	const dependencies = new Set<string>();
+	for (let slice = 0; slice < sliceCount; slice++) {
+		const entry = 8 + slice * FAT_ARCH_SIZE;
+		if (entry + FAT_ARCH_SIZE > bytes.byteLength) {
+			throw new Error(`${label}: truncated fat header`);
+		}
+		const offset = view.getUint32(entry + 8, littleEndian);
+		for (const dependency of readThinMachODependencies(bytes, offset, label)) {
+			dependencies.add(dependency);
+		}
+	}
+	return [...dependencies];
 }
 
-function linkedLibraries(binaryPath: string): string {
-	const otoolPath = Bun.which("otool");
-	if (!otoolPath) {
-		throw new Error("otool is required to verify darwin native linkage contracts.");
+function readThinMachODependencies(bytes: Uint8Array, start: number, label: string): string[] {
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	if (start + 4 > bytes.byteLength) {
+		throw new Error(`${label}: truncated Mach-O header`);
 	}
-	const result = Bun.spawnSync([otoolPath, "-L", binaryPath], { stdout: "pipe", stderr: "pipe" });
-	if (result.exitCode !== 0) {
-		throw new Error(`otool failed for ${binaryPath}: ${result.stderr.toString("utf-8").trim()}`);
+
+	const magic = view.getUint32(start, false);
+	const littleEndian = magic === MH_CIGAM || magic === MH_CIGAM_64;
+	const is64Bit = magic === MH_MAGIC_64 || magic === MH_CIGAM_64;
+	if (!littleEndian && magic !== MH_MAGIC && magic !== MH_MAGIC_64) {
+		throw new Error(`${label}: not a Mach-O image (magic 0x${magic.toString(16)})`);
 	}
-	return result.stdout.toString("utf-8");
+
+	const commandCount = view.getUint32(start + 16, littleEndian);
+	let cursor = start + (is64Bit ? MACH_HEADER_64_SIZE : MACH_HEADER_SIZE);
+	const names: string[] = [];
+	for (let i = 0; i < commandCount; i++) {
+		if (cursor + 8 > bytes.byteLength) {
+			throw new Error(`${label}: truncated load command`);
+		}
+		const command = view.getUint32(cursor, littleEndian);
+		const commandSize = view.getUint32(cursor + 4, littleEndian);
+		if (commandSize < 8 || cursor + commandSize > bytes.byteLength) {
+			throw new Error(`${label}: malformed load command at offset ${cursor}`);
+		}
+
+		if (DYLIB_COMMANDS.has(command) && commandSize >= 24) {
+			const nameOffset = view.getUint32(cursor + 8, littleEndian);
+			const nameStart = cursor + nameOffset;
+			const limit = cursor + commandSize;
+			if (nameStart >= cursor + 24 && nameStart < limit) {
+				let end = nameStart;
+				while (end < limit && bytes[end] !== 0) end++;
+				const name = new TextDecoder().decode(bytes.subarray(nameStart, end));
+				if (name !== "") names.push(name);
+			}
+		}
+		cursor += commandSize;
+	}
+	return names;
+}
+
+/** Mach-O load commands already list only real dependencies, so any entry that is
+ * not a system path and not self-relative is a release blocker. */
+export function findNonSystemDependencies(dependencies: readonly string[]): string[] {
+	return dependencies.filter((dep) => !DARWIN_SYSTEM_PREFIXES.some((prefix) => dep.startsWith(prefix)));
 }
 
 function disassemble(binaryPath: string): string {
@@ -166,7 +234,8 @@ async function main(): Promise<void> {
 	for (const platform of expectedAddons.filter((entry) => entry.startsWith("darwin-"))) {
 		const filename = `cornfield_natives.${platform}.node`;
 		const binaryPath = path.join(nativeDir, filename);
-		const nonSystem = findNonSystemDependencies(linkedLibraries(binaryPath));
+		const bytes = new Uint8Array(await Bun.file(binaryPath).arrayBuffer());
+		const nonSystem = findNonSystemDependencies(readMachODependencies(bytes, filename));
 		if (nonSystem.length > 0) {
 			linkageFailures.push(
 				`${filename} links non-system libraries:\n${nonSystem.join("\n")}\n` +
