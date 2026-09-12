@@ -29,8 +29,10 @@ decisions:
   - 2026-09-11 接管 tool2 的 4 项工作，单人执行
   - 2026-09-11 【约束】所有修改必须合入 worktree 的验证分支；合入 main 必须用户明确同意
 openQuestions:
-  - 名称规范化的 contract 阶段（配置 key 与提示词改名、旧名移除）未排期
-  - （已清）主检出 target/ 26G + bun cache 7.7G + cargo registry 3.6G，磁盘 16Gi → 50Gi
+  - 旧名移除（别名表 find→glob / search→grep / todo_write→todo + 配置 key 只读兼容层）未排期 —— ADR 明确「另开一票」
+  - MCP 会话侧残留：`agent-session.ts` 仍留有整套 discovery 子系统（#mcpDiscoveryEnabled / #discoverableMCPTools / #discoverableMCPSearchIndex / #selectedMCPToolNames / refreshMCPTools / #persistSelectedMCPToolNamesIfChanged），而设置入口已退场 ⇒ 无法再被配置开启的旧设计残留
+  - `read`/`write` 的影响面单独评估（ADR 后果段要求：gateway / 子 Agent / RPC host tool / 自演化路径共用）—— 未见任何评估记录
+  - 两份「首版」名单（essential 名单、XDEV_KEEP_TOP_LEVEL）的复评未排期
 ---
 
 ## 当前状态（2026-09-11）
