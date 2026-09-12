@@ -8,10 +8,10 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-11 23:24
+lastActivity: 2026-09-12 12:01
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
-nextAction: 全部完成，已在 squad-20260911-tool-xdev-w2b-integ（tip 83841ae884）通过五道门禁；等用户验收 + 是否 fast-forward 合入 main（main 仍为 8daba81c48）
+nextAction: 第二期（D1+M1）已完成并集成到 squad-20260911-tool-xdev-w3-integ（base = w2b-integ，含两期全部工作）；等用户验收 + 是否合 main；磁盘两缓存项(11G)与主检出 target/(26G)仍等用户。
 artifacts:
   - docs/adr/0003-tool-presentation-xdev.md
   - CONTEXT.md（Tool Catalog / Enabled Tool Set / Discoverable Tool Set / Load Mode / xd:// 挂载 / Tool Metadata）
@@ -30,7 +30,7 @@ decisions:
   - 2026-09-11 【约束】所有修改必须合入 worktree 的验证分支；合入 main 必须用户明确同意
 openQuestions:
   - 名称规范化的 contract 阶段（配置 key 与提示词改名、旧名移除）未排期
-  - 主检出 target/ 占 26G（本机磁盘大头），待用户决定是否清理
+  - （已清）主检出 target/ 26G + bun cache 7.7G + cargo registry 3.6G，磁盘 16Gi → 50Gi
 ---
 
 ## 当前状态（2026-09-11）
@@ -164,6 +164,69 @@ openQuestions:
 - 2026-09-11 23:24 — 【先前的绿曾被缓存污染】我的 `CI=0 bun check` 多次报绿后，`check:tools`（= `biome check .`）开始报出 M1 代码里的 `useTemplate` 违规（已修）。该违规为既有，biome 缓存失效（`bun install` 重建 node_modules）后才暴露。**又一个「先前的绿不可信」实例 —— 与运行前清理缓存、以及把门禁跑在干净环境里同样重要。**
 
 - 2026-09-11 23:24 — 【wave-3 去向已收口，不再单独开工】**I1（不变量与回归）→ 由新门禁脚本实际交付**：它原本要补的三条属性断言（分区等式 legacy == 顶层 ∪ 设备、每个挂载设备 summary 非空、tools.xdev 默认开启）已全部落在 `packages/coding-agent/scripts/verify-xdev-mounting.ts` 里，且跑在真实运行时（bun test 下挂载恒关，断言放单测里测不到该路径）；其中两条在本批实战中真的拓到了缺陷。**C1（conflict:// 移植）→ 移除**：前提成立（全树零命中）但越界 —— 它是上游另一个协议设备、一项新增能力，不属 xd:// 呈现机制，无任何已证实缺口。`~/.cornfield/squads/squad-20260911-tool-xdev-w3/` 的任务包保留作为记录，不再集结。⇒ 本批到此不再有待开工的票，剩下的是用户验收与是否合入 main。
+
+- 2026-09-11 23:30 — 【最后一条构造性未验证已补齐】N1 主张「未编译 PCRE2 的构建下请求 pcre2 显式报错、不静默降级」并为此写了测试，但那条测试是 `#[cfg(not(feature = "grep-pcre2"))]` —— **默认构建下它根本不运行**，我跑的 214 个用例里没有它。补验：`cargo nextest run -p cornfield-natives --no-default-features --features client` → **204 passed / 0 skipped**；再按名过滤 → `PASS grep::tests::pcre2_engine_errors_when_unavailable`（1 test run / 203 skipped）。声明成立。⇒ 同一教训的又一形态：**cfg 门控的测试在默认构建下等于不存在**。仓库声明的 `client` 变体（不含 pcre2/语法高亮/剪贴板/PTY/音频）目前只靠“有人手动跑”验证 —— 候选改进：门禁同时跑两组 feature。与 `verify:xdev` 接 CI 同属“门禁覆盖”决策，一并交用户。
+
+- 2026-09-11 23:31 — 【F1 变异验证：独立复现成立】把超时分支按同形改回旧 `throw` → **9 pass / 3 fail（正是超时那三条）/ Ran 12**，文件 sha256 精确还原、工作区干净。F1 的「测试真的抓得住这个缺陷」成立。
+  半途险些被骗：**第一次变异我多留了一个 `)`，跑出 `error: Unexpected )`，退出码同样是 1** —— 若只看退出码，就把一次语法错当成了「测试抓住缺陷」。⇒ 教训：**退出码不是证据，输出形态才是**；复现他人的「红」时必须区分「断言红」与「编译红」。
+  （**纠正我先前对 F1 的不公正归类**：它的 3红/6绿 与我实测的 9/3 并不矛盾 —— 它的变异跑在加 renderer 测试**之前**，当时文件只有 9 个测试（3 resolvePartialMatchPaths + 5 FindTool + 1 declaration），差的 3 条正是后来加的 renderer 测试，不经过超时分支故变异下仍绿。两个读数都对，只是文件状态不同。要求别人区分「实测 vs 推断」的人，自己也不能把不同状态下的两个真值当成矛盾。）
+- 2026-09-11 23:31 — F1 报告里另三处值得记的实现判断：①`onMatch` 改为**无条件收集**（否则超时路径根本无部分结果可返）；②`FindIncomplete` 用具名联合而非 boolean，保留「为何不完整」域信息；③不完整标记**追加在 truncation 之后**，保证被 head 截断时不会把这句裁掉。
+- 2026-09-11 23:31 — F1 自述把 `.node` 软链到主检出旧产物（12:48 构建，不含 PCRE2）；其测试用 `vi.spyOn(natives,"glob")` 替换真实 walker 故不受影响 —— **但它与集成区 addon 过期事故是同一模式的两个实例**，说明「worker 工作树拿旧 addon」是系统性的，不是一次性失误。
+- 2026-09-11 — 【F1 的方法改进优于我的提醒】它把「退出码 1 分不清『测试抓到缺陷』与『代码根本没跑起来』」推进一步：**变异运行前先断言变异后的代码能通过类型检查，把语法错挡在外面**。比我说的「要看输出形态」更可操作 —— 记入本批方法库。
+- 2026-09-11 — 【F1 主动收敛自己的证据边界】它声明：其 `bun test test/tools -> 687 pass` 是连着那份 12:48 旧 addon 跑的，因此只能作为「我的 TS 改动没打破既有 find 行为」的证据，**不能**当作「整个 tools 套件在正确 natives 上通过」的认证 —— 后者由集成五道门禁覆盖。这正是本批要求的「不把未观察的结论说成事实」，主动做比被追问后再做更值钱。
+- 2026-09-11 — 【阻塞：等用户四项决定】（任务清单中非我方推进项已移除，阻塞状态记录于此）
+  ① 验收过不过；② 合不合 main；③ CI 两项（verify:xdev 接 CI + 门禁跑 client feature 组，两项均需用户接受「linux 侧无法本地验证」）；  ④ bootstrap.ts 是否补原生 addon（与已修的 integrate.ts 同族缺陷，但它不在用户明确批准的脚本内，故未扩进去）。
+  执行「合」时的次序（已核对，反过来会真丢内容）：先把主检出那份最新台账提交到分支 → 再清主检出的本地副本 → 然后 `git merge --ff-only`。
+
+- 2026-09-12 00:01 — 【清理完成（用户指示：保留含全部功能的那棵树）】删除本批 12 棵 worktree（10 棵任务树 + 2 棵已被取代的集成树），**保留 `squad-20260911-tool-xdev-w2b-integ`**（还没合 main）。其余 5 棵不是本批的（agent-client / coord-*），未动。10 个 agent 节点已 herdr workspace close。
+  磁盘只释放 **2G**（按 du 估的是 ~11G）。查过：样本文件 links=1（非硬链接）、APFS 本地快照只有系统更新项 —— 常见解释均不成立，**标为未解释，不编原因**。
+- 2026-09-12 00:01 — 【真实磁盘大头】主检出 `target/` **26G**（待用户点头）；`.worktrees/` 剩余 16G（其中 ~8G 是其他 squad 的，未动）；`~/.bun/install/cache` **7.7G** 与 `~/.cargo/registry` **3.6G**（纯缓存，共 11G，已提议可清，待用户）。
+- 2026-09-12 00:01 — 【第二期开工】任务包 `~/.cornfield/squads/squad-20260911-tool-xdev-w3/bundle.json`（--check 通过），base = `squad-20260911-tool-xdev-w2b-integ`：**D1** 名称规范化（canonical 换 glob/grep/todo，旧名留别名；先交改动面清单，规模超预期先停下报）；**M1** MCP 工具纳入 xd 分流（要害：MCP 在 createTools 之后注册、分流在内部，须延伸到注册后；`search_tool_bm25` 与 `mcp.discoveryMode` 退场并留读旧配置兼容层）。M1 依赖 D1（两票同动 prompts/** 与 tools/index.ts）。两个 worker 均为 deepseek-v4-pro（mid），已 STARTED，D1 已 GO。
+- 2026-09-12 00:01 — 【新模块生产首跑】`native-addon.ts` 在 w3 集结时真实生效：两棵树均从保留的 `w2b-integ` 取到正确 addon（git-hash f0b9d532c56db5cc…，与先前验证一致），无需重建、无旧产物。（未逐项答复的两处 scope 按默认执行并在此备案：只换规范名、旧名留别名；MCP 设备名不做显示名映射。）
+
+- 2026-09-11 — 【已核实的 M1 前提（给它发 GO 时一并用）】读 `sdk.ts` 确认：`1184` 先 `createTools(...)`，`1186` 起才 `discoverAndLoadMCPTools`，`1189` 起进 `CustomTool[]`。⇒ MCP 工具确实在分流**之后**注册，落点在 toolRegistry/CustomToolAdapter（非设备集）—— 与 A3 发现的「适配器重注册丢 loadMode」是同一处。给 M1 的 GO 里应写明这三个行号，省它考古；并提醒它“只声明 loadMode 不会生效，因为分流已经跑过了”。
+
+- 2026-09-11 — 【已核实的 M1 前提之二 —— bm25 发现机制】读 `search-tool-bm25.ts`：`createIf` 在 `mcp.discoveryMode` 关闭时返回 null（工具不存在）；`loadMode = "essential"` 且注释写明「否则模型完全失去发现 MCP 工具的能力」；搜索对象是 `../mcp/discoverable-tool-metadata` 的 discoverable MCP 工具；执行时若发现被禁则直接 throw。⇒ `search_tool_bm25` 确是当前**唯一**的 MCP 发现入口。给 M1 的 GO 要写明一条边界：**退场它之前，xd 设备目录必须已能承担发现职责**；而目录受 `XDEV_PROMPT_BUDGET_CHARS = 2000` 预算限制，MCP 服务器多时会截断 —— 所以「截断后靠 `read xd://` 拿全量」这条路径必须实测通，否则就是发现机制退场、新机制只覆盖一半，MCP 工具实际不可达。
+
+- 2026-09-11 — 【D1 清点回报与三处决策】D1 严格停在动手之前交了清单（里程碑生效）：A 组锚点在 scope 内；**B 组约 20 个 scope 外文件**因「全仓不得出现两个规范名」硬要求需同步（tools/index.ts, essential-tools.ts, renderers.ts, settings-schema.ts, wire-server.ts, agent-session.ts, task/index+executor, cli/args, live/tool-risk+consult-bridge, acp-event-mapper, event-controller, session-observer-overlay, tree-selector, settings-defs, extensions/types, hooks/types, bash.ts, export/html 产物, cursor.ts）。它还拓出一个我没想到的判别：`find.md`/`search.md` 里的 find/fd/grep/rg 是 **shell 命令**，不改 —— 无脑替换会把文档里的命令也改掉。
+  决策：**① 配置 key 改名 + 兼容读旧 key**（它发现的陷阱是决定性的：老 config.yml 写 `find.enabled: false`，改名后会读成默认 true，等于把用户关掉的工具静默打开）；**② `tools/index.ts` 与 `settings-schema.ts` 均归 D1**（M1 依赖 D1，实际操作不撞；M1 的 GO 里要写明“不要二次改”）；**③ 授权 D1 本票内一次改完 Bucket B**，但三条约束：只改「承载工具名」处（内部标识符如 `hashFind`/`hashSearch` 不得为对齐而 churn）、生成文件走生成器不手改、实际面超 2 倍就停下报。
+
+- 2026-09-11 — 【待办：M1 的 GO 消息要包含这四块（防 compaction 丢失）】① `sdk.ts:1184` 先 `createTools`、`1186` 起才 `discoverAndLoadMCPTools`、`1189` 起进 `CustomTool[]` ⇒ MCP 工具在分流**之后**注册，只声明 `loadMode` 不会生效。② `search-tool-bm25.ts`：`createIf` 在 `mcp.discoveryMode` 关闭时返回 null；`loadMode="essential"` 且注释写明「否则模型完全失去发现 MCP 工具的能力」；搜索对象是 `../mcp/discoverable-tool-metadata`。③ 边界：退场 bm25 之前，xd 设备目录必须已能承担发现职责；目录受 `XDEV_PROMPT_BUDGET_CHARS=2000` 限制会截断，所以「截断后靠 `read xd://` 拿全量」必须实测通，否则 MCP 工具变不可达。④ **不要二次改 registry 与配置 key** —— D1 本票已改（`find.enabled→glob.enabled` 等），M1 在 D1 结果上继续。另：M1 的硬要求重申 —— 证据必须含 `bun run --cwd=packages/coding-agent verify:xdev`（挂载在 bun test 下恒关，单测验不到）。
+
+- 2026-09-11 — 【D1 提交 5293031bff（57 文件 +265/−220）父独立复验】门禁全过：`CI=0 bun check`、`test/tools` 957 用例 **0 fail**（D1 自报 688 与我实测 610+347skip 不符，这是它第 N 次自报数字偏差，仍以实测为准）、`verify:xdev` **ALL PASS**。**决策 ① 真落地了**：`settings.ts:114-120` 的 `RENAMED_SETTING_GROUPS = [["find","glob"],["search","grep"]]` + 组级迁移 + 一次性 `logger.warn` 废弃提示 —— 组级而非逐 key，比预期更稳。
+- 2026-09-11 — 【真缺陷：跨包按工具名字面匹配】全仓普查拓出 `packages/ai/src/providers/cursor.ts`：`CURSOR_NATIVE_TOOL_NAMES = new Set([..., "todo_write"])` 用于 `advertisedTools = tools.filter(t => !CURSOR_NATIVE_TOOL_NAMES.has(t.name))`（决定哪些工具走 MCP 通告）；且它自己构造 `name: "todo_write"` 的调用（:1977）。⇒ 改名后 `todo` 不在集合内 → **会被当 MCP 工具重复通告**；**别名机制救不了这类**（它比的是精确名字）。另：该集合本来就有 `grep` —— 说明 AI 层当年照上游命名写，本轮正好对齐，但漏了 `todo`。
+- 2026-09-11 — 【D1 打回清单（已发）】A 真缺陷（授权改 cursor.ts，2 行；要求给「改前/改后 advertisedTools 差异」作证据）；B 文档/注释/用户可见串（event-controller:492 用户可见告警、DEVELOPMENT.md:396、todo-write.ts:310、docs/client/editor-extension.md:156、docs/gateway/gateway.md:1041〔还错两层：列表过时 + enabledToolsets 现为任务配置字段、代码无硬编码默认值〕、packages/agent/src/types.ts:323）；C 明确不动 CHANGELOG×2 与 ADR（历史事实）；D 要求它扫 `packages/{ai,agent,gateway,tui}` 同形形态（字符串集合 / `name === "…"` / 按名分派）**只报不改**，交清单给我判。
+
+- 2026-09-11 — 【detect_changes 给出 CRITICAL（D1 分支）—— 已按仓库硬约束上报用户】changed 89 符号 / 18 条受影响流程 / risk=critical。**定性：广度而非破坏。** `Settings` 类被全仓引用，改过它则所有读配置的流程均计为 affected；实际改动是**在 `settings.ts` 既有迁移函数内新增一组** —— 紧邻已有两组同类迁移（`isolation.enabled→mode`、`statusLine.plan_mode→mode`），不是新造机制。关键性质：`!(key in canonical)` ⇒ **规范 key 已显式存在时旧值不覆盖**（优先级正确）；`delete raw[legacyGroup]`；仅迁移发生时告警一次。**已核实（原推断已推翻）**：该迁移**不会**写回 `config.yml`。`#migrateRawSettings` 的三个加载期调用点（`settings.ts:595`、`:627`）只返回迁移后的内存对象；唯二落盘处是 `migrateLegacyModelConfig` 的显式重写（`:575-594`，注释写明）与从旧 `.settings.json`/`agent.db` 迁移时的一次性写入（`:667-669`）——均与本次无关。⇒ 用户现有 config.yml 不被静默改写，旧 key 仅在内存中按“规范优先”被读懂。
+
+- 2026-09-11 — 【D1 复验通过 + 拓出一类缺陷：别名边界之外的名称字面匹配】D1 第一次返工 commit `cdad23d45e`（7 文件 +12/−12），A 项证据正是要求的形态：`advertisedTools` 由 `["todo","glob"]` 变为 `["glob"]`（todo 不再进 MCP 通告）。
+  **但这条证据暴露了第二个漏网 + 它自己报了三处，共四处，均已核实并授权本次改完**：① `anthropic.ts:1820` `ANTHROPIC_STRICT_TOOL_ALLOWLIST=["bash","python","edit","find"]` 用于 `:2082` 决定哪些工具走 strict schema ⇒ `glob` **失去 strict 处理**（已核实）；② `validation.ts:960` `toolName === "todo_write"` ⇒ 模型发歪的 todo ops **不再被修复**（已核实）；③ `cursor.ts:2056` `CURSOR_NATIVE_TOOL_NAMES` 有 `grep` 却无 `glob`（**改名之前就存在的错配**，改名使其显形）⇒ 补 `glob` 后期望 advertisedTools 为空；④ `dingtalk-card.ts:444-445` `TOOL_EMOJIS` 旧键（cosmetic）。
+  **系统性教训（已要求 D1 写进提交信息）**：这四处**别名机制全都救不了** —— 别名只在 `normalizeToolName` 的边界内生效，而这些是别的包直接用**字面量**比对工具名。⇒ 本批教训在命名层的重演：**只要判断发生在归一化边界之外，它就是构造性地失守**（与“能力被排除在 gate 默认路径之外”同构）。
+
+- 2026-09-11 — 【D1 完成并验收】3 commits：`5293031bff`（规范名换 glob/grep/todo，57 文件）+ `cdad23d45e`（cursor.ts 等复验意见）+ `19e8738eeb`（4 处跨包字面载体）。父独立复验：check 全绿 / 957 用例 0 fail / verify:xdev ALL PASS；四处载体已验（`anthropic.ts` allowlist、`validation.ts:960`、`cursor.ts` native set 补 glob、`dingtalk-card.ts` emoji），提交信息含要求的观察。
+- 2026-09-11 — 【我自己的任务包设计缺陷（已修，教训待入 skill）】我用「独立工作树 + deps」表达代码依赖，但 skill 的铁律是「**deps 只做顺序安排；worktree 不传递依赖代码**」。后果：reconcile 放行 M1 时，M1 的工作树仍停在 base（不含 D1 的改名）⇒ 它会在旧名上写代码并与 D1 撞车。做法：父在发 GO **之前**把 `feat/xdev3-d1` 并进 M1 工作树（现 HEAD `19e8738eeb`），再放行。⇒ **候选 skill 改进**：`bootstrap`/GO 发放环节应对 `deps` 做「先 merge 依赖分支再发 GO」，或任务包 schema 拒绝「独立工作树 + 代码依赖」的组合。
+- 2026-09-11 — M1 已 GO（带四块硬料：sdk.ts 行号与「声明 loadMode 不生效」、bm25 唯一发现入口与预算截断边界、verify:xdev 必须在 bun test 外、别二次改 registry/config key）。
+
+- 2026-09-11 — 【重要基线：base 分支整包测试本就有 22 条失败】在 `squad-20260911-tool-xdev-w2b-integ`（含第一期全部工作、未含第二期）跑 `bun test packages/coding-agent/test`：**3675 pass / 411 skip / 22 fail / 2 errors（4108 用例）**。失败形如 `gh.test.ts` 的 worktree `ENOENT`（临时 HOME 路径），**与工具改名无关**。⇒ 这是仓库既有状态，不是本批造成的；但意味着「整包绿」不是可用的判据，只能用**失败集对齐**。此数已交给 D1 作为基线。
+- 2026-09-11 — 【M1 复验 + D1 重开】M1 声明的 gate 全绿（check / test/tools 944 用例 0 fail / `verify:xdev` ALL PASS，含我要的截断证据：prompt catalog 59 条 +441 截断，`read xd://` 仍达最后一台设备）；实现：`sdk.ts` 在 createTools 后用 `splitPostRegistrationMCPToolsForXdev` 把注册后的 MCP 工具挂进 xdevDevices（**只挂 `mcp__*`**，扩展/自定义工具留顶层—— 限额得当、炸半径小）；`search_tool_bm25` 全退场（19 文件 +137/−1240，大量为删除）。
+  **但整包跑出 1 条真回归（base 同文件 16 pass/0 fail vs 本支 14/1）**：`test/system-prompt-templates.test.ts` 的「references overridden tool wire names」期望仍写 `search`/`find`。根因**不是粗心，是 gate 覆盖面**：D1 的 gate 只跑 `test/tools`，该文件在 `test/` 根目录 ⇒ 落在 gate 路径之外。⇒ 已重开 D1（`complete` → `running --force`），要求：改期望（先看实际渲染再改）+ **gate 扩到整包** + 失败集必须与 base 的 22 条一致（不得新增）。
+- 2026-09-11 — 【同一教训的第三种形态】「能力/检查只要落在 gate 的默认路径之外，就是构造性地不被覆盖」：① build-feature 层（grep-pcre2 若不进默认 feature，nextest 测不到 PCRE2）；② runtime 层（bun test 下挂载恒关，lsp 空摘要出厂）；③ **gate 路径层（只跑 test/tools 则 test/ 根目录的期望过期无人知）**。
+
+- 2026-09-11 — 【集成风险预告：M1 与 D1 改同一测试文件】M1 的 `5a6c443fe6` 也改了 `test/system-prompt-templates.test.ts`（它退场 bm25 时清理该文件）。D1 的期望修复也在同一文件 ⇒ 合并时可能冲突。**根因是我的任务包：两票同落 `prompts/**` 与该测试文件，我用 `deps` 表达了顺序但没消除文件重叠**（skill 的铁律是「代码依赖必须共享工作树」，又一次同源）。处理：D1 修完后由父把其分支**再次**并进 M1 工作树（同依赖处理），冲突在父处解 —— D1 的期望修复是同一文件的更新更正，M1 在下游。
+
+- 2026-09-12 03:00 — 【第二期完成并集成】分支 `squad-20260911-tool-xdev-w3-integ`（base = w2b-integ）。D1 4 commits（改名 + 两次返工）+ M1 1 commit + 合并。
+  门禁：`CI=0 bun check` ✓ / `test/tools` 944 用例 0 fail ✓ / `verify:xdev` **ALL PASS** ✓（含 MCP 设备路径 + 截断证据：catalog 59 条 +441 截断，`read xd://` 仍达最后一台设备）。
+  整包：20 fail / 3 errors（4087 用例），**全部为环境性/预存**；其中 `wire-server-git.integration.test.ts` 的 6 条已在 base 上验为**完全一致**（1 pass / 6 fail）⇒ 非本批引起。无一条与改名/xd/MCP 相关。
+  `detect_changes`：107 符号 / 74 文件 / 18 流程 / **critical** —— 与 D1 单独评测同形同源（`Settings` 类引用广度 + 18 条读配置流程），非新风险；该改动为既有迁移表新增一组且**不写回 config.yml**（已核实）。
+
+- 2026-09-12 03:00 — 【本批四条同源教训已集齐】「判断/能力只要落在某个边界之外，就是构造性地失守」的四种形态：
+  ① build-feature 层（grep-pcre2 不进默认 feature ⇒ nextest 测不到 PCRE2）
+  ② runtime 层（bun test 下挂载恒关 ⇒ lsp 空摘要出厂，944 单测全绿）
+  ③ gate 路径层（只跑 test/tools ⇒ test/ 根的过期期望无人知；扩到整包后 D1 又拓出 4 处残留，含 read.ts 的用户可见提示）
+  ④ 命名归一化层（别名只在 normalizeToolName 内生效 ⇒ 跨包字面量比对全失效：anthropic strict 白名单、validation、cursor native set、dingtalk emoji）
+
+- 2026-09-12 12:01 — 【磁盘清理（用户「3 清」）】删 `~/.bun/install/cache` 7.7G + `~/.cargo/registry` 3.6G + 主检出 `target/` 26G；**磁盘 16Gi → 50Gi 可用**（+34G，占用 97%→89%）。动手前已确认无构建在跑（仅 `lspmux` 常驻进程，非构建，未动）。
+  代价：下次 `bun install` 与 Rust 构建走冷启动（重下/重编）。交付物不受影响 —— addon 在 `packages/natives/native/`，不在 `target/` 内。
 
 ## 批注
 
