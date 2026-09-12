@@ -11,7 +11,7 @@ doneWhen: |-
 lastActivity: 2026-09-12 19:21
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
-nextAction: 已全部合入 main（`2aa75cc3c7`）并完成清理。剩余待用户表态：是否 push 远端（领先 origin 50+ 提交）、是否清理非本批的 4 棵工作树（agent-client-m1 / coord-* / squad-20260909-coord-p0-integ）。
+nextAction: 已全部合入 main 并 push 到 origin（main = 0263605546）。剩余待用户表态：是否清理非本批的 4 棵工作树（feat-agent-client-m1 / feat-coord-backend-p0 / feat-coord-frontend-p0 / squad-20260909-coord-p0-integ）。
 artifacts:
   - docs/adr/0003-tool-presentation-xdev.md
   - CONTEXT.md（Tool Catalog / Enabled Tool Set / Discoverable Tool Set / Load Mode / xd:// 挂载 / Tool Metadata）
