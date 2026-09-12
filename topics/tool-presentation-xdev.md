@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-12 16:01
+lastActivity: 2026-09-12 18:32
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已完成并合入 main（当前 main = e7779db8c6）。远端 origin/main 未 push（领先 40 提交）。回退锚点：`git reset --hard pre-tool-xdev-batch`。
@@ -307,6 +307,12 @@ openQuestions:
 - 2026-09-12 16:01 — ✗ **门禁盲区（同一教训第五种形态）**：`verify-xdev-mounting.ts` 的 Case 6 **直接调 `WriteTool.execute` 并传字符串化 JSON**，绕过了「模型 → schema 校验」这一层 ⇒ **门禁绿着而功能不可用**。⇒ 修法要求（已派 J2）：schema 接受 `string | object`、设备分支两种都吃、文件写入仍要求 string，且门禁改为**经真实校验函数**后再执行。
 - 2026-09-12 16:01 — 【测试 ⑤ 的结论：pcre2 是好的，是模型没传参】新会话声称传了 `engine: "pcre2"` 但两条错误逐字相同 ⇒ 未生效。父独立定位：**工具层探针直调 `grep` 工具，`engine: "pcre2"` 的 lookahead 匹配成功、默认仍走 rust 且报 look-around 不支持** ⇒ 接线与 natives 均正常。另排除了「二进制内嵌的旧 addon」：若 `SearchEngine` 为 undefined，`search.ts` 无条件解引用会抛 TypeError，而该会话 `grep` 正常返回结果 ⇒ addon 正常。⇒ 结论是模型自报不准（它自己标了 `[inference]` 并问要不要报工具偏差）。
 - 2026-09-12 16:01 — 【整包 24 fail 的 A/B 判定：非回归】合并后整包 3640 pass / 411 skip / 24 fail / 2 errors（4075 用例）；基线为 22 fail。对其中两条不认识的失败（`serve 多 Agent`、`ModelRegistry refresh`）做 A/B：**合并前 tag 与合并后 main 各跑同一组，结果逐项相同（19 pass / 2 fail / 1 error）** ⇒ 既有问题。剩余计数差异落在 compaction 超时、serve 未就绪等随负载波动的家族（同机同时跑 cargo 构建/多会话）。
+
+- 2026-09-12 18:32 — 【`write xd://` 契约缺陷已修、合入 main 并端到端验证】J2 提交 `7f39f0ed39` @ `fix/xdev-write-content`（2 文件 +87/−18：`tools/write.ts` +55、门禁脚本 +50），用户批「合入并验证」。打 tag `pre-write-fix` 后 `--no-ff` 合入 main；main 上门禁全绿（check ✓ / tools 945 用例 0 fail ✓ / verify:xdev ALL PASS ✓）。
+  修法：`content` 改 `string | object`；`#writeXdDevice` 两种都吃（字符串 JSON5 解析、对象直用）；**普通文件写入仍要求 string**，传对象给明确错误。
+  **J2 回答了我要求的关键前提**：`validateToolArguments`（`packages/ai/src/utils/validation.ts:864` → `compileSchema(tool.parameters):867`）用**原始 TypeBox schema + AJV** ⇒ 联合不被 strict/CCA 归一化削掉，修改确实生效；`prepareSchemaForCCA`（仅 provider 广告层）会把联合塌缩成 string（lossy，字符串形态仍可用）；**代价：OpenAI strict 因对象变体不可表示而对 `write` 退化为非 strict**（J2 主动报出，用户已接受）。
+  **门禁升级（本次最有价值）**：Case 6 从直调 `WriteTool.execute` 改为经 `validateToolArguments → execute`（镜像 `agent-loop.ts`），并断言对象/字符串/文件写对象三条路径；注释里写明了「旧门禁之所以绿着而坏着，是因为它绕过了拒掉 `content: {}` 的那一层」。
+  **端到端复验（用户要求，重建二进制 + 原子安装 + 全新 herdr 会话 `w95:p3`）**：① 对象形态执行设备 `xd://list_models` → **成功**，返回 362 个模型的真实列表；② 文件写入传对象 → **明确报错** `write content must be a string for non-device writes: object content is only valid with an xd:// path`（非静默 stringify）。新会话自行总结出修复后的契约。
 
 ## 批注
 
