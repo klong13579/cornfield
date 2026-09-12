@@ -48,7 +48,18 @@ import { toolResult } from "./tool-result";
 
 const writeSchema = Type.Object({
 	path: Type.String({ description: "file path", examples: ["src/new.ts"] }),
-	content: Type.String({ description: "file content" }),
+	content: Type.Union(
+		[
+			Type.String({ description: "File content to write (for file/archive/sqlite writes)." }),
+			Type.Record(Type.String(), Type.Unknown(), {
+				description: "Tool arguments object (for xd:// device execution).",
+			}),
+		],
+		{
+			description:
+				"File content as a string, or — when the path is an xd:// device — a JSON object of tool arguments.",
+		},
+	),
 });
 
 export type WriteToolInput = Static<typeof writeSchema>;
@@ -423,6 +434,18 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		context?: AgentToolContext,
 	): Promise<AgentToolResult<WriteToolDetails>> {
 		return untilAborted(signal, async () => {
+			// Object content is only valid for xd:// device execution: a device
+			// invocation takes a JSON arguments object, while file/archive/sqlite
+			// writes take a string body. Route object content to the device branch
+			// directly so it can never be mistaken for (or stringified into) a file write.
+			if (typeof content !== "string") {
+				const deviceResult = await this.#writeXdDevice(path, content, signal, _onUpdate, context);
+				if (deviceResult) return deviceResult;
+				throw new ToolError(
+					"write content must be a string for non-device writes: object content is only valid with an xd:// path",
+				);
+			}
+
 			// Strip hashline display prefixes (LINE+ID|) if the model copied them from read output
 			const { text: cleanContent, stripped } = stripWriteContent(this.session, content);
 
@@ -513,7 +536,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 	 */
 	async #writeXdDevice(
 		path: string,
-		content: string,
+		content: string | Record<string, unknown>,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<WriteToolDetails>,
 		context?: AgentToolContext,
@@ -534,12 +557,16 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		}
 
 		let args: unknown;
-		try {
-			args = Bun.JSON5.parse(content);
-		} catch (error) {
-			throw new ToolError(
-				`xd:// write content must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-			);
+		if (typeof content === "string") {
+			try {
+				args = Bun.JSON5.parse(content);
+			} catch (error) {
+				throw new ToolError(
+					`xd:// write content must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		} else {
+			args = content;
 		}
 		if (!isRecord(args)) {
 			throw new ToolError("xd:// write content must be a JSON object of tool arguments");
@@ -563,7 +590,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 interface WriteRenderArgs {
 	path?: string;
 	file_path?: string;
-	content?: string;
+	content?: string | Record<string, unknown>;
 }
 
 const WRITE_PREVIEW_LINES = 6;
@@ -634,12 +661,16 @@ export const writeToolRenderer = {
 
 		let text = `${formatTitle("Write", uiTheme)} ${spinner ? `${spinner} ` : ""}${langIcon} ${pathDisplay}`;
 
-		if (!args.content) {
+		// Device writes carry object content (xd:// arguments); only a string body
+		// has a file-content preview. Guard so object content never reaches
+		// `.split()` in the preview helpers.
+		const content = typeof args.content === "string" ? args.content : "";
+		if (!content) {
 			return new Text(text, 0, 0);
 		}
 
 		// Show streaming preview of content (tail)
-		text += formatStreamingContent(args.content, uiTheme);
+		text += formatStreamingContent(content, uiTheme);
 
 		return new Text(text, 0, 0);
 	},
@@ -652,7 +683,7 @@ export const writeToolRenderer = {
 	): Component {
 		const rawPath = args?.file_path || args?.path || "";
 		const filePath = shortenPath(rawPath);
-		const fileContent = args?.content || "";
+		const fileContent = typeof args?.content === "string" ? args.content : "";
 		const lang = getLanguageFromPath(rawPath);
 		const langIcon = uiTheme.fg("muted", uiTheme.getLangIcon(lang));
 		const pathDisplay = filePath ? uiTheme.fg("accent", filePath) : uiTheme.fg("toolOutput", "…");
