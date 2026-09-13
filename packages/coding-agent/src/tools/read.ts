@@ -47,6 +47,7 @@ import {
 	persistToolOutputArtifact,
 } from "./output-meta";
 import { expandPath, formatPathRelativeToCwd, resolveReadPath } from "./path-utils";
+import { type ReadSummarySettings, summarizeFileContent } from "./read-summary";
 import { formatAge, formatBytes, shortenPath, wrapBrackets } from "./render-utils";
 import {
 	executeReadQuery,
@@ -94,6 +95,9 @@ function formatTextWithMode(
 }
 
 const READ_CHUNK_SIZE = 8 * 1024;
+
+// Cap on reading a whole file into memory for structured summarization (see #readFileText).
+const MAX_SUMMARIZE_BYTES = 8 * 1024 * 1024;
 
 async function streamLinesFromFile(
 	filePath: string,
@@ -562,6 +566,34 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			IS_HASHLINE_MODE: displayMode.hashLines,
 			IS_LINE_NUMBER_MODE: !displayMode.hashLines && displayMode.lineNumbers,
 		});
+	}
+
+	#readSummarySettings(): ReadSummarySettings {
+		const raw = (key: string): unknown => this.session.settings.get(key as never) as unknown;
+		const num = (key: string): number => {
+			const value = raw(key);
+			return typeof value === "number" && Number.isFinite(value) ? value : 0;
+		};
+		const flag = (key: string): boolean => raw(key) === true;
+		return {
+			enabled: flag("read.summarize.enabled"),
+			minTotalLines: num("read.summarize.minTotalLines"),
+			minBodyLines: num("read.summarize.minBodyLines"),
+			minCommentLines: num("read.summarize.minCommentLines"),
+			prose: flag("read.summarize.prose"),
+			unfoldLimit: num("read.summarize.unfoldLimit"),
+			unfoldUntil: num("read.summarize.unfoldUntil"),
+		};
+	}
+
+	async #readFileText(absolutePath: string, signal?: AbortSignal): Promise<string | null> {
+		try {
+			throwIfAborted(signal);
+			return await Bun.file(absolutePath).text();
+		} catch (_error) {
+			if (signal?.aborted) throw new ToolAbortError();
+			return null;
+		}
 	}
 
 	async #resolveArchiveReadPath(readPath: string, signal?: AbortSignal): Promise<ResolvedArchiveReadPath | null> {
@@ -1256,6 +1288,27 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					return toolResult<ReadToolDetails>({ resolvedPath: absolutePath, suffixResolution })
 						.text(`Line ${startLineDisplay} is beyond end of file (${totalFileLines} lines total). ${suggestion}`)
 						.done();
+				}
+
+				// Structured summarization: a large full-file read (no sel) is summarized
+				// instead of returning a truncated head. The stream above already counted
+				// the file's total line count, so it gates the whole-file re-read cheaply.
+				if (parsed.kind === "none") {
+					const summarySettings = this.#readSummarySettings();
+					if (
+						summarySettings.enabled &&
+						totalFileLines >= summarySettings.minTotalLines &&
+						fileSize <= MAX_SUMMARIZE_BYTES
+					) {
+						const fullText = await this.#readFileText(absolutePath, signal);
+						const summary = fullText === null ? null : summarizeFileContent(fullText, summarySettings);
+						if (summary) {
+							return toolResult<ReadToolDetails>({ suffixResolution })
+								.text(prependSuffixResolutionNotice(summary.text, suffixResolution))
+								.sourcePath(absolutePath)
+								.done();
+						}
+					}
 				}
 
 				const selectedContent = collectedLines.join("\n");
