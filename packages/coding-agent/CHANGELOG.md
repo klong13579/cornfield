@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-13
+
 ### Added
 
 - **bash prompt 精简**（`src/prompts/tools/bash.md`）：删除 Instead of (WRONG) / Use (CORRECT) 表格与重复的 MUST NOT 条目，保留至多 4 条 MUST 且只保留拦截器规则无法替代的语义；行数从 57 降到 30 以内。
