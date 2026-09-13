@@ -13,9 +13,9 @@
 # commit. workflow_dispatch is the one event GitHub exempts from that rule,
 # which is why `actions: write` is requested below.
 #
-# A failure also pings the DingTalk group robot (DINGTALK_RELEASE_WEBHOOK) —
-# this job failed for five consecutive nights (2026-09-07 … 09-11) with nothing
-# but a red run nobody watched.
+# This job failed for five consecutive nights (2026-09-07 … 09-11) with nothing
+# but a red run nobody watched, which is why the steps below install what a
+# fresh runner does not provide instead of assuming it.
 name: Nightly auto-release
 
 on:
@@ -58,20 +58,3 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun scripts/auto-release.ts
-
-  notify_failure:
-    needs: [auto_release]
-    if: failure()
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Notify nightly failure via DingTalk
-        env:
-          WEBHOOK: ${{ secrets.DINGTALK_RELEASE_WEBHOOK }}
-          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [[ -z "$WEBHOOK" ]]; then
-            echo "DINGTALK_RELEASE_WEBHOOK secret not set; skipping notification"
-            exit 0
-          fi
-          body="{\"msgtype\":\"text\",\"text\":{\"content\":\"[cornfield] nightly 自动发版失败 ${RUN_URL}\"}}"
-          curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json' -d "$body"
