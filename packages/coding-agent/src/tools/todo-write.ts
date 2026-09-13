@@ -13,6 +13,7 @@ import type { SessionEntry } from "../session/session-manager";
 import { renderStatusLine, renderTreeList } from "../tui";
 import { PREVIEW_LIMITS } from "./render-utils";
 
+import { ToolError } from "./tool-errors";
 // =============================================================================
 // Types
 // =============================================================================
@@ -58,7 +59,7 @@ const InitListEntry = Type.Object({
 });
 
 const TodoOpEntry = Type.Object({
-	op: TodoOp,
+	op: Type.Optional(TodoOp),
 	list: Type.Optional(Type.Array(InitListEntry, { description: "phased task list for op=init" })),
 	task: Type.Optional(
 		Type.String({ description: "task content for start/done/rm/drop/note", examples: ["Run tests"] }),
@@ -85,6 +86,8 @@ const todoWriteSchema = Type.Object(
 
 type TodoWriteParams = Static<typeof todoWriteSchema>;
 type TodoOpEntryValue = TodoWriteParams["ops"][number];
+type TodoOpName = Static<typeof TodoOp>;
+type ResolvedTodoOpEntry = TodoOpEntryValue & { op: TodoOpName };
 
 // =============================================================================
 // State helpers
@@ -250,7 +253,38 @@ function removeTasks(phases: TodoPhase[], entry: TodoOpEntryValue, errors: strin
 	return phases;
 }
 
-function applyEntry(phases: TodoPhase[], entry: TodoOpEntryValue, errors: string[]): TodoPhase[] {
+const ALLOWED_OPS: readonly TodoOpName[] = ["init", "start", "done", "rm", "drop", "append", "note"];
+
+function buildOpInferenceError(index: number): ToolError {
+	return new ToolError(
+		`Could not infer the \`op\` for ops/${index + 1} (the ${index + 1}th operation entry). ` +
+			`Allowed op values: ${ALLOWED_OPS.join(", ")}. ` +
+			`Make the operation unambiguous by adding an \`op\`, or include a shape-specific field: ` +
+			`list → init, items → append, text → note; ` +
+			`or reference an existing task via \`task\` whose status disambiguates the intent ` +
+			`(pending → start, in_progress → done). Example: {"op": "done", "task": "Run tests"}`,
+	);
+}
+
+function resolveOp(phases: TodoPhase[], entry: TodoOpEntryValue, index: number): ResolvedTodoOpEntry {
+	if (entry.op !== undefined) return entry as ResolvedTodoOpEntry;
+	if (entry.list !== undefined) return { ...entry, op: "init" };
+	if (entry.items !== undefined) return { ...entry, op: "append" };
+	if (entry.text !== undefined) return { ...entry, op: "note" };
+
+	const task = entry.task;
+	if (typeof task === "string" && task.length > 0) {
+		const hit = findTaskByContent(phases, task);
+		if (hit) {
+			if (hit.task.status === "pending") return { ...entry, op: "start" };
+			if (hit.task.status === "in_progress") return { ...entry, op: "done" };
+		}
+	}
+
+	throw buildOpInferenceError(index);
+}
+
+function applyEntry(phases: TodoPhase[], entry: ResolvedTodoOpEntry, errors: string[]): TodoPhase[] {
 	switch (entry.op) {
 		case "init":
 			return initPhases(entry, errors);
@@ -300,7 +334,8 @@ function applyEntry(phases: TodoPhase[], entry: TodoOpEntryValue, errors: string
 function applyParams(phases: TodoPhase[], params: TodoWriteParams): { phases: TodoPhase[]; errors: string[] } {
 	const errors: string[] = [];
 	let next = phases;
-	for (const entry of params.ops) {
+	for (let index = 0; index < params.ops.length; index++) {
+		const entry = resolveOp(next, params.ops[index]!, index);
 		next = applyEntry(next, entry, errors);
 	}
 	normalizeInProgressTask(next);

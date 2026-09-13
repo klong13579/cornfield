@@ -52,17 +52,21 @@ const writeSchema = Type.Object({
 		[
 			Type.String({ description: "File content to write (for file/archive/sqlite writes)." }),
 			Type.Record(Type.String(), Type.Unknown(), {
-				description: "Tool arguments object (for xd:// device execution).",
+				description: "Tool arguments object (for xd:// device execution or JSON-series file writes).",
+			}),
+			Type.Array(Type.Unknown(), {
+				description: "JSON array content (for .json/.jsonc/.json5/.ipynb/.webmanifest targets).",
 			}),
 		],
 		{
 			description:
-				"File content as a string, or — when the path is an xd:// device — a JSON object of tool arguments.",
+				"File content as a string, a JSON object/array (serialized for JSON-series targets), or — when the path is an xd:// device — a JSON object of tool arguments.",
 		},
 	),
 });
 
 export type WriteToolInput = Static<typeof writeSchema>;
+type WriteContent = WriteToolInput["content"];
 
 /** Details returned by the write tool for TUI rendering */
 export interface WriteToolDetails {
@@ -84,6 +88,62 @@ function stripWriteContent(session: ToolSession, content: string): { text: strin
 	const cleaned = stripHashlinePrefixes(lines);
 	if (cleaned === lines) return { text: content, stripped: false };
 	return { text: cleaned.join("\n"), stripped: true };
+}
+
+const JSON_SERIES_EXTENSIONS = new Set([".json", ".jsonc", ".json5", ".ipynb", ".webmanifest"]);
+
+function isJsonSeriesTarget(writePath: string): boolean {
+	if (parseArchivePathCandidates(writePath).some(candidate => candidate.archivePath !== writePath)) return false;
+	if (parseSqlitePathCandidates(writePath).some(candidate => candidate.sqlitePath !== writePath)) return false;
+	return JSON_SERIES_EXTENSIONS.has(path.extname(writePath.toLowerCase()));
+}
+
+function detectIndent(text: string): string {
+	for (const line of text.split(/\r?\n/)) {
+		const match = /^([ \t]+)\S/.exec(line);
+		if (match?.[1]) return match[1];
+	}
+	return "\t";
+}
+
+async function serializeJsonContent(
+	absolutePath: string,
+	content: Record<string, unknown> | unknown[],
+): Promise<string> {
+	let indent = "\t";
+	try {
+		const existing = await Bun.file(absolutePath).text();
+		indent = detectIndent(existing);
+	} catch (error) {
+		if (!isEnoent(error)) throw error;
+	}
+	return `${JSON.stringify(content, null, indent)}\n`;
+}
+
+function objectContentError(content: Record<string, unknown> | unknown[]): ToolError {
+	const kind = Array.isArray(content) ? "array" : "object";
+	return new ToolError(
+		`write content must be a string for non-JSON targets, but received an ${kind}. ` +
+			`Target a JSON path (.json/.jsonc/.json5/.ipynb/.webmanifest) to write the ${kind} directly, ` +
+			`or JSON-encode it into a string and pass it as a string (e.g. content: JSON.stringify(...)).`,
+	);
+}
+
+function truncateWriteSummary(value: string, max: number): string {
+	return value.length > max ? `${value.slice(0, max)}… (${value.length} chars)` : value;
+}
+
+function summarizeWriteArgs(pathArg: string, contentArg: WriteContent): string {
+	const contentSummary =
+		typeof contentArg === "string"
+			? truncateWriteSummary(contentArg.replace(/\s+/g, " ").trim(), 240)
+			: truncateWriteSummary(JSON.stringify(contentArg) ?? String(contentArg), 240);
+	return `Received write args: path=${truncateWriteSummary(pathArg, 160)}, content=${contentSummary}`;
+}
+
+function augmentWriteError(error: unknown, pathArg: string, contentArg: WriteContent): ToolError {
+	const message = error instanceof Error ? error.message : String(error);
+	return new ToolError(`${message}\n\n${summarizeWriteArgs(pathArg, contentArg)}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -434,16 +494,14 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		context?: AgentToolContext,
 	): Promise<AgentToolResult<WriteToolDetails>> {
 		return untilAborted(signal, async () => {
-			// Object content is only valid for xd:// device execution: a device
-			// invocation takes a JSON arguments object, while file/archive/sqlite
-			// writes take a string body. Route object content to the device branch
-			// directly so it can never be mistaken for (or stringified into) a file write.
+			// Object content is only valid for xd:// device execution or a JSON-series
+			// file write: route device execution first, then serialize JSON targets.
 			if (typeof content !== "string") {
 				const deviceResult = await this.#writeXdDevice(path, content, signal, _onUpdate, context);
 				if (deviceResult) return deviceResult;
-				throw new ToolError(
-					"write content must be a string for non-device writes: object content is only valid with an xd:// path",
-				);
+				if (!isJsonSeriesTarget(path)) throw objectContentError(content);
+				const absolutePath = resolvePlanPath(this.session, path);
+				content = await serializeJsonContent(absolutePath, content);
 			}
 
 			// Strip hashline display prefixes (LINE+ID|) if the model copied them from read output
@@ -512,6 +570,8 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 					}
 				: { content: [{ type: "text", text: resultText }], details: {} };
 			return this.#noteHashlineStripping(plainResult, stripped);
+		}).catch((error: unknown) => {
+			throw augmentWriteError(error, path, content);
 		});
 	}
 
@@ -536,7 +596,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 	 */
 	async #writeXdDevice(
 		path: string,
-		content: string | Record<string, unknown>,
+		content: WriteContent,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<WriteToolDetails>,
 		context?: AgentToolContext,
@@ -590,7 +650,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 interface WriteRenderArgs {
 	path?: string;
 	file_path?: string;
-	content?: string | Record<string, unknown>;
+	content?: WriteContent;
 }
 
 const WRITE_PREVIEW_LINES = 6;
