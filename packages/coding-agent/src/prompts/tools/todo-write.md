@@ -5,6 +5,8 @@ The next pending task is auto-promoted to `in_progress` after each completion.
 
 > **IMPORTANT**: `items` (in `init` and `append`) must be a **flat array of strings** — each element is the task content itself, not a wrapper. Do NOT model each task as `{task: "…"}` or any object. The schema is `Type.Array(Type.String())`. Pass `items=["Scaffold crate","Wire workspace"]`, NOT `items=[{task:"Scaffold crate",item:{…}}, …]`. Wrapping each string in an object triggers a validation error and a per-element recovery pass.
 
+> **Optional `op`**: each entry's `op` is optional and is inferred only when a field uniquely identifies the op — `list` → init, `items` → append, `text` → note. An entry with only `task`/`phase` is ambiguous (start/done/rm/drop all match) and must name its `op` explicitly; otherwise the tool errors listing the allowed `op` values.
+
 ## Operations
 
 |`op`|Required fields|Effect|

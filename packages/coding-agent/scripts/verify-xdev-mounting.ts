@@ -278,7 +278,7 @@ try {
 }
 check(
 	"object content for a plain file write is rejected with a clear error",
-	fileWriteRejected.includes("must be a string for non-device writes"),
+	fileWriteRejected.includes("must be a string for non-JSON targets"),
 	`rejected: ${fileWriteRejected || "none"}`,
 );
 
