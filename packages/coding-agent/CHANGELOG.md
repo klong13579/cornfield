@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **bash prompt 精简**（`src/prompts/tools/bash.md`）：删除 Instead of (WRONG) / Use (CORRECT) 表格与重复的 MUST NOT 条目，保留至多 4 条 MUST 且只保留拦截器规则无法替代的语义；行数从 57 降到 30 以内。
+
+- **edit 校验与自动修复配置键**（`src/config/settings-schema.ts`、`src/modes/components/settings-defs.ts`）：新增 `edit.validate.enabled`（默认 true）、`edit.autoRepair.enabled`（默认 false）、`edit.autoRepair.maxRegionLines`（默认 150）、`edit.autoRepair.maxAttempts`（默认 2）、`edit.autoRepair.modelRole`（默认 smol）。
+
+- **read 结构化摘要配置键**（`src/config/settings-schema.ts`）：新增 `read.summarize.enabled`（默认 false）及 6 个阈值键，默认值均取保守方案（`minTotalLines=500`、`minBodyLines=200`、`minCommentLines=100`、`prose=true`、`unfoldLimit=50`、`unfoldUntil=100`），即摘要功能默认关闭且触发门槛较高，避免影响既有行为。
+
 ### Changed
 
 - **发布流水线一次成跑：不再干跑一遍矩阵，且不再重造已有产物**（`.github/workflows/ci.yml`、`scripts/release.ts`、`scripts/ci-release-build-binaries.ts`、`packages/desktop/scripts/build.ts`、`packages/stats/scripts/generate-client-bundle.ts`）：v1.2.0 实测一次远端 release 16m03，三处是纯粹的重复劳动 ——（1）`generate-client-bundle.ts` 的 120s 竞态轮询只在并行 workspace build 下有意义，而 release job 是独立运行，必然跑满超时（`release_binary` 该步骤 122s，日志里两次 `bun build --compile` 合计 0.4s；`install_methods` 同样中招），现由 `STATS_CLIENT_NO_WAIT=1` 跳过；（2）`release_desktop` 调 coding-agent 的 build 重跑了一遍 coding-agent 构建 —— 重建 Rust addon（3m59，冷 `CARGO_TARGET_DIR`）+ 重编译 CLI 二进制（2m00），而它下载的 native addon 和 `release_binary` 刚产出的二进制就在同一台机器上（electron-builder 本身只占 38s），现走 `bun scripts/build.ts --agent-binary …` 直接复用；（3）`needs: [native]` 让 release job 等整个 native 矩阵，包括不发布的 linux-x64（7m07）—— darwin-arm64 3m08 就好了，现拆成 `native_linux` / `native_darwin` 两个 job，release 只依赖后者。预计单次 release 从 16m 降到 6m 量级。

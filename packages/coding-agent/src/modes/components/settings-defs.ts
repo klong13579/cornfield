@@ -318,6 +318,12 @@ const OPTION_PROVIDERS: Partial<Record<SettingPath, OptionProvider>> = {
 		{ value: "0.95", label: "0.95", description: "Default" },
 		{ value: "0.98", label: "0.98", description: "Strict" },
 	],
+	// Edit auto-repair model role
+	"edit.autoRepair.modelRole": [
+		{ value: "smol", label: "Fast (smol)", description: "Fast/cheap model for quick repairs" },
+		{ value: "default", label: "Default", description: "Use the session's default model" },
+		{ value: "slow", label: "Thinking (slow)", description: "Slow/reasoning model for complex repairs" },
+	],
 	// TTSR repeat gap
 	"ttsr.repeatGap": [
 		{ value: "5", label: "5 messages" },
