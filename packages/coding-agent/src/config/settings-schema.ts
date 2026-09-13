@@ -2,6 +2,7 @@ import { THINKING_EFFORTS } from "@cornfield/ai";
 import { TASK_SIMPLE_MODES } from "../task/simple-mode";
 import { EDIT_MODES } from "../utils/edit-mode";
 import type { ModelRoleRoute } from "./model-routes";
+import { MODEL_ROLE_IDS } from "./model-registry";
 
 /** Unified settings schema - single source of truth for all settings.
  * Unified settings schema - single source of truth for all settings.
@@ -1517,6 +1518,58 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"edit.validate.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "editing",
+			label: "Validate After Edit",
+			description: "Validate file is still parseable after each edit operation",
+		},
+	},
+
+	"edit.autoRepair.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "editing",
+			label: "Auto-Repair Edits",
+			description: "Automatically attempt to repair edits that break file parsing",
+		},
+	},
+
+	"edit.autoRepair.maxRegionLines": {
+		type: "integer",
+		default: 150,
+		ui: {
+			tab: "editing",
+			label: "Auto-Repair Max Lines",
+			description: "Maximum lines in the smallest affected region for auto-repair (0 = no limit)",
+		},
+	},
+
+	"edit.autoRepair.maxAttempts": {
+		type: "integer",
+		default: 2,
+		ui: {
+			tab: "editing",
+			label: "Auto-Repair Max Attempts",
+			description: "Maximum number of auto-repair attempts per edit failure",
+		},
+	},
+
+	"edit.autoRepair.modelRole": {
+		type: "enum",
+		values: MODEL_ROLE_IDS,
+		default: "smol",
+		ui: {
+			tab: "editing",
+			label: "Auto-Repair Model Role",
+			description: "Model role to use for auto-repair attempts",
+			submenu: true,
+		},
+	},
+
 	readLineNumbers: {
 		type: "boolean",
 		default: false,
@@ -1556,6 +1609,46 @@ export const SETTINGS_SCHEMA = {
 			label: "Inline Read Previews",
 			description: "Render read tool results inline in the transcript instead of summary rows",
 		},
+	},
+
+	"read.summarize.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "editing",
+			label: "Read Summarization",
+			description: "Summarize long files in read output instead of returning full content",
+		},
+	},
+
+	"read.summarize.minTotalLines": {
+		type: "integer",
+		default: 500,
+	},
+
+	"read.summarize.minBodyLines": {
+		type: "integer",
+		default: 200,
+	},
+
+	"read.summarize.minCommentLines": {
+		type: "integer",
+		default: 100,
+	},
+
+	"read.summarize.prose": {
+		type: "boolean",
+		default: true,
+	},
+
+	"read.summarize.unfoldLimit": {
+		type: "integer",
+		default: 50,
+	},
+
+	"read.summarize.unfoldUntil": {
+		type: "integer",
+		default: 100,
 	},
 
 	// LSP
