@@ -258,29 +258,19 @@ const ALLOWED_OPS: readonly TodoOpName[] = ["init", "start", "done", "rm", "drop
 function buildOpInferenceError(index: number): ToolError {
 	return new ToolError(
 		`Could not infer the \`op\` for ops/${index + 1} (the ${index + 1}th operation entry). ` +
+			`Add an explicit \`op\`. Inferring is only safe when a field uniquely identifies the op: ` +
+			`list → init, items → append, text → note. ` +
+			`An entry with only \`task\`/\`phase\` is ambiguous (start/done/rm/drop all match), so name its op explicitly. ` +
 			`Allowed op values: ${ALLOWED_OPS.join(", ")}. ` +
-			`Make the operation unambiguous by adding an \`op\`, or include a shape-specific field: ` +
-			`list → init, items → append, text → note; ` +
-			`or reference an existing task via \`task\` whose status disambiguates the intent ` +
-			`(pending → start, in_progress → done). Example: {"op": "done", "task": "Run tests"}`,
+			`Example: {"op": "done", "task": "Run tests"}`,
 	);
 }
 
-function resolveOp(phases: TodoPhase[], entry: TodoOpEntryValue, index: number): ResolvedTodoOpEntry {
+function resolveOp(entry: TodoOpEntryValue, index: number): ResolvedTodoOpEntry {
 	if (entry.op !== undefined) return entry as ResolvedTodoOpEntry;
 	if (entry.list !== undefined) return { ...entry, op: "init" };
 	if (entry.items !== undefined) return { ...entry, op: "append" };
 	if (entry.text !== undefined) return { ...entry, op: "note" };
-
-	const task = entry.task;
-	if (typeof task === "string" && task.length > 0) {
-		const hit = findTaskByContent(phases, task);
-		if (hit) {
-			if (hit.task.status === "pending") return { ...entry, op: "start" };
-			if (hit.task.status === "in_progress") return { ...entry, op: "done" };
-		}
-	}
-
 	throw buildOpInferenceError(index);
 }
 
@@ -335,7 +325,7 @@ function applyParams(phases: TodoPhase[], params: TodoWriteParams): { phases: To
 	const errors: string[] = [];
 	let next = phases;
 	for (let index = 0; index < params.ops.length; index++) {
-		const entry = resolveOp(next, params.ops[index]!, index);
+		const entry = resolveOp(params.ops[index]!, index);
 		next = applyEntry(next, entry, errors);
 	}
 	normalizeInProgressTask(next);

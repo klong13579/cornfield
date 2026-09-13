@@ -52,20 +52,14 @@ describe("todo op inference", () => {
 		expect(result.details?.phases[0]?.tasks[0]?.notes).toEqual(["add more detail"]);
 	});
 
-	it("infers start for a pending task", async () => {
+	it("throws for a task-only entry instead of guessing start/done/rm/drop", async () => {
 		const tool = new TodoWriteTool(createSession());
 		await tool.execute("init", { ops: [{ op: "init", list: [{ phase: "Work", items: ["First", "Second"] }] }] });
-		const result = await tool.execute("start", { ops: [{ task: "Second" }] });
-		const statuses = result.details?.phases[0]?.tasks.map(task => task.status) ?? [];
-		expect(statuses).toEqual(["pending", "in_progress"]);
-	});
-
-	it("infers done for an in_progress task", async () => {
-		const tool = new TodoWriteTool(createSession());
-		await tool.execute("init", { ops: [{ op: "init", list: [{ phase: "Work", items: ["First", "Second"] }] }] });
-		const result = await tool.execute("done", { ops: [{ task: "First" }] });
-		const statuses = result.details?.phases[0]?.tasks.map(task => task.status) ?? [];
-		expect(statuses).toEqual(["completed", "in_progress"]);
+		for (const task of ["First", "Second"]) {
+			const message = await captureError(tool.execute("bad", { ops: [{ task }] }));
+			expect(message).toContain("ops/1");
+			expect(message).toContain('{"op": "done", "task": "Run tests"}');
+		}
 	});
 
 	it("throws an executable error listing allowed ops with ops/N when inference is impossible", async () => {
