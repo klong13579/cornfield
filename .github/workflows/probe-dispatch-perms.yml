@@ -1,0 +1,32 @@
+# TEMPORARY probe — lives only on its own branch and is deleted with it.
+#
+# `auto-release.ts` step 7 dispatches ci.yml after pushing its tag. Two things
+# that step depends on had never executed anywhere in this repo:
+#   1. `gh` being present on the runner.
+#   2. A job holding `actions: write` being allowed to create a workflow run
+#      with the default GITHUB_TOKEN. Events triggered by GITHUB_TOKEN normally
+#      do NOT create runs — workflow_dispatch is the documented exception, and
+#      the whole no-longer-needing-a-PAT decision rests on that exception.
+# Target is ci-target-tests.yml: dispatch-only, ubuntu, two test files, no
+# artifacts and no release.
+name: probe-dispatch-perms
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: gh present, and GITHUB_TOKEN allowed to dispatch?
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh --version
+          gh workflow run ci-target-tests.yml --ref main -f 'target=gateway:test/gateway-lifecycle.test.ts'
+          echo "PROBE: dispatch call returned 0"
