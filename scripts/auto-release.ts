@@ -168,12 +168,14 @@ await git(["tag", `v${nextVersion}`]);
 await git(["push", "origin", `v${nextVersion}`]);
 
 // 7. Start the release run. The tag exists now, but nothing is building it —
-//    see the header for why the push cannot do this. `release_tag` is what the
-//    release job names the GitHub Release after, and `check_latest_tag`
-//    short-circuits to "is_latest" for a trigger_release dispatch, so the rest
-//    of the matrix runs against this commit exactly as a tag push would have.
+//    see the header for why the push cannot do this. `--ref` is the tag, not
+//    main: the artifacts must come from the tagged commit, and main can move
+//    between step 6's push and this line (a human pushing, or another workflow).
+//    `release_tag` is what the release job names the GitHub Release after, and
+//    `check_latest_tag` short-circuits to "is_latest" for a trigger_release
+//    dispatch, so the rest of the matrix runs exactly as a tag push would have.
 //    A failure here leaves a tag with no Release, which a human can recover by
-//    re-running the same dispatch — so it is loud, and it is the last step.
+//    re-running this same dispatch — so it is loud, and it is the last step.
 console.log(`Dispatching the release workflow for v${nextVersion}…`);
-await $`gh workflow run ci.yml --ref main -f trigger_release=true -f release_tag=v${nextVersion}`;
+await $`gh workflow run ci.yml --ref v${nextVersion} -f trigger_release=true -f release_tag=v${nextVersion}`;
 console.log(`=== Auto-release v${nextVersion}: main pushed, tag pushed, release run dispatched ===`);
