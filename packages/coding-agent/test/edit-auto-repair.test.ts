@@ -116,7 +116,7 @@ describe("edit post-write validation", () => {
 				displayPath: "a.ts",
 				originalContent: "const a = 1;\nconst b = 2;\n",
 			}),
-		).resolves.toBeUndefined();
+		).resolves.toEqual({ outcome: "clean" });
 		await expect(fs.readFile(file, "utf8")).resolves.toBe(broken);
 	});
 });
@@ -140,7 +140,7 @@ describe("edit auto-repair", () => {
 
 		await expect(
 			validateEditedFile({ session, absolutePath: file, displayPath: "a.ts", originalContent: original, complete }),
-		).resolves.toBeUndefined();
+		).resolves.toMatchObject({ outcome: "repaired", note: expect.any(String) });
 		await expect(fs.readFile(file, "utf8")).resolves.toBe("const total = 0;\n");
 	});
 
@@ -172,6 +172,74 @@ describe("edit auto-repair", () => {
 			validateEditedFile({ session, absolutePath: file, displayPath: "a.ts", originalContent: original, complete }),
 		).rejects.toBeInstanceOf(EditValidationError);
 		await expect(fs.readFile(file, "utf8")).resolves.toBe(original);
+	});
+});
+
+describe("edit auto-repair adoption hardening", () => {
+	const hardeningOverrides = {
+		"edit.validate.enabled": true,
+		"edit.autoRepair.enabled": true,
+		"edit.autoRepair.maxAttempts": 1,
+		"edit.autoRepair.modelRole": "smol",
+		modelRoutes: { smol: { primary: "smol-model" } },
+	};
+
+	test("rolls back an unclosed-brace edit without auto-repair", async () => {
+		const file = path.join(dir, "a.ts");
+		const original = "function foo() {\n  return 1;\n}\n";
+		const broken = "function foo() {\n  return 1;\n";
+		await fs.writeFile(file, broken);
+
+		const session = makeSession({});
+		await expect(
+			validateEditedFile({ session, absolutePath: file, displayPath: "a.ts", originalContent: original }),
+		).rejects.toBeInstanceOf(EditValidationError);
+		await expect(fs.readFile(file, "utf8")).resolves.toBe(original);
+	});
+
+	test("rejects a whitespace-only undo candidate and rolls back", async () => {
+		const file = path.join(dir, "a.ts");
+		const original = "const total = 5;\n";
+		const broken = "const total = ;\n";
+		await fs.writeFile(file, broken);
+
+		const complete = async (): Promise<AssistantMessage> => assistantText("const total =  5;");
+		const session = makeSession(hardeningOverrides);
+
+		await expect(
+			validateEditedFile({ session, absolutePath: file, displayPath: "a.ts", originalContent: original, complete }),
+		).rejects.toBeInstanceOf(EditValidationError);
+		await expect(fs.readFile(file, "utf8")).resolves.toBe(original);
+	});
+
+	test("rejects a candidate that dropped every inserted line", async () => {
+		const file = path.join(dir, "a.ts");
+		const original = "const a = 1;\n";
+		const broken = "const a = 1;\nconst b = {\n";
+		await fs.writeFile(file, broken);
+
+		const complete = async (): Promise<AssistantMessage> => assistantText("const c = 3;");
+		const session = makeSession(hardeningOverrides);
+
+		await expect(
+			validateEditedFile({ session, absolutePath: file, displayPath: "a.ts", originalContent: original, complete }),
+		).rejects.toBeInstanceOf(EditValidationError);
+		await expect(fs.readFile(file, "utf8")).resolves.toBe(original);
+	});
+
+	test("adopts a repair that keeps the inserted line", async () => {
+		const file = path.join(dir, "a.ts");
+		const original = "const a = 1;\n";
+		const broken = "const a = 1;\nconst b = {\n";
+		await fs.writeFile(file, broken);
+
+		const complete = async (): Promise<AssistantMessage> => assistantText("const b = { x: 1 };");
+		const session = makeSession(hardeningOverrides);
+
+		await expect(
+			validateEditedFile({ session, absolutePath: file, displayPath: "a.ts", originalContent: original, complete }),
+		).resolves.toMatchObject({ outcome: "repaired", note: expect.any(String) });
+		await expect(fs.readFile(file, "utf8")).resolves.toBe("const a = 1;\nconst b = { x: 1 };\n");
 	});
 });
 

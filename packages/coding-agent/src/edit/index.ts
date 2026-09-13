@@ -187,6 +187,17 @@ async function readOriginalContent(file: BunFile | undefined, dst: string): Prom
 	}
 }
 
+function withValidationNote(diagnostics: FileDiagnosticsResult | undefined, note: string): FileDiagnosticsResult {
+	if (!diagnostics) {
+		return { server: "edit-validation", messages: [note], summary: note, errored: false };
+	}
+	return {
+		...diagnostics,
+		messages: [note, ...diagnostics.messages],
+		summary: diagnostics.summary ? `${note} ${diagnostics.summary}` : note,
+	};
+}
+
 function createEditWritethrough(session: ToolSession): WritethroughCallback {
 	const enableLsp = session.enableLsp ?? true;
 	const enableDiagnostics = enableLsp && session.settings.get("lsp.diagnosticsOnEdit");
@@ -202,7 +213,16 @@ function createEditWritethrough(session: ToolSession): WritethroughCallback {
 		const originalContent = shouldValidate ? await readOriginalContent(file, dst) : "";
 		const diagnostics = await inner(dst, content, signal, file, batch, getDeferred);
 		if (shouldValidate) {
-			await validateEditedFile({ session, absolutePath: dst, displayPath: dst, originalContent, signal });
+			const outcome = await validateEditedFile({
+				session,
+				absolutePath: dst,
+				displayPath: dst,
+				originalContent,
+				signal,
+			});
+			if (outcome.outcome === "repaired" && outcome.note) {
+				return withValidationNote(diagnostics, outcome.note);
+			}
 		}
 		return diagnostics;
 	};

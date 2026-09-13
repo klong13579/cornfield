@@ -1,24 +1,25 @@
 import { completeSimple } from "@cornfield/ai";
-import { astGrep } from "@cornfield/natives";
+import { type SummarizeCodeDiagnostic, type SummarizeCodeResult, summarizeCode } from "@cornfield/natives";
 import { logger, prompt } from "@cornfield/utils";
 import * as Diff from "diff";
 import { resolveModelRoleValue } from "../config/model-resolver";
-import { getLanguageFromPath } from "../modes/theme/theme";
 import type { ToolSession } from "../tools";
+import { normalizeToLF } from "./normalize";
 import repairPromptTemplate from "./repair.md" with { type: "text" };
-
-const PARSE_ERROR_MARKER = "parse error (syntax tree contains error nodes)";
 
 /** A syntax failure detectable through the native tree-sitter parse. */
 interface ParseFailure {
 	detail: string;
 	language: string;
+	/** 1-based start line of the first error/missing node, when known. */
+	badLine: number | undefined;
+	diagnostics: SummarizeCodeDiagnostic[];
 }
 
 /**
  * Raised when an edit leaves a target file in a state native tree-sitter
  * can no longer parse, and auto-repair (if enabled) did not adopt a fix.
- * Carries the first changed line so the caller can report the damage site.
+ * Carries the damage site so the caller can report it precisely.
  */
 export class EditValidationError extends Error {
 	constructor(
@@ -41,25 +42,104 @@ export class EditValidationError extends Error {
 	}
 }
 
+function formatDiagnosticLocation(diagnostic: SummarizeCodeDiagnostic): string {
+	return `${diagnostic.kind} '${diagnostic.nodeKind}' at ${diagnostic.startLine}:${diagnostic.startColumn}`;
+}
+
+function formatParseFailureDetail(language: string, diagnostics: SummarizeCodeDiagnostic[]): string {
+	const noun = diagnostics.length === 1 ? "node" : "nodes";
+	const head = `syntax tree contains ${diagnostics.length} error or missing ${noun} (${language})`;
+	const first = diagnostics[0];
+	if (!first) return head;
+	const extra = diagnostics.slice(1, 3).map(formatDiagnosticLocation).join("; ");
+	return `${head}. First: ${formatDiagnosticLocation(first)}${extra ? `. Also: ${extra}` : ""}`;
+}
+
 /**
- * Prove (or disprove) that the file at `absolutePath` still parses using the
- * native tree-sitter grammars exposed through ast-grep. Files whose extension
- * has no native grammar are not candidates and count as "still parseable".
+ * Prove (or disprove) that `content` still parses using the native tree-sitter
+ * grammars exposed through `summarizeCode`. Files whose extension has no native
+ * grammar (or whose parse otherwise fails to run) are not candidates and count
+ * as "still parseable".
+ *
+ * `parsed: false` is derived from the tree containing error OR missing nodes,
+ * so an unclosed delimiter (a *missing* node, not an *error* node) is caught.
  */
-async function detectParseFailure(absolutePath: string): Promise<ParseFailure | undefined> {
-	const language = getLanguageFromPath(absolutePath) ?? "source";
+function detectParseFailure(content: string, absolutePath: string): ParseFailure | undefined {
+	let result: SummarizeCodeResult;
 	try {
-		// A single meta-variable pattern forces ast-grep to parse the whole file
-		// (parse is all-or-nothing per file) while keeping match output bounded.
-		const result = await astGrep({ patterns: ["$A"], path: absolutePath, limit: 1, timeoutMs: 10_000 });
-		const detail = result.parseErrors?.find(error => error.endsWith(PARSE_ERROR_MARKER));
-		if (!detail) return undefined;
-		return { detail, language };
+		result = summarizeCode({ code: content, path: absolutePath });
 	} catch {
-		// If the native layer cannot even run (unsupported language, worker
-		// failure), treat the file as valid rather than blocking the edit.
+		// Unsupported language, worker failure, or native error — treat as valid
+		// rather than blocking the edit.
 		return undefined;
 	}
+	if (result.parsed) return undefined;
+	const diagnostics = result.diagnostics ?? [];
+	return {
+		detail: formatParseFailureDetail(result.language, diagnostics),
+		language: result.language,
+		badLine: diagnostics[0]?.startLine,
+		diagnostics,
+	};
+}
+
+/** Normalize whitespace so whitespace-only differences become invisible. */
+function normalizeWhitespace(text: string): string {
+	return normalizeToLF(text)
+		.split("\n")
+		.map(line => line.replace(/[ \t]+/g, " ").trim())
+		.filter(line => line.length > 0)
+		.join("\n");
+}
+
+/** Non-empty, whitespace-normalized lines of `text`. */
+function normalizedNonEmptyLines(text: string): string[] {
+	return normalizeWhitespace(text)
+		.split("\n")
+		.filter(line => line.length > 0);
+}
+
+function countDiffLines(value: string): number {
+	const lines = value.split("\n");
+	if (lines[lines.length - 1] === "") lines.pop();
+	return lines.length;
+}
+
+/**
+ * Lines this edit genuinely inserted (net additions), excluding replacements.
+ *
+ * A removal/immediately-following-addition pair in the line diff is a
+ * replacement, not an insertion: only the added lines beyond the removed count
+ * represent new content the edit contributed.
+ */
+function computeNetAddedLines(original: string, broken: string): string[] {
+	const parts = Diff.diffLines(normalizeWhitespace(original), normalizeWhitespace(broken));
+	const added: string[] = [];
+	for (let i = 0; i < parts.length; i++) {
+		const part = parts[i];
+		if (!part.added) continue;
+		const removedCount = i > 0 && parts[i - 1].removed ? countDiffLines(parts[i - 1].value) : 0;
+		const lines = part.value.split("\n");
+		const cleanLines = lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
+		for (let j = removedCount; j < cleanLines.length; j++) {
+			const line = cleanLines[j].trim();
+			if (line) added.push(line);
+		}
+	}
+	return added;
+}
+
+/** True when the candidate kept at least one of the edit's net-new lines. */
+function keptLine(addedLine: string, candidateLine: string): boolean {
+	const a = addedLine.trim();
+	const c = candidateLine.trim();
+	return c === a || c.startsWith(a) || a.startsWith(c);
+}
+
+function candidateKeepsAnyAddedLine(netAddedLines: string[], candidate: string): boolean {
+	if (netAddedLines.length === 0) return true;
+	const candidateLines = normalizedNonEmptyLines(candidate);
+	return netAddedLines.some(line => candidateLines.some(candidateLine => keptLine(line, candidateLine)));
 }
 
 interface ChangedLineRange {
@@ -177,10 +257,17 @@ async function callRepairModel(
 	}
 }
 
+interface AutoRepairResult {
+	adopted: boolean;
+	note?: string;
+}
+
 /**
  * Attempt to repair a broken edit with the model assigned to
- * `edit.autoRepair.modelRole`. Returns true only when the repaired file
- * parses again and the repair is not a verbatim undo of the edit.
+ * `edit.autoRepair.modelRole`. Reports adoption only when the repaired file
+ * parses again and the repair is not an undo of the edit — where "undo" is
+ * judged after whitespace normalization and additionally rejects candidates
+ * that dropped every line this edit genuinely inserted.
  */
 async function attemptAutoRepair(
 	session: ToolSession,
@@ -193,22 +280,25 @@ async function attemptAutoRepair(
 	},
 	complete: typeof completeSimple,
 	signal?: AbortSignal,
-): Promise<boolean> {
-	if (!session.settings.get("edit.autoRepair.enabled")) return false;
+): Promise<AutoRepairResult> {
+	if (!session.settings.get("edit.autoRepair.enabled")) return { adopted: false };
 
 	const maxAttempts = Math.max(0, session.settings.get("edit.autoRepair.maxAttempts"));
-	if (maxAttempts === 0) return false;
+	if (maxAttempts === 0) return { adopted: false };
 
 	const maxRegionLines = Math.max(1, session.settings.get("edit.autoRepair.maxRegionLines"));
 	const range = computeChangedLineRange(args.originalContent, args.brokenContent);
-	if (!range) return false;
-	if (range.end - range.start + 1 > maxRegionLines) return false;
+	if (!range) return { adopted: false };
+	if (range.end - range.start + 1 > maxRegionLines) return { adopted: false };
 
 	const brokenLines = args.brokenContent.split("\n");
 	const region = brokenLines.slice(range.start - 1, range.end).join("\n");
 
 	const resolved = resolveRepairModel(session);
-	if (!resolved) return false;
+	if (!resolved) return { adopted: false };
+
+	const normalizedOriginal = normalizeWhitespace(args.originalContent);
+	const netAddedLines = computeNetAddedLines(args.originalContent, args.brokenContent);
 
 	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
 		const corrected = await callRepairModel(
@@ -227,22 +317,32 @@ async function attemptAutoRepair(
 		if (corrected === undefined) break;
 
 		const candidate = spliceRegion(args.brokenContent, range, corrected);
-		if (candidate === args.originalContent) {
-			// A verbatim undo would silently discard the edit; reject it.
-			continue;
-		}
 		if (candidate === args.brokenContent) {
 			// The model returned the broken region unchanged.
 			continue;
 		}
+		if (candidate === args.originalContent || normalizeWhitespace(candidate) === normalizedOriginal) {
+			// A verbatim or whitespace-only undo would silently discard the edit.
+			continue;
+		}
+		if (!candidateKeepsAnyAddedLine(netAddedLines, candidate)) {
+			// The candidate dropped every line this edit inserted (a non-verbatim undo).
+			continue;
+		}
 
 		await Bun.write(args.absolutePath, candidate);
-		const stillBroken = await detectParseFailure(args.absolutePath);
-		if (!stillBroken) return true;
-		if (signal?.aborted) return false;
+		const stillBroken = detectParseFailure(candidate, args.absolutePath);
+		if (!stillBroken) {
+			const lineNote = args.failure.badLine !== undefined ? ` near line ${args.failure.badLine}` : "";
+			return {
+				adopted: true,
+				note: `${args.displayPath}: auto-repair adopted a parseable fix${lineNote}; the edit was kept.`,
+			};
+		}
+		if (signal?.aborted) return { adopted: false };
 	}
 
-	return false;
+	return { adopted: false };
 }
 
 export interface ValidateEditedFileOptions {
@@ -256,28 +356,38 @@ export interface ValidateEditedFileOptions {
 	complete?: typeof completeSimple;
 }
 
+/** What post-write validation did, surfaced so the tool result can say so. */
+export interface EditValidationOutcome {
+	outcome: "clean" | "repaired";
+	/** Human-readable note for the tool result when a repair was adopted. */
+	note?: string;
+}
+
 /**
  * Post-write gate for the edit tool: validate that the target file still
  * parses. On failure, attempt auto-repair (when enabled); if that does not
  * produce an adopted fix, roll the edit back and surface the damage site.
+ *
+ * Rollback concludes by throwing {@link EditValidationError} (which the caller
+ * already surfaces), while an adopted repair is returned so the tool result can
+ * report it to the model.
  */
-export async function validateEditedFile(options: ValidateEditedFileOptions): Promise<void> {
+export async function validateEditedFile(options: ValidateEditedFileOptions): Promise<EditValidationOutcome> {
 	const { session, absolutePath, displayPath, originalContent, signal, complete = completeSimple } = options;
-	if (!session.settings.get("edit.validate.enabled")) return;
-
-	const failure = await detectParseFailure(absolutePath);
-	if (!failure) return;
+	if (!session.settings.get("edit.validate.enabled")) return { outcome: "clean" };
 
 	const brokenContent = await Bun.file(absolutePath).text();
-	const repaired = await attemptAutoRepair(
+	const failure = detectParseFailure(brokenContent, absolutePath);
+	if (!failure) return { outcome: "clean" };
+
+	const repair = await attemptAutoRepair(
 		session,
 		{ absolutePath, displayPath, originalContent, brokenContent, failure },
 		complete,
 		signal,
 	);
-	if (repaired) return;
+	if (repair.adopted) return { outcome: "repaired", note: repair.note };
 
 	await Bun.write(absolutePath, originalContent);
-	const range = computeChangedLineRange(originalContent, brokenContent);
-	throw new EditValidationError(displayPath, range?.start, failure.language, failure.detail);
+	throw new EditValidationError(displayPath, failure.badLine, failure.language, failure.detail);
 }
