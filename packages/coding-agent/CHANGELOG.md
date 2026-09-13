@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-13
+
 ### Fixed
 
 - **手工发版会被自己上一次发版挡住，且提示里的逃生开关是个死名字**（`scripts/release.ts`、`.github/workflows/ci.yml`）：`release.ts` 的 dispatch 与 bump 的 push run 同属 `CI-<ref>` concurrency group，所以每次手工发版都会把 bump 的 push run 取消掉；而 `assertMainCiGreen` 原来只认「最新一条 main push run」，于是下一次手工发版读到 cancelled 直接报错退出 —— v1.2.1 实测就是如此（push run 34776550768 cancelled，同 commit 的 dispatch run 34776551979 绿）。现改为按「当前 main tip 这个 commit」取所有 run，跳过没有裁决的 cancelled、由真正跑完的那条决定；报错提示里的 `--skip-preflight` 也改成实际存在的 `--skip-main-check`（旧名字会被静默忽略、照样 exit 1）。另：release 资产里的 `packages/desktop/dist/*.yml` 改点名 `latest*.yml`，不再把 electron-builder 的 `builder-debug.yml` 当日更元数据一起发布（v1.2.0/v1.2.1 资产里都有）。
