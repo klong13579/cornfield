@@ -192,28 +192,44 @@ function compareVersions(a: string, b: string): number {
 	return aPatch - bPatch;
 }
 
+/**
+ * The commit about to be released (main's tip, before the bump) must have a run
+ * that actually reached a verdict.
+ *
+ * Not “the latest push run”: release.ts's own dispatch shares the `CI-<ref>`
+ * concurrency group with the bump's push run and cancels it, so right after
+ * every manual release the newest *push* run of main's tip is a cancelled one —
+ * and with only that run recorded, the next manual release would be blocked by
+ * its own previous release (measured on v1.2.1: push run 34776550768 cancelled,
+ * its dispatch run 34776551979 green). A cancelled run is not a red main; it is
+ * no signal at all, so it is skipped and the run of the same commit that did
+ * finish decides.
+ */
 async function assertMainCiGreen(): Promise<void> {
-	console.log("Checking latest main CI run...");
-	const out = await $`gh run list --branch main --event push --limit 1 --json status,conclusion,databaseId`.quiet().nothrow().text();
-	let run: { status: string; conclusion: string | null; databaseId: number } | undefined;
+	console.log("Checking CI for the current main tip...");
+	const commit = (await git(["rev-parse", "HEAD"]).text()).trim();
+	const out =
+		await $`gh run list --commit ${commit} --limit 10 --json databaseId,event,status,conclusion`.quiet().nothrow().text();
+	let runs: Array<{ databaseId: number; event: string; status: string; conclusion: string | null }> = [];
 	try {
-		const runs = JSON.parse(out) as Array<{ status: string; conclusion: string | null; databaseId: number }>;
-		run = runs[0];
+		runs = JSON.parse(out) as typeof runs;
 	} catch {
-		run = undefined;
+		runs = [];
 	}
-	if (!run) {
-		console.log("  No recent main push run found — continuing");
+	const verdicts = runs.filter((run) => run.conclusion !== "cancelled");
+	if (verdicts.length === 0) {
+		console.log(`  No CI run with a verdict for ${commit.slice(0, 8)} — continuing`);
 		return;
 	}
-	if (run.status !== "completed" || run.conclusion !== "success") {
+	const latest = verdicts[0];
+	if (latest.status !== "completed" || latest.conclusion !== "success") {
 		console.error(
-			`Error: latest main CI run #${run.databaseId} is ${run.status}/${run.conclusion ?? "unknown"}.`,
+			`Error: latest CI run #${latest.databaseId} (${latest.event}) for ${commit.slice(0, 8)} is ${latest.status}/${latest.conclusion ?? "unknown"}.`,
 		);
-		console.error("  Release assumes a green main. Fix and re-run (or bypass with --skip-preflight).");
+		console.error("  Release assumes a green main. Fix and re-run (or bypass with --skip-main-check).");
 		process.exit(1);
 	}
-	console.log(`  main CI green (run #${run.databaseId})`);
+	console.log(`  main CI green (run #${latest.databaseId}, ${latest.event})`);
 }
 
 async function commitIfDirty(message: string): Promise<void> {

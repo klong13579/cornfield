@@ -441,7 +441,7 @@ jobs:
           path: |
             packages/desktop/dist/*.dmg
             packages/desktop/dist/*.zip
-            packages/desktop/dist/*.yml
+            packages/desktop/dist/latest*.yml
             packages/desktop/dist/*.blockmap
 
   release:
@@ -523,7 +523,7 @@ jobs:
             packages/coding-agent/binaries/*
             packages/desktop/dist/*.dmg
             packages/desktop/dist/*.zip
-            packages/desktop/dist/*.yml
+            packages/desktop/dist/latest*.yml
             packages/desktop/dist/*.blockmap
           generate_release_notes: true
       - name: Publish to npm
