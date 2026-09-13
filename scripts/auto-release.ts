@@ -12,13 +12,21 @@
  * releases). Refuses to run when the tree already declares a version at or
  * beyond the one it computed — see step 2b.
  *
- * On a change: bumps versions, finalizes CHANGELOGs, commits,
- * pushes main, tags v<next> and pushes the tag — the tag push runs the normal
- * full release pipeline (native matrix → release_binary → release_desktop →
- * release).
+ * On a change: bumps versions, finalizes CHANGELOGs, commits, pushes main,
+ * tags v<next> and pushes the tag — then starts the release workflow
+ * explicitly (see step 7).
  *
- * Requires a PAT with `contents: write` in GH_TOKEN (repo secret
- * AUTO_RELEASE_TOKEN); GITHUB_TOKEN pushes do not re-trigger workflows.
+ * GH_TOKEN is required for the two calls that talk back to GitHub: the push and
+ * the `gh workflow run` that starts the release. The workflow supplies the
+ * default GITHUB_TOKEN.
+ *
+ * The tag push alone is NOT enough to start a release: GITHUB_TOKEN pushes do
+ * not trigger workflows, and this job runs on GITHUB_TOKEN. Measured
+ * 2026-09-13 — the first night the job got this far — when v1.2.0 was tagged
+ * and pushed, and the GitHub API reported zero workflow runs for that commit.
+ * `workflow_dispatch` is the one event GitHub exempts from that rule, which is
+ * the same reason `scripts/release.ts` dispatches its preflight instead of
+ * waiting for a push.
  *
  * The commit it makes is attributed to the identity
  * `.github/workflows/nightly.yml` configures; a runner has none by default,
@@ -147,7 +155,7 @@ if (isDryRun) {
 	process.exit(0);
 }
 if (!token) {
-	console.error("GH_TOKEN (PAT with contents: write) is required — push must re-trigger workflows.");
+	console.error("GH_TOKEN is required — it authenticates both the push and the release dispatch.");
 	process.exit(1);
 }
 console.log("Committing…");
@@ -158,4 +166,14 @@ await git(["push", "origin", "main"]);
 console.log(`Tagging v${nextVersion}…`);
 await git(["tag", `v${nextVersion}`]);
 await git(["push", "origin", `v${nextVersion}`]);
-console.log(`=== Auto-release v${nextVersion} pushed — tag CI will build & publish ===`);
+
+// 7. Start the release run. The tag exists now, but nothing is building it —
+//    see the header for why the push cannot do this. `release_tag` is what the
+//    release job names the GitHub Release after, and `check_latest_tag`
+//    short-circuits to "is_latest" for a trigger_release dispatch, so the rest
+//    of the matrix runs against this commit exactly as a tag push would have.
+//    A failure here leaves a tag with no Release, which a human can recover by
+//    re-running the same dispatch — so it is loud, and it is the last step.
+console.log(`Dispatching the release workflow for v${nextVersion}…`);
+await $`gh workflow run ci.yml --ref main -f trigger_release=true -f release_tag=v${nextVersion}`;
+console.log(`=== Auto-release v${nextVersion}: main pushed, tag pushed, release run dispatched ===`);
