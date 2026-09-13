@@ -75,10 +75,15 @@ async function main(): Promise<void> {
 	// 触发 build，而是等待并行 stats build 产出完整 dist/client
 	// （index.js + index.html 均存在，且连续 1s 稳定）；超时（独立运行、
 	// 无并行 build 时）再自行构建兑底。
+	//
+	// CI 的 release/install 步骤自己掌管整个构建，没有第二个进程碰
+	// dist/client，等待只会烧满超时。这类调用方设 STATS_CLIENT_NO_WAIT=1
+	// 跳过轮询，直接兜底构建。
+	const NO_WAIT = Bun.env.STATS_CLIENT_NO_WAIT === "1";
 	const BUILD_READY_TIMEOUT_MS = 120_000;
 	const deadline = Date.now() + BUILD_READY_TIMEOUT_MS;
 	let ready = false;
-	while (Date.now() < deadline) {
+	while (!NO_WAIT && Date.now() < deadline) {
 		const hasIndexJs = await fs
 			.access(path.join(DIST_CLIENT_DIR, "index.js"))
 			.then(() => true)
@@ -104,7 +109,11 @@ async function main(): Promise<void> {
 		}
 	}
 	if (!ready) {
-		console.log("dist/client not ready after wait; building stats client inline");
+		console.log(
+			NO_WAIT
+				? "STATS_CLIENT_NO_WAIT=1: building stats client inline"
+				: "dist/client not ready after wait; building stats client inline",
+		);
 		await $`bun run build`;
 	}
 

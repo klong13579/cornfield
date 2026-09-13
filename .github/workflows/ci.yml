@@ -18,7 +18,7 @@ on:
         type: boolean
         default: false
       dry_run:
-        description: "Preflight: run the full release matrix (binaries + desktop) WITHOUT creating the GitHub Release or publishing to npm. release.ts runs this automatically before tagging."
+        description: "Manual valve: build the release artifacts (binaries + desktop) WITHOUT creating the GitHub Release or publishing to npm. No automated flow uses this — release.ts and the nightly auto-release publish in one pass."
         type: boolean
         default: false
       release_tag:
@@ -51,11 +51,12 @@ jobs:
         run: bun run ci:check:full
 
   detect_rust_changes:
-    # Release/tag and manual-release runs always build the full native matrix
-    # (linux-x64 + darwin-arm64). For plain main pushes and PRs this job decides
-    # whether the change touches the Rust/native stack (crates/, Cargo.toml,
-    # Cargo.lock, packages/natives/) and, if so, widens the native matrix to
-    # both — so darwin-arm64 breakage surfaces on the branch/PR instead of at
+    # Decides whether this run builds cornfield-natives for darwin-arm64 (the
+    # only shipped platform) or just for linux-x64 (which exists for the test
+    # jobs). Release/tag runs and manual dispatches always build both. For
+    # plain main pushes and PRs, a change touching the Rust/native stack
+    # (crates/, Cargo.toml, Cargo.lock, packages/natives/) also builds
+    # darwin-arm64 — so darwin breakage surfaces on the branch/PR instead of at
     # release time. Releases are macOS-only: linux-arm64 and win32-x64 are not
     # built anywhere in CI. Verify aarch64-linux changes locally with
     # `bun run build:native:linux-arm64`.
@@ -70,11 +71,9 @@ jobs:
         id: diff
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # Manual dispatch (incl. the dry-run release preflight) always runs
-            # the full matrix. Do not rely on `inputs`/`github.ref` in the
-            # matrix include expression below — `inputs` is not reliably
-            # evaluated there (observed: a dispatch with trigger_release=true
-            # expanded only the linux-x64 job).
+            # A dispatch means "build everything": release runs
+            # (trigger_release=true) need darwin-arm64, and a manual CI run is
+            # someone asking for the full set.
             echo "rust_changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -99,22 +98,12 @@ jobs:
             echo "rust_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-  native:
-    needs: [detect_rust_changes]
-    strategy:
-      fail-fast: false
-      # linux-x64 is not a release platform — it stays because `test` and
-      # `test_gateway` download cornfield-natives-linux-x64, and it is the only
-      # entry carrying `rust_checks` (clippy / rustfmt / nextest). darwin-arm64
-      # is the only shipped platform.
-      matrix:
-        include: ${{ (startsWith(github.ref, 'refs/tags/v') || needs.detect_rust_changes.outputs.rust_changed == 'true') && fromJSON('[
-          {"os":"ubuntu-22.04","platform":"linux","arch":"x64","variants":"baseline modern","rust_checks":true},
-          {"os":"macos-14","platform":"darwin","arch":"arm64"}
-          ]') || fromJSON('[
-          {"os":"ubuntu-22.04","platform":"linux","arch":"x64","variants":"baseline modern","rust_checks":true}
-          ]') }}
-    runs-on: ${{ matrix.os }}
+  # linux-x64 is not a release platform — it exists because `test` and
+  # `test_gateway` download cornfield-natives-linux-x64, and it is the only job
+  # carrying the Rust checks (clippy / rustfmt / nextest). It also builds two
+  # addon variants for those test jobs.
+  native_linux:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -122,10 +111,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           toolchain: nightly-2026-04-29
-          components: ${{ matrix.rust_checks && 'clippy, rustfmt' || '' }}
+          components: clippy, rustfmt
+      # shared-key, not key: the cache belongs to the platform, not to this
+      # job's name (the automatic job-based key changes whenever the job is
+      # renamed, which turns a rename into a full cold rebuild).
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.platform }}-${{ matrix.arch }}
+          shared-key: linux-x64
           cache-workspace-crates: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -135,32 +127,68 @@ jobs:
           version: 0.15.2
       - run: bun install --frozen-lockfile
       - name: Rust checks
-        if: matrix.rust_checks
         run: bun run check:rs
       - uses: taiki-e/install-action@v2
-        if: matrix.rust_checks
         with:
           tool: nextest
       - name: Rust tests
-        if: matrix.rust_checks
         run: bun run test:rs
       - name: Build native addon(s)
         env:
-          TARGET_PLATFORM: ${{ matrix.platform }}
-          TARGET_ARCH: ${{ matrix.arch }}
-          TARGET_VARIANTS: ${{ matrix.variants }}
+          TARGET_PLATFORM: linux
+          TARGET_ARCH: x64
+          TARGET_VARIANTS: baseline modern
         shell: bash
         run: |
           bun run ci:build:native
       - name: Upload native addon(s)
         uses: actions/upload-artifact@v5
         with:
-          name: cornfield-natives-${{ matrix.platform }}-${{ matrix.arch }}
-          path: packages/natives/native/cornfield_natives.${{ matrix.platform }}-${{ matrix.arch }}*.node
+          name: cornfield-natives-linux-x64
+          path: packages/natives/native/cornfield_natives.linux-x64*.node
+          if-no-files-found: error
+
+  # darwin-arm64 is the only shipped platform, and it is the only native job the
+  # release jobs wait for. detect_rust_changes reports true for tags and for
+  # dispatches, so a release run always builds it.
+  native_darwin:
+    if: needs.detect_rust_changes.outputs.rust_changed == 'true'
+    needs: [detect_rust_changes]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-04-29
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: darwin-arm64
+          cache-workspace-crates: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - run: bun install --frozen-lockfile
+      - name: Build native addon(s)
+        env:
+          TARGET_PLATFORM: darwin
+          TARGET_ARCH: arm64
+        shell: bash
+        run: |
+          bun run ci:build:native
+      - name: Upload native addon(s)
+        uses: actions/upload-artifact@v5
+        with:
+          name: cornfield-natives-darwin-arm64
+          path: packages/natives/native/cornfield_natives.darwin-arm64*.node
           if-no-files-found: error
 
   test:
-    needs: [native]
+    needs: [native_linux]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     strategy:
@@ -220,7 +248,7 @@ jobs:
     # intermittently exited 1 with 0 failures (timing-sensitive leftover
     # exitCode). Full suite in its own job: deterministic signal, independent
     # retry, no cross-package interference.
-    needs: [native]
+    needs: [native_linux]
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -283,6 +311,11 @@ jobs:
           sudo ln -sf /usr/bin/convert /usr/local/bin/magick
       - run: bun install --frozen-lockfile
       - name: Install method smoke tests
+        # STATS_CLIENT_NO_WAIT: run-ci.sh owns this build top to bottom and runs
+        # it sequentially — nothing else can be writing packages/stats/dist/client,
+        # so the generator's 120s race-wait would only burn its full timeout.
+        env:
+          STATS_CLIENT_NO_WAIT: "1"
         run: bun run ci:test:install-methods
 
   check_latest_tag:
@@ -314,7 +347,9 @@ jobs:
 
   release_binary:
     if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == true)) && needs.check_latest_tag.outputs.is_latest == 'true'
-    needs: [check_latest_tag, check, native]
+    # native_darwin, not every native job: linux-x64 is not a release platform
+    # and takes twice as long on a release run.
+    needs: [check_latest_tag, check, native_darwin]
     strategy:
       fail-fast: false
       # Single-entry matrix on purpose: releases are macOS-only. The job body is
@@ -367,7 +402,10 @@ jobs:
 
   release_desktop:
     if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.trigger_release == true)) && needs.check_latest_tag.outputs.is_latest == 'true'
-    needs: [check_latest_tag, check, native]
+    # The desktop app bundles the CLI binary and the renderer, and nothing else
+    # it builds itself. Everything it needs already exists by the time
+    # release_binary finishes, so it waits for that and reuses the artifact.
+    needs: [check_latest_tag, check, native_darwin, release_binary]
     runs-on: macos-14
     permissions:
       contents: read
@@ -384,13 +422,17 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
       - run: bun install --frozen-lockfile
-      - name: Download native addon(s)
+      - name: Download release binary
         uses: actions/download-artifact@v5
         with:
-          name: cornfield-natives-darwin-arm64
-          path: packages/natives/native
+          name: cornfield-binary-darwin-arm64
+          path: packages/coding-agent/binaries
       - name: Build desktop app (dmg + zip + latest.yml)
-        run: bun run build:desktop
+        # --agent-binary bundles the binary release_binary just built from this
+        # same commit. Without it this step rebuilds the Rust addon and the CLI
+        # binary from source — measured 2026-09-13 on v1.2.0: 6m of the 7m34
+        # step was that rebuild, while electron-builder itself took 38s.
+        run: bun scripts/build.ts --agent-binary ../coding-agent/binaries/cornfield-darwin-arm64
         working-directory: packages/desktop
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v5
@@ -465,11 +507,17 @@ jobs:
           fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        # Skipped in dry-run preflight (workflow_dispatch with dry_run=true):
-        # release_binary / release_desktop still build the shipped artifacts so
-        # the preflight validates the macOS release path the tag push will re-run.
+        # Skipped for a manual dry run (workflow_dispatch with dry_run=true):
+        # release_binary / release_desktop still build the shipped artifacts, so
+        # the run validates the macOS release path without publishing anything.
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         with:
+          # Dispatch mode runs from `main`: the tag does not exist yet, this step
+          # creates it. target_commitish pins it to the commit this run built —
+          # without it the tag is created wherever the default branch points when
+          # the release is created, which is a different commit as soon as anyone
+          # pushes to main mid-run.
+          target_commitish: ${{ github.sha }}
           tag_name: "${{ (github.event_name == 'workflow_dispatch' && inputs.release_tag) || github.ref_name }}"
           files: |
             packages/coding-agent/binaries/*

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **发布流水线一次成跑：不再干跑一遍矩阵，且不再重造已有产物**（`.github/workflows/ci.yml`、`scripts/release.ts`、`scripts/ci-release-build-binaries.ts`、`packages/desktop/scripts/build.ts`、`packages/stats/scripts/generate-client-bundle.ts`）：v1.2.0 实测一次远端 release 16m03，三处是纯粹的重复劳动 ——（1）`generate-client-bundle.ts` 的 120s 竞态轮询只在并行 workspace build 下有意义，而 release job 是独立运行，必然跑满超时（`release_binary` 该步骤 122s，日志里两次 `bun build --compile` 合计 0.4s；`install_methods` 同样中招），现由 `STATS_CLIENT_NO_WAIT=1` 跳过；（2）`release_desktop` 调 coding-agent 的 build 重跑了一遍 coding-agent 构建 —— 重建 Rust addon（3m59，冷 `CARGO_TARGET_DIR`）+ 重编译 CLI 二进制（2m00），而它下载的 native addon 和 `release_binary` 刚产出的二进制就在同一台机器上（electron-builder 本身只占 38s），现走 `bun scripts/build.ts --agent-binary …` 直接复用；（3）`needs: [native]` 让 release job 等整个 native 矩阵，包括不发布的 linux-x64（7m07）—— darwin-arm64 3m08 就好了，现拆成 `native_linux` / `native_darwin` 两个 job，release 只依赖后者。预计单次 release 从 16m 降到 6m 量级。
+
+### Removed
+
+- **release 前的 dry-run preflight（矩阵跑两遍）**（`scripts/release.ts`、`.github/workflows/ci.yml`）：旧流程是「push main → dry-run 全矩阵 → 绿了再打 tag → tag push 再跑一遍同一矩阵」，手工发一次要 ~35 分钟串行。现改为 push 后直接 dispatch 发布 run，tag 由该 run 最后一步创建（`target_commitish` 钉在本次构建的 commit 上）。门槛反而更严：整条流程不绿就不会有 tag、也不会有 Release；失败则无可清理的半成品。`--skip-preflight` 随之改为 `--skip-main-check`（它现在只跳过「最新 main CI 是绿的」这一道）。`dry_run` 输入保留为人工阀门，不再有自动流程使用。
+
 ## [1.1.4] - 2026-09-12
 
 ### Added

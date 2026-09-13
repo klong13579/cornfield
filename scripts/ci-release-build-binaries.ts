@@ -172,7 +172,12 @@ async function generateBundle(): Promise<void> {
 		console.log("DRY RUN bun --cwd=packages/stats scripts/generate-client-bundle.ts --generate");
 		return;
 	}
-	await runCommand(["bun", "--cwd=packages/stats", "scripts/generate-client-bundle.ts", "--generate"], repoRoot);
+	// STATS_CLIENT_NO_WAIT: this step owns packages/stats/dist/client — no parallel
+	// build can be writing it, so the generator's 120s race-wait is pure dead time.
+	await runCommand(["bun", "--cwd=packages/stats", "scripts/generate-client-bundle.ts", "--generate"], repoRoot, {
+		...Bun.env,
+		STATS_CLIENT_NO_WAIT: "1",
+	});
 }
 
 async function resetArtifacts(): Promise<void> {

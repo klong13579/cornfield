@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`bun scripts/build.ts --agent-binary <path>`：复用已构建的 CLI 二进制**（`scripts/build.ts`）：默认路径会调 `packages/coding-agent` 的 build，也就是在本机重建 Rust addon 并重编译一遍 CLI 二进制。CI 的 `release_desktop` job 里这两样都已经存在（native job 产出的 addon 就在工作区，`release_binary` 刚产出的二进制随 artifact 下载下来），却因此白跑 6 分钟（实测 v1.2.0：该步骤 7m34，electron-builder 本身只占 38s）。新参数把给定二进制拷到 `packages/coding-agent/dist/cornfield` 并跳过第 2 步，web-app 与桌面壳照常构建。
+
 ## [1.1.4] - 2026-09-12
 
 ### Fixed
