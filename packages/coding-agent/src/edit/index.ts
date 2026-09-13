@@ -1,6 +1,7 @@
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
 import { prompt } from "@cornfield/utils";
 import type { Static } from "@sinclair/typebox";
+import type { BunFile } from "bun";
 import {
 	createLspWritethrough,
 	type FileDiagnosticsResult,
@@ -89,6 +90,7 @@ import {
 } from "./modes/hashline";
 import { executePatchSingle, type PatchEditEntry, type PatchParams, patchEditSchema } from "./modes/patch";
 import { executeReplaceSingle, type ReplaceEditEntry, type ReplaceParams, replaceEditSchema } from "./modes/replace";
+import { validateEditedFile } from "./post-write";
 import { type EditToolDetails, type EditToolPerFileResult, getLspBatchRequest, type LspBatchRequest } from "./renderer";
 
 export { DEFAULT_EDIT_MODE, type EditMode, normalizeEditMode } from "../utils/edit-mode";
@@ -101,6 +103,7 @@ export * from "./modes/hashline";
 export * from "./modes/patch";
 export * from "./modes/replace";
 export * from "./normalize";
+export * from "./post-write";
 export * from "./renderer";
 export * from "./streaming";
 
@@ -169,11 +172,40 @@ function resolveFuzzyThreshold(session: ToolSession, rawValue: string): number {
 	return threshold;
 }
 
+async function readOriginalContent(file: BunFile | undefined, dst: string): Promise<string> {
+	if (file) {
+		try {
+			return await file.text();
+		} catch {
+			// fall through to a fresh read
+		}
+	}
+	try {
+		return await Bun.file(dst).text();
+	} catch {
+		return "";
+	}
+}
+
 function createEditWritethrough(session: ToolSession): WritethroughCallback {
 	const enableLsp = session.enableLsp ?? true;
 	const enableDiagnostics = enableLsp && session.settings.get("lsp.diagnosticsOnEdit");
 	const enableFormat = enableLsp && session.settings.get("lsp.formatOnWrite");
-	return enableLsp ? createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics }) : writethroughNoop;
+	const inner = enableLsp ? createLspWritethrough(session.cwd, { enableFormat, enableDiagnostics }) : writethroughNoop;
+
+	return async (dst, content, signal, file, batch, getDeferred) => {
+		// Capture the pre-edit content before the write so a failed validation can
+		// roll back to the exact prior state. Batch flush calls rewrite already-edited
+		// buffers and are skipped here (their files were validated at the non-flush
+		// write that first put the content on disk).
+		const shouldValidate = !batch?.flush;
+		const originalContent = shouldValidate ? await readOriginalContent(file, dst) : "";
+		const diagnostics = await inner(dst, content, signal, file, batch, getDeferred);
+		if (shouldValidate) {
+			await validateEditedFile({ session, absolutePath: dst, displayPath: dst, originalContent, signal });
+		}
+		return diagnostics;
+	};
 }
 
 /** Run apply_patch file operations and aggregate their multi-file result. */
