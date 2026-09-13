@@ -6,7 +6,7 @@
 
 - **bash prompt 精简**（`src/prompts/tools/bash.md`）：删除 Instead of (WRONG) / Use (CORRECT) 表格与重复的 MUST NOT 条目，保留至多 4 条 MUST 且只保留拦截器规则无法替代的语义；行数从 57 降到 30 以内。
 
-- **edit 校验与自动修复配置键**（`src/config/settings-schema.ts`、`src/modes/components/settings-defs.ts`）：新增 `edit.validate.enabled`（默认 true）、`edit.autoRepair.enabled`（默认 false）、`edit.autoRepair.maxRegionLines`（默认 150）、`edit.autoRepair.maxAttempts`（默认 2）、`edit.autoRepair.modelRole`（默认 smol）。
+- **edit 校验与自动修复配置键**（`src/config/settings-schema.ts`、`src/modes/components/settings-defs.ts`）：新增 `edit.validate.enabled`（默认 true）、`edit.autoRepair.enabled`（默认 true，即默认打开自动修复；每次把文件改坏的编辑会真调一次 `edit.autoRepair.modelRole` 指定的模型，最长 `edit.autoRepair.maxAttempts` 次；修复候选需通过复检且不能是原样撤销才会被采纳，否则回滚）、`edit.autoRepair.maxRegionLines`（默认 150）、`edit.autoRepair.maxAttempts`（默认 2）、`edit.autoRepair.modelRole`（默认 smol）。
 
 - **read 结构化摘要配置键**（`src/config/settings-schema.ts`）：新增 `read.summarize.enabled`（默认 false）及 6 个阈值键，默认值均取保守方案（`minTotalLines=500`、`minBodyLines=200`、`minCommentLines=100`、`prose=true`、`unfoldLimit=50`、`unfoldUntil=100`），即摘要功能默认关闭且触发门槛较高，避免影响既有行为。
 

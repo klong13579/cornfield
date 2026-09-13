@@ -70,6 +70,13 @@ afterEach(async () => {
 	await fs.rm(dir, { recursive: true, force: true });
 });
 
+describe("defaults", () => {
+	test("edit.autoRepair.enabled defaults to true", () => {
+		const settings = Settings.isolated({});
+		expect(settings.get("edit.autoRepair.enabled")).toBe(true);
+	});
+});
+
 describe("edit post-write validation", () => {
 	test("rolls back a broken edit and reports the damage site", async () => {
 		const file = path.join(dir, "a.ts");

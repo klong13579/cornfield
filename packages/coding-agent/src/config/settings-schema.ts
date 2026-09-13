@@ -1530,7 +1530,7 @@ export const SETTINGS_SCHEMA = {
 
 	"edit.autoRepair.enabled": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "editing",
 			label: "Auto-Repair Edits",
