@@ -13,14 +13,36 @@ const repoRoot = path.join(import.meta.dir, "..");
 const isDryRun = process.argv.includes("--dry-run");
 const targetPlatform = Bun.env.TARGET_PLATFORM || process.platform;
 const targetArch = Bun.env.TARGET_ARCH || process.arch;
+/**
+ * `aes` 0.9 compiles its VAES512 backend into every x86_64 build: the module is
+ * reached only through runtime CPU detection, but the AVX-512 instructions land
+ * in the artifact either way — and the x86-64-v2/v3 addons must not contain them
+ * (AGENTS.md).
+ *
+ * Measured 2026-09-13: adding `pdf-inspector` (→ `lopdf` → `aes`) broke the
+ * native job on `vbroadcasti32x4 … %zmm0`, the opcode of
+ * `aes-0.9.3/src/backends/x86_vaes512/encdec.rs::broadcast_keys`. That code sits
+ * behind a const-generic dispatch and is instantiated into the *calling* crate's
+ * codegen unit, so it does not appear in `aes`'s own object file — verified on an
+ * x86_64-unknown-linux-gnu build: without this cfg the caller's object carries 5
+ * AVX-512 instructions, with it, zero.
+ *
+ * Forcing the soft backend is `aes`'s documented knob for this, and the only one
+ * that keeps the 512-bit module out of the binary. It costs AES-NI/VAES on these
+ * builds, which is acceptable because the variants exist for the linux-x64 test
+ * addons only — the shipped darwin-arm64 addon is built without variants and
+ * keeps its intrinsics.
+ */
+const AES_SOFT_BACKEND_CFG = '--cfg aes_backend="soft"';
+
 const variantConfigs: Record<NativeBuildVariant["name"], NativeBuildVariant> = {
 	baseline: {
 		name: "baseline",
-		rustflags: "-C target-cpu=x86-64-v2",
+		rustflags: `-C target-cpu=x86-64-v2 ${AES_SOFT_BACKEND_CFG}`,
 	},
 	modern: {
 		name: "modern",
-		rustflags: "-C target-cpu=x86-64-v3",
+		rustflags: `-C target-cpu=x86-64-v3 ${AES_SOFT_BACKEND_CFG}`,
 	},
 };
 

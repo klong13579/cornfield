@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **x86-64 addon 里混进 AVX-512 指令：`aes` 的 VAES512 后端被静态编入**（`scripts/ci-build-native.ts`、`crates/pi-natives/Cargo.toml` 引入的 `pdf-inspector` → `lopdf` → `aes 0.9.3`）：新增 PDF 依赖后 `native_linux` 挂在 ISA 契约上（`cornfield_natives.linux-x64-baseline.node` 与 `-modern.node` 都报 AVX-512）—— 反汇编出来是 `vbroadcasti32x4 …,%zmm0`，正是 `aes-0.9.3/src/backends/x86_vaes512/encdec.rs::broadcast_keys` 的指令。该后端只在运行时 CPU 探测后才执行，但代码本身无条件编入 x86_64 产物；且因为它在 const 泛型分发后面，实例化进的是**调用方**的 codegen unit，所以在 `aes` 自己的目标文件里看不到 —— 本地对 x86_64-unknown-linux-gnu 实测：不加 cfg 时调用方目标文件带 5 条 AVX-512 指令，加 cfg 后为 0 条。两个 x64 variant 的 `RUSTFLAGS` 现加 `--cfg aes_backend="soft"`（`aes` 官方为此提供的开关，也是唯一能把 512 位模块整个移出产物的办法）。代价：这两个 variant 失去 AES-NI/VAES，只影响加密 PDF 的解密速度；variant 产物只是 linux-x64 测试用 addon，出货的 darwin-arm64 addon 不走 variant 路径、仍保留指令集加速。
+
 ## [1.1.4] - 2026-09-12
 
 ### Added
