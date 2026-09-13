@@ -86,6 +86,35 @@ if (!isCrossCompile && !Bun.env.RUSTFLAGS) {
 	}
 }
 
+/**
+ * linux-x64 addons must not contain AVX-512 (scripts/ci-release-verify-natives.ts
+ * enforces it), and `aes` 0.9 compiles its VAES512 backend into every x86_64
+ * build: the module is reached only through runtime CPU detection, but the
+ * instructions land in the artifact either way. Neither `-C target-cpu` nor
+ * `-C target-feature=-avx512*` suppresses a `#[target_feature(enable =
+ * "avx512f")]` body; forcing `aes`'s soft backend is its documented knob for
+ * this, and the only one that keeps the 512-bit module out of the binary.
+ *
+ * Measured 2026-09-13: adding `pdf-inspector` (→ `lopdf` → `aes`) broke the
+ * native job on `vbroadcasti32x4 … %zmm0`, the opcode of
+ * `aes-0.9.3/src/backends/x86_vaes512/encdec.rs::broadcast_keys`. That code sits
+ * behind a const-generic dispatch and is instantiated into the *calling* crate's
+ * codegen unit, so it never shows up in `aes`'s own object file — verified on an
+ * x86_64-unknown-linux-gnu build: without this cfg the caller's object carries 5
+ * AVX-512 instructions, with it, zero.
+ *
+ * Scoped to linux-x64 on purpose: that is the platform the ISA contract covers,
+ * and the shipped darwin-arm64 addon keeps its intrinsics. The cost is AES-NI/
+ * VAES on linux-x64 (encrypted-PDF decryption only), which is a test-only
+ * artifact. Applied on every build path, not just the TARGET_VARIANTS one: a
+ * host build on linux-x64 is verified by the same contract, so a variant-only
+ * cfg would leave local linux developers facing a gate they cannot pass.
+ */
+const AES_SOFT_BACKEND_CFG = '--cfg aes_backend="soft"';
+if (targetPlatform === "linux" && targetArch === "x64") {
+	Bun.env.RUSTFLAGS = Bun.env.RUSTFLAGS ? `${Bun.env.RUSTFLAGS} ${AES_SOFT_BACKEND_CFG}` : AES_SOFT_BACKEND_CFG;
+}
+
 async function cleanupStaleTemps(dir: string): Promise<void> {
 	try {
 		const entries = await fs.readdir(dir);
