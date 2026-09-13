@@ -6,7 +6,7 @@ use std::{
 };
 
 use ast_grep_core::{
-	Language, MatchStrictness, matcher::Pattern, source::Edit, tree_sitter::LanguageExt,
+	Doc, Language, MatchStrictness, Node, matcher::Pattern, source::Edit, tree_sitter::LanguageExt,
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -250,6 +250,17 @@ fn resolve_language(lang: Option<&str>, file_path: &Path) -> Result<SupportLang>
 			file_path.display()
 		))
 	})
+}
+
+/// Returns true when the parse tree contains error or missing nodes.
+///
+/// tree-sitter represents unclosed delimiters as *missing* nodes rather than
+/// *error* nodes, so a check that only tests `is_error()` silently accepts
+/// syntactically incomplete sources. Both classes must be treated as "did not
+/// parse cleanly" for search/rewrite safety and `summarize_code`'s `parsed`
+/// flag.
+fn has_parse_issue<D: Doc>(root: &Node<'_, D>) -> bool {
+	root.dfs().any(|node| node.is_error() || node.is_missing())
 }
 
 /// Returns true if the file's extension resolves to a supported language.
@@ -651,9 +662,9 @@ pub fn ast_grep(options: AstFindOptions<'_>) -> task::Promise<AstFindResult> {
 			}
 
 			let ast = language.ast_grep(source);
-			if ast.root().dfs().any(|node| node.is_error()) {
+			if has_parse_issue(&ast.root()) {
 				parse_errors.push(format!(
-					"{}: parse error (syntax tree contains error nodes)",
+					"{}: parse error (syntax tree contains error or missing nodes)",
 					candidate.display_path
 				));
 			}
@@ -806,9 +817,9 @@ pub fn ast_edit(options: AstReplaceOptions<'_>) -> task::Promise<AstReplaceResul
 			};
 
 			let ast = language.ast_grep(&source);
-			if ast.root().dfs().any(|node| node.is_error()) {
+			if has_parse_issue(&ast.root()) {
 				let parse_issue = format!(
-					"{}: parse error (syntax tree contains error nodes)",
+					"{}: parse error (syntax tree contains error or missing nodes)",
 					candidate.display_path
 				);
 				if fail_on_parse_error {
@@ -907,6 +918,117 @@ pub fn ast_edit(options: AstReplaceOptions<'_>) -> task::Promise<AstReplaceResul
 			parse_errors: (!parse_errors.is_empty()).then_some(parse_errors),
 			changes,
 		})
+	})
+}
+
+/// Input for `summarizeCode`: source text and an optional path used to infer
+/// the language when `lang` is not provided.
+#[napi(object)]
+pub struct SummarizeCodeOptions {
+	/// Source code to parse and summarize.
+	pub code:      String,
+	/// Path whose extension is used to infer the language.
+	pub path:      Option<String>,
+	/// Language override; otherwise inferred from `path`.
+	pub lang:      Option<String>,
+	/// Maximum number of kind buckets to return (default 20).
+	pub max_kinds: Option<u32>,
+}
+
+/// Count of nodes sharing one syntax-tree kind.
+#[napi(object)]
+pub struct SummarizeCodeKindCount {
+	/// Syntax-tree node kind (e.g. `function_declaration`).
+	pub kind:  String,
+	/// Number of nodes with that kind.
+	pub count: u32,
+}
+
+/// One parse diagnostic: an error or missing node.
+#[napi(object)]
+pub struct SummarizeCodeDiagnostic {
+	/// `error` or `missing`.
+	pub kind:         String,
+	/// The node's syntax-tree kind.
+	pub node_kind:    String,
+	/// 1-based start line.
+	pub start_line:   u32,
+	/// 1-based start column.
+	pub start_column: u32,
+}
+
+/// Structural summary of a source snippet, plus whether it parsed cleanly.
+#[napi(object)]
+pub struct SummarizeCodeResult {
+	/// False when the tree contains error or missing nodes.
+	pub parsed:      bool,
+	/// Canonical language name (e.g. `typescript`).
+	pub language:    String,
+	/// Total number of nodes in the tree.
+	pub node_count:  u32,
+	/// Distinct syntax-tree kinds of the top-level (depth-1) nodes.
+	pub top_level:   Vec<String>,
+	/// Most-frequent node kinds, sorted by descending count.
+	pub kinds:       Vec<SummarizeCodeKindCount>,
+	/// Error/missing node diagnostics; `None` when `parsed` is true.
+	pub diagnostics: Option<Vec<SummarizeCodeDiagnostic>>,
+}
+
+/// Parse `code` and return whether it parsed cleanly together with a compact
+/// structural summary. Serves as the shared foundation for "can we parse"
+/// checks and structural summarization.
+#[napi]
+pub fn summarize_code(options: SummarizeCodeOptions) -> Result<SummarizeCodeResult> {
+	let SummarizeCodeOptions { code, path, lang, max_kinds } = options;
+	let max_kinds = max_kinds.unwrap_or(20).max(1) as usize;
+	let lang_str = lang.as_deref().map(str::trim).filter(|v| !v.is_empty());
+	let file_path = PathBuf::from(path.as_deref().unwrap_or("").trim());
+	let language = resolve_language(lang_str, &file_path)?;
+	let language_name = language.canonical_name().to_string();
+	let ast = language.ast_grep(&code);
+	let root = ast.root();
+
+	let top_level = root
+		.children()
+		.map(|node| node.kind().into_owned())
+		.collect::<Vec<_>>();
+
+	let mut node_count = 0u32;
+	let mut diagnostics = Vec::new();
+	let mut kind_counts: HashMap<String, u32> = HashMap::new();
+	for node in root.dfs() {
+		node_count = node_count.saturating_add(1);
+		let node_kind = node.kind().into_owned();
+		kind_counts
+			.entry(node_kind.clone())
+			.and_modify(|count| *count = count.saturating_add(1))
+			.or_insert(1);
+		if node.is_error() || node.is_missing() {
+			let start = node.start_pos();
+			diagnostics.push(SummarizeCodeDiagnostic {
+				kind: if node.is_error() { "error" } else { "missing" }.to_string(),
+				node_kind,
+				start_line: to_u32(start.line().saturating_add(1)),
+				start_column: to_u32(start.column(&node).saturating_add(1)),
+			});
+		}
+	}
+
+	let mut kinds: Vec<_> = kind_counts.into_iter().collect();
+	kinds.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+	let kinds = kinds
+		.into_iter()
+		.take(max_kinds)
+		.map(|(kind, count)| SummarizeCodeKindCount { kind, count })
+		.collect::<Vec<_>>();
+
+	Ok(SummarizeCodeResult {
+		parsed: diagnostics.is_empty(),
+		language: language_name,
+		node_count,
+		top_level,
+		kinds,
+		diagnostics: (!diagnostics.is_empty()).then_some(diagnostics),
 	})
 }
 
@@ -1042,5 +1164,53 @@ mod tests {
 			Edit::<String> { position: 2, deleted_length: 1, inserted_text: b"y".to_vec() },
 		];
 		assert!(apply_edits(source, &edits).is_err());
+	}
+	#[test]
+	fn unclosed_brace_typescript_is_parse_issue() {
+		let ast = SupportLang::TypeScript.ast_grep("function foo() {\n  return 1;\n");
+		assert!(has_parse_issue(&ast.root()), "unclosed brace must be a parse issue");
+	}
+
+	#[test]
+	fn unclosed_brace_produces_missing_node() {
+		// Guards the is_missing() arm: tree-sitter represents the unterminated
+		// block as a MISSING `}` node, which an is_error()-only check misses.
+		let ast = SupportLang::TypeScript.ast_grep("function foo() {\n  return 1;\n");
+		assert!(
+			ast.root().dfs().any(|node| node.is_missing()),
+			"unclosed brace must surface as a MISSING node"
+		);
+	}
+
+	#[test]
+	fn complete_typescript_file_is_not_parse_issue() {
+		let ast = SupportLang::TypeScript.ast_grep("function foo() {\n  return 1;\n}\n");
+		assert!(!has_parse_issue(&ast.root()), "complete file must not be flagged");
+	}
+
+	#[test]
+	fn summarize_code_distinguishes_broken_from_complete() {
+		let broken = summarize_code(SummarizeCodeOptions {
+			code:      "function foo() {\n  return 1;\n".to_string(),
+			path:      Some("sample.ts".to_string()),
+			lang:      None,
+			max_kinds: None,
+		})
+		.expect("summarizing a broken file should succeed");
+		assert!(!broken.parsed, "unclosed brace must report parsed=false");
+		assert_eq!(broken.language, "typescript");
+		assert!(broken.diagnostics.is_some());
+
+		let complete = summarize_code(SummarizeCodeOptions {
+			code:      "function foo() {\n  return 1;\n}\n".to_string(),
+			path:      Some("sample.ts".to_string()),
+			lang:      None,
+			max_kinds: None,
+		})
+		.expect("summarizing a complete file should succeed");
+		assert!(complete.parsed, "complete file must report parsed=true");
+		assert!(complete.diagnostics.is_none());
+		assert!(complete.node_count > 0);
+		assert!(!complete.top_level.is_empty());
 	}
 }
