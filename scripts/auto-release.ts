@@ -9,16 +9,23 @@
  *   - major:   manual only, via `bun scripts/release.ts <X>.0.0`
  *
  * Skips entirely when main has no commits beyond the latest v* tag (no empty
- * releases). On a change: bumps versions, finalizes CHANGELOGs, commits,
+ * releases). Refuses to run when the tree already declares a version at or
+ * beyond the one it computed — see step 2b.
+ *
+ * On a change: bumps versions, finalizes CHANGELOGs, commits,
  * pushes main, tags v<next> and pushes the tag — the tag push runs the normal
  * full release pipeline (native matrix → release_binary → release_desktop →
  * release).
  *
  * Requires a PAT with `contents: write` in GH_TOKEN (repo secret
  * AUTO_RELEASE_TOKEN); GITHUB_TOKEN pushes do not re-trigger workflows.
+ *
+ * The commit it makes is attributed to the identity
+ * `.github/workflows/nightly.yml` configures; a runner has none by default,
+ * and assuming otherwise took the job down two nights in a row.
  */
 import { $, Glob } from "bun";
-import { bumpRepoVersions } from "./version-bump";
+import { bumpRepoVersions, compareVersions, readRepoVersion } from "./version-bump";
 
 const repoRoot = process.cwd();
 const isDryRun = process.argv.includes("--dry-run");
@@ -99,6 +106,23 @@ const isWeeklyMinor = bjDow === "7";
 const [major, minor, patch] = parseVersion(latestTag);
 const nextVersion = isWeeklyMinor ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
 console.log(`  cadence: ${isWeeklyMinor ? "weekly (minor)" : "daily (patch)"} → next: v${nextVersion}`);
+
+// 2b. The tag says what shipped; the tree says what is staged. They part ways
+//     when a manual release bumps the tree and dies before tagging it — exactly
+//     what v1.1.4's first attempt did (2026-09-12: preflight failure, tree at
+//     1.1.4, latest tag still v1.1.1). Measuring only against the tag would then
+//     walk every version file backwards and tag a release labelled lower than
+//     its own source. Refuse, and name both ways out.
+const declaredVersion = await readRepoVersion(repoRoot);
+if (compareVersions(nextVersion, declaredVersion) <= 0) {
+	console.error(
+		`Error: next version v${nextVersion} (from tag ${latestTag}) is not ahead of the v${declaredVersion} the tree declares.`,
+	);
+	console.error("  A manual release bumped the tree without tagging the bumped commit.");
+	console.error(`  Recover by tagging it (git tag v${declaredVersion} && git push origin v${declaredVersion}),`);
+	console.error("  or by reverting the bump on main. Both need a human — this script cannot pick.");
+	process.exit(1);
+}
 
 // 3. Bump package versions, root catalog pins and the Rust workspace version
 //    (shared with scripts/release.ts — see scripts/version-bump.ts)

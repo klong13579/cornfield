@@ -66,6 +66,42 @@ export async function bumpRepoVersions(repoRoot: string, version: string): Promi
 	return packages.result;
 }
 
+/**
+ * The version the tree currently declares.
+ *
+ * Read from the `[workspace.package]` block, one of the three places a bump
+ * writes — so it is exactly the version the next bump has to beat.
+ */
+export async function readRepoVersion(repoRoot: string): Promise<string> {
+	const file = path.join(repoRoot, "Cargo.toml");
+	return cargoWorkspaceVersion((await Bun.file(file).text()).split("\n"), file).version;
+}
+
+/** The strict `X.Y.Z` shape every version on the release train has. */
+const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+
+function parseVersion(version: string): [number, number, number] {
+	const match = RELEASE_VERSION.exec(version);
+	if (!match) throw new Error(`Not a release version: "${version}"`);
+	return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/**
+ * Compare two release versions: negative when `a` precedes `b`.
+ *
+ * Strict about `X.Y.Z` on purpose. This comparison is what an unattended
+ * release decides "is this version ahead?" with; a tolerant parse would let
+ * `1.1` and `1.1.0` land on opposite sides of the same gate depending on which
+ * caller asked.
+ */
+export function compareVersions(a: string, b: string): number {
+	const [aMajor, aMinor, aPatch] = parseVersion(a);
+	const [bMajor, bMinor, bPatch] = parseVersion(b);
+	if (aMajor !== bMajor) return aMajor - bMajor;
+	if (aMinor !== bMinor) return aMinor - bMinor;
+	return aPatch - bPatch;
+}
+
 async function planPackageVersions(
 	repoRoot: string,
 	version: string,
@@ -129,6 +165,20 @@ async function planCatalogPins(file: string, version: string): Promise<PlannedEd
 
 async function planCargoWorkspaceVersion(file: string, version: string): Promise<PlannedEdit> {
 	const lines = (await Bun.file(file).text()).split("\n");
+	const { line } = cargoWorkspaceVersion(lines, file);
+	const updated = [...lines];
+	updated[line] = `version = "${version}"`;
+	return { file, content: updated.join("\n") };
+}
+
+/**
+ * Locate the single `version` entry of `[workspace.package]`.
+ *
+ * Returns the line it sits on as well as the value: the bump rewrites that
+ * line, the nightly compares the next release against that value, and both have
+ * to agree on which line they are talking about.
+ */
+function cargoWorkspaceVersion(lines: readonly string[], file: string): { line: number; version: string } {
 	const header = lines.indexOf("[workspace.package]");
 	if (header === -1) throw new Error(`${file}: no [workspace.package] section`);
 	const nextSection = lines.findIndex((line, index) => index > header && line.startsWith("["));
@@ -144,9 +194,10 @@ async function planCargoWorkspaceVersion(file: string, version: string): Promise
 		);
 	}
 
-	const updated = [...lines];
-	updated[versionLines[0]] = `version = "${version}"`;
-	return { file, content: updated.join("\n") };
+	const line = versionLines[0];
+	const value = lines[line].match(/^version\s*=\s*"([^"]+)"/);
+	if (!value) throw new Error(`${file}:${line + 1}: version entry is not a quoted string`);
+	return { line, version: value[1] };
 }
 
 /**

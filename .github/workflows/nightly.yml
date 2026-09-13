@@ -10,6 +10,10 @@
 # Requires the AUTO_RELEASE_TOKEN repo secret: a PAT with `contents: write`.
 # GITHUB_TOKEN pushes do NOT re-trigger workflows, so a PAT is mandatory for
 # the tag push to start the release run.
+#
+# A failure also pings the DingTalk group robot (DINGTALK_RELEASE_WEBHOOK) —
+# this job failed for five consecutive nights (2026-09-07 … 09-11) with nothing
+# but a red run nobody watched.
 name: Nightly auto-release
 
 on:
@@ -31,7 +35,40 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3"
+      # `cargo generate-lockfile` (auto-release.ts step 4) resolves the workspace
+      # crates against the toolchain pinned in rust-toolchain.toml. A runner's
+      # preinstalled rustup default is not that toolchain, so install it the same
+      # way every Rust job in ci.yml does rather than assume it.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-04-29
+      # A fresh runner has no git identity. Without one, `git commit` dies with
+      # "fatal: empty ident name" — which is exactly how the nightly spent
+      # 2026-09-10 and 09-11 failing one line before it ever tagged anything.
+      # Identity is CI config, not script logic: a developer running
+      # auto-release.ts locally should commit under their own name.
+      - name: Configure git identity for the bump commit
+        run: |
+          git config user.name "cornfield-auto-release"
+          git config user.email "cornfield-auto-release@users.noreply.github.com"
       - name: Run auto-release (bump + commit + push main + tag)
         env:
           GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
         run: bun scripts/auto-release.ts
+
+  notify_failure:
+    needs: [auto_release]
+    if: failure()
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Notify nightly failure via DingTalk
+        env:
+          WEBHOOK: ${{ secrets.DINGTALK_RELEASE_WEBHOOK }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -z "$WEBHOOK" ]]; then
+            echo "DINGTALK_RELEASE_WEBHOOK secret not set; skipping notification"
+            exit 0
+          fi
+          body="{\"msgtype\":\"text\",\"text\":{\"content\":\"[cornfield] nightly 自动发版失败 ${RUN_URL}\"}}"
+          curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json' -d "$body"
