@@ -93,6 +93,11 @@ image = { version = "0.25", default-features = false, features = [
    "webp",
 ] }
 webp = "0.3"
+resvg = { version = "0.45", default-features = false, features = [
+   "text",
+   "raster-images",
+] }
+pdf-inspector = "1.19"
 arboard = { version = "3.5.0", features = ["wayland-data-control"], optional = true }
 maudio = { version = "0.1.6", optional = true }
 flume = "0.11"

@@ -429,6 +429,9 @@ export declare enum Encoding {
  */
 export declare function executeShell(options: ShellExecuteOptions, onChunk?: ((error: Error | null, chunk: string) => void) | undefined | null): Promise<ShellExecuteResult>
 
+/** Extract text and metadata from a PDF document given as bytes. */
+export declare function extractPdfText(bytes: Uint8Array): Promise<PdfExtractResult>
+
 /**
  * Extract the before/after slices around an overlay region.
  *
@@ -944,6 +947,20 @@ export declare function parseKey(data: string, kittyProtocolActive: boolean): st
  */
 export declare function parseKittySequence(data: string): ParsedKittyResult | null
 
+/** Extracted text and metadata from a PDF document. */
+export interface PdfExtractResult {
+  /** Extracted text (markdown-flavored when structure detection produced it). */
+  text: string
+  /** Number of pages. */
+  pageCount: number
+  /** Detected PDF type (e.g. `TextBased`, `Scanned`). */
+  pdfType: string
+  /** Document title from PDF metadata, when available. */
+  title?: string
+  /** True when broken font encodings were detected (garbled text). */
+  hasEncodingIssues: boolean
+}
+
 /** Probe whether `ProjFS` overlay virtualization can be started on this system. */
 export declare function projfsOverlayProbe(): ProjfsOverlayProbeResult
 
@@ -997,6 +1014,15 @@ export interface PtyStartOptions {
   /** PTY row count. */
   rows?: number
 }
+
+/**
+ * Rasterize an SVG document to PNG bytes at its intrinsic size.
+ *
+ * Font loading is left to the calling layer: this primitive parses and
+ * renders vector content, so text glyphs only appear once a font database is
+ * wired in.
+ */
+export declare function rasterizeSvg(bytes: Uint8Array): Promise<Array<number>>
 
 /**
  * Read an image from the system clipboard.
@@ -1184,6 +1210,64 @@ export interface SliceResult {
  * width.
  */
 export declare function sliceWithWidth(line: string, startCol: number, length: number, strict: boolean | undefined | null, tabWidth: number): SliceResult
+
+/**
+ * Parse `code` and return whether it parsed cleanly together with a compact
+ * structural summary. Serves as the shared foundation for "can we parse"
+ * checks and structural summarization.
+ */
+export declare function summarizeCode(options: SummarizeCodeOptions): SummarizeCodeResult
+
+/** One parse diagnostic: an error or missing node. */
+export interface SummarizeCodeDiagnostic {
+  /** `error` or `missing`. */
+  kind: string
+  /** The node's syntax-tree kind. */
+  nodeKind: string
+  /** 1-based start line. */
+  startLine: number
+  /** 1-based start column. */
+  startColumn: number
+}
+
+/** Count of nodes sharing one syntax-tree kind. */
+export interface SummarizeCodeKindCount {
+  /** Syntax-tree node kind (e.g. `function_declaration`). */
+  kind: string
+  /** Number of nodes with that kind. */
+  count: number
+}
+
+/**
+ * Input for `summarizeCode`: source text and an optional path used to infer
+ * the language when `lang` is not provided.
+ */
+export interface SummarizeCodeOptions {
+  /** Source code to parse and summarize. */
+  code: string
+  /** Path whose extension is used to infer the language. */
+  path?: string
+  /** Language override; otherwise inferred from `path`. */
+  lang?: string
+  /** Maximum number of kind buckets to return (default 20). */
+  maxKinds?: number
+}
+
+/** Structural summary of a source snippet, plus whether it parsed cleanly. */
+export interface SummarizeCodeResult {
+  /** False when the tree contains error or missing nodes. */
+  parsed: boolean
+  /** Canonical language name (e.g. `typescript`). */
+  language: string
+  /** Total number of nodes in the tree. */
+  nodeCount: number
+  /** Distinct syntax-tree kinds of the top-level (depth-1) nodes. */
+  topLevel: Array<string>
+  /** Most-frequent node kinds, sorted by descending count. */
+  kinds: Array<SummarizeCodeKindCount>
+  /** Error/missing node diagnostics; `None` when `parsed` is true. */
+  diagnostics?: Array<SummarizeCodeDiagnostic>
+}
 
 /**
  * Check if a language is supported for highlighting.

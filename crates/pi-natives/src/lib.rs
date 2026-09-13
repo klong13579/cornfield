@@ -45,6 +45,8 @@ pub mod image;
 pub mod keys;
 pub mod language;
 
+pub mod pdf;
+
 pub mod power;
 
 pub mod prof;
@@ -55,6 +57,8 @@ pub mod ps;
 #[cfg(feature = "full")]
 pub mod pty;
 pub mod shell;
+pub mod svg;
+
 pub mod task;
 pub mod text;
 pub mod tokens;
