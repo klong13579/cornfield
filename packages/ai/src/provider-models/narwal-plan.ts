@@ -658,9 +658,16 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 			mode: "effort",
 			minLevel: Effort.Low,
 			maxLevel: Effort.XHigh,
+			// Always-thinking: only reasoning_effort low/high/max are accepted, and
+			// the session default (`medium`) is rejected with a 400 on every call.
+			// A contiguous range would advertise medium as supported; the explicit
+			// set clamps it (medium -> low) before it reaches the wire.
+			levels: [Effort.Low, Effort.High, Effort.XHigh],
 		},
 		compat: {
 			supportsDeveloperRole: false,
+			// `xhigh` is outside the upstream vocabulary; it travels as `max`.
+			reasoningEffortMap: { xhigh: "max" },
 		},
 	},
 	{

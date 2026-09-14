@@ -13,6 +13,7 @@ import {
 import type { Api, Model, Provider } from "@cornfield/ai/types";
 import { getBundledModel } from "../src/models";
 import MODELS from "../src/models.json" with { type: "json" };
+import { resolveOpenAICompat } from "../src/providers/openai-completions-compat";
 
 function createModel<TApi extends Api>(overrides: {
 	id: string;
@@ -530,32 +531,45 @@ describe("model thinking runtime helpers", () => {
 });
 
 describe("explicit thinking level sets (non-contiguous upstream support)", () => {
-	const CATALOG_MODEL_ID = "glm-5.3-flash";
+	// Both glm-5.3 variants are always-thinking and accept low/high/max only; a
+	// session default of `medium` is rejected by the upstream on every call.
+	const EXPLICIT_SET_MODEL_IDS = ["glm-5.3", "glm-5.3-flash"];
 
-	it("ships glm-5.3-flash with the explicit low/high/xhigh level set", () => {
-		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID);
-		expect(model).toBeDefined();
-		expect(model!.reasoning).toBe(true);
-		expect(model!.thinking?.levels).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
+	for (const CATALOG_MODEL_ID of EXPLICIT_SET_MODEL_IDS) {
+		it(`ships ${CATALOG_MODEL_ID} with the explicit low/high/xhigh level set`, () => {
+			const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID);
+			expect(model).toBeDefined();
+			expect(model!.reasoning).toBe(true);
+			expect(model!.thinking?.levels).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
+		});
+
+		it(`getSupportedEfforts returns the explicit set without medium for ${CATALOG_MODEL_ID}`, () => {
+			const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
+			expect(getSupportedEfforts(model)).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
+		});
+
+		it(`clamps medium down to low instead of sending a rejected effort for ${CATALOG_MODEL_ID}`, () => {
+			const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
+			expect(clampThinkingLevelForModel(model, Effort.Medium)).toBe(Effort.Low);
+			expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.Low);
+			expect(clampThinkingLevelForModel(model, Effort.High)).toBe(Effort.High);
+			expect(clampThinkingLevelForModel(model, Effort.XHigh)).toBe(Effort.XHigh);
+		});
+
+		it(`requireSupportedEffort rejects medium with the explicit set for ${CATALOG_MODEL_ID}`, () => {
+			const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
+			expect(() => requireSupportedEffort(model, Effort.Medium)).toThrow(/Supported efforts: low, high, xhigh/);
+		});
+	}
+
+	it("maps xhigh to the upstream 'max' vocabulary for glm-5.3, which rejects 'xhigh'", () => {
+		// glm-5.3 accepts only low/high/max upstream; glm-5.3-flash accepts
+		// `xhigh` verbatim, so only glm-5.3 carries the map.
+		const model = getBundledModel("narwal-plan", "glm-5.3")! as Model<"openai-completions">;
+		expect(resolveOpenAICompat(model).reasoningEffortMap.xhigh).toBe("max");
 	});
 
-	it("getSupportedEfforts returns the explicit set without medium", () => {
-		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
-		expect(getSupportedEfforts(model)).toEqual([Effort.Low, Effort.High, Effort.XHigh]);
-	});
-
-	it("clamps medium down to low instead of sending a rejected effort", () => {
-		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
-		expect(clampThinkingLevelForModel(model, Effort.Medium)).toBe(Effort.Low);
-		expect(clampThinkingLevelForModel(model, Effort.Minimal)).toBe(Effort.Low);
-		expect(clampThinkingLevelForModel(model, Effort.High)).toBe(Effort.High);
-		expect(clampThinkingLevelForModel(model, Effort.XHigh)).toBe(Effort.XHigh);
-	});
-
-	it("requireSupportedEffort rejects medium with the explicit set", () => {
-		const model = getBundledModel("narwal-plan", CATALOG_MODEL_ID)!;
-		expect(() => requireSupportedEffort(model, Effort.Medium)).toThrow(/Supported efforts: low, high, xhigh/);
-	});
+	const CATALOG_MODEL_ID = EXPLICIT_SET_MODEL_IDS[0]!;
 
 	it("enrichModelThinking preserves the explicit set instead of re-inferring a range", () => {
 		const model = enrichModelThinking({
