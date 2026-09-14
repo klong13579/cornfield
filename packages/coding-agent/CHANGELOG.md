@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-09-14
+
 ### Added
 
 - **`write` 的对象/数组 content 只进 JSON 目标，且现在提示词里说得出来**（`src/tools/write.ts`、`src/prompts/tools/write.md`、`test/write-content-object.test.ts`）：`content` 为 `string | object | array`，目标扩展名 ∈ {`.json`, `.jsonc`, `.json5`, `.ipynb`, `.webmanifest`} 时直接序列化写入（缩进沿用目标文件既有缩进，新文件用 tab），其余目标仍只吃字符串。`.jsonl` 明确不在名单里 —— 一行一个值是调用方的决定，漂亮打印出来的文件不再是 JSONL。对象内容的报错现按目标点名：archive 条目（`a.zip:entry`）与 SQLite 行（`db.sqlite:table`）给「自己 JSON-encode 后传文本」这一条真正可行的写法，其他目标给「改走 JSON 路径，或自己 stringify」。这条能力随 T6 在 v1.2.2 出货，但当时没进 changelog、提示词也一个字没写（模型选传参方式主要靠提示词，schema description 是次要通道），本次补齐并同步。

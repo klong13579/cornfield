@@ -1,7 +1,7 @@
 {
 	"type": "module",
 	"name": "@cornfield/utils",
-	"version": "1.2.2",
+	"version": "1.2.3",
 	"description": "Shared utilities for CornField packages",
 	"homepage": "https://github.com/klong13579/cornfield",
 	"author": "Can Boluk",

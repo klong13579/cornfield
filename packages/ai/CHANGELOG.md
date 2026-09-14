@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-09-14
+
 ### Added
 
 - **`validateAgainstSchema(schema, value)`：对纯 JSON Schema 的校验入口**（`src/utils/validation.ts`、`test/validate-against-schema.test.ts`）：复用 `validateToolArguments` 同一个 AJV 实例与编译缓存，返回格式化后的问题列表（空数组即通过）。动机见 coding-agent 侧的修复：设备执行路径曾用 TypeBox `Value.Check` 校验参数，而该 API 只认 TypeBox 自己的 `Kind` 符号、对 MCP server 广告的纯 JSON Schema 直接抛 `Unknown type`（实测 17/17 全抛）。同一个 `parameters` 字段的两个来源（TypeBox 构建 / `sanitizeSchemaForMCP` 消毒）现共用 AJV 一个校验器。
