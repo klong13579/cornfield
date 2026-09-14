@@ -437,7 +437,9 @@ describe("Anthropic request fingerprint alignment", () => {
 
 	it("marks only the Anthropic strict allowlist strict", async () => {
 		const tools: Tool[] = [
-			...(["bash", "python", "edit", "find"] as const).map(name => ({
+			// Canonical tool names that the strict allowlist carries (`find` was
+			// renamed to `glob` in 1.1.4; the allowlist compares names literally).
+			...(["bash", "python", "edit", "glob"] as const).map(name => ({
 				name,
 				description: `${name} tool`,
 				strict: true,
@@ -447,7 +449,10 @@ describe("Anthropic request fingerprint alignment", () => {
 					required: ["requiredValue"],
 				} as unknown as TSchema,
 			})),
-			...(["write", "grep", "read", "task", "todo_write", "web_search", "ast_grep"] as const).map(name => ({
+			// Non-allowlisted names stay non-strict. `find` / `todo_write` are legacy
+			// aliases: the allowlist does not resolve aliases, so they must not be
+			// marked strict under their old spelling.
+			...(["write", "grep", "read", "task", "todo_write", "web_search", "ast_grep", "find"] as const).map(name => ({
 				name,
 				description: `${name} tool`,
 				strict: true,
@@ -473,7 +478,7 @@ describe("Anthropic request fingerprint alignment", () => {
 
 		const strictNames = (payload.tools ?? []).filter(tool => tool.strict === true).map(tool => tool.name);
 
-		expect(strictNames).toEqual(["bash", "python", "edit", "find"]);
+		expect(strictNames).toEqual(["bash", "python", "edit", "glob"]);
 		expect(payload.tools?.find(tool => tool.name === "bash")?.input_schema?.required).toEqual(["requiredValue"]);
 	});
 

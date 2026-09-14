@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **Anthropic strict 白名单用例跟随 `find` → `glob` 改名**（`test/anthropic-alignment.test.ts`）：1.1.4 把工具名归一化后，代码侧 `ANTHROPIC_STRICT_TOOL_ALLOWLIST`（`src/providers/anthropic.ts:1820`）已是 `glob`，而该用例的 fixture 仍用旧名 `find`——断言 `strictNames` 恒缺失一项，长期红。现 fixture 与新名对齐，并把 `find` 归入「非白名单、不得标记 strict」那一组（旧拼写不会被解析成新名，写下来免得下次改名再漏）。
+
 - **`narwal-plan/glm-5.3` 的思考等级声明补成显式集合，并把 `xhigh` 映射为上游的 `max`**（`src/provider-models/narwal-plan.ts`、`src/models.json` 重新生成、`test/model-thinking.test.ts`）：glm-5.3 是始终思考模型，上游只接受 `reasoning_effort ∈ low|high|max`；而它的 thinking 此前是推断出的连续区间（minimal..xhigh），把会话默认的 `medium` 也当成合法值原样下发 —— 每次调用 400「该模型始终思考，不支持关闭思考；请使用 low、high 或 max」。实测（2026-09-14 直打 `coder.narwal.com/v1/chat/completions`）：`low`/`high`/`max` = 200，`medium`/`xhigh` = 400。现声明 `levels: [low, high, xhigh]`（`clampThinkingLevelForModel` 把 medium/minimal 夹成 low）+ `compat.reasoningEffortMap: { xhigh: "max" }`。同族对照实测：`glm-5.3-flash` **接受** `xhigh`（200）、只拒 `medium`，故不动；`glm-5`/`glm-5.1`/`glm-5.2`/`glm-5-turbo` 接受 `medium` 与 `xhigh`（均 200），不动。这是 2026-09-11 与 2026-09-14 两次 squad 事故中同一个 400 的根源：挂在该模型上的子会话**每一个模型调用**都失败（连「切模型」指令都执行不了），父侧只能看到它「活着且 idle」。
 	同时按生成流程重跑 `bun run generate-models`：除本条改动外还带入 101 个模型条目的上游元数据漂移（amazon-bedrock 46 / openrouter 37 / kilo 7 / narwal-plan 3 / 其他 8；无条目新增或删除）。上游漂移随重新生成一并落地，属生成文件的常态。
 
