@@ -2,11 +2,11 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
+import { validateAgainstSchema } from "@cornfield/ai/utils/validation";
 import type { Component } from "@cornfield/tui";
 import { Text } from "@cornfield/tui";
 import { isEnoent, isRecord, prompt, untilAborted } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
 import { unzipSync, zipSync } from "fflate";
 import { stripHashlinePrefixes } from "../edit";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
@@ -90,7 +90,22 @@ function stripWriteContent(session: ToolSession, content: string): { text: strin
 	return { text: cleaned.join("\n"), stripped: true };
 }
 
+/**
+ * JSON documents that may hold an object or array.
+ *
+ * `.jsonl` is deliberately absent: a JSONL file is one value per line, so
+ * pretty-printing an object or array into it would produce a file that is no
+ * longer JSONL. That target takes text, and the line structure stays the
+ * caller's decision.
+ */
 const JSON_SERIES_EXTENSIONS = new Set([".json", ".jsonc", ".json5", ".ipynb", ".webmanifest"]);
+
+/**
+ * Formats whose entire reason to exist is comments. Serializing an object into
+ * one goes through `JSON.stringify`, which cannot emit them — see
+ * `assertJsonCommentsSurvivable`.
+ */
+const COMMENT_BEARING_EXTENSIONS = new Set([".jsonc", ".json5"]);
 
 function isJsonSeriesTarget(writePath: string): boolean {
 	if (parseArchivePathCandidates(writePath).some(candidate => candidate.archivePath !== writePath)) return false;
@@ -107,21 +122,77 @@ function detectIndent(text: string): string {
 }
 
 async function serializeJsonContent(
+	writePath: string,
 	absolutePath: string,
 	content: Record<string, unknown> | unknown[],
 ): Promise<string> {
-	let indent = "\t";
+	let existing: string | undefined;
 	try {
-		const existing = await Bun.file(absolutePath).text();
-		indent = detectIndent(existing);
+		existing = await Bun.file(absolutePath).text();
 	} catch (error) {
 		if (!isEnoent(error)) throw error;
 	}
-	return `${JSON.stringify(content, null, indent)}\n`;
+	if (existing !== undefined) assertJsonCommentsSurvivable(writePath, existing);
+	return `${JSON.stringify(content, null, existing === undefined ? "\t" : detectIndent(existing))}\n`;
 }
 
-function objectContentError(content: Record<string, unknown> | unknown[]): ToolError {
+/**
+ * Whether JSONC/JSON5 source carries a `//` or `/*` comment outside a string.
+ *
+ * Scanned rather than regex-matched: `{"url": "http://example.com"}` contains
+ * the comment opener and is not a comment, so a text search would refuse a
+ * write that deletes nothing. Single-quoted strings count as strings for the
+ * same reason — JSON5 allows them, and `'http://…'` is the common shape.
+ */
+function containsJsonComments(text: string): boolean {
+	let inString = false;
+	let escaped = false;
+	for (let index = 0; index < text.length; index++) {
+		const char = text[index]!;
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (char === "\\") escaped = true;
+			else if (char === '"' || char === "'") inString = false;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			inString = true;
+			continue;
+		}
+		if (char === "/" && (text[index + 1] === "/" || text[index + 1] === "*")) return true;
+	}
+	return false;
+}
+
+/**
+ * Refuse to reserialize a commented `.jsonc`/`.json5` from an object or array.
+ *
+ * Comments are the only thing those formats add over `.json`, and
+ * `JSON.stringify` cannot emit them: writing an object over a commented file
+ * would delete information the writer never saw. Refusing leaves the file
+ * intact and names the one writing that survives.
+ */
+function assertJsonCommentsSurvivable(writePath: string, existing: string): void {
+	if (!COMMENT_BEARING_EXTENSIONS.has(path.extname(writePath.toLowerCase()))) return;
+	if (!containsJsonComments(existing)) return;
+	throw new ToolError(
+		`write content must be a string for ${path.basename(writePath)}: the file contains comments, and writing ` +
+			`an object or array would reserialize it through JSON.stringify, deleting them. ` +
+			`Pass the full file text, comments included, as a string.`,
+	);
+}
+
+function objectContentError(writePath: string, content: Record<string, unknown> | unknown[]): ToolError {
 	const kind = Array.isArray(content) ? "array" : "object";
+	const isArchiveEntry = parseArchivePathCandidates(writePath).some(candidate => candidate.archivePath !== writePath);
+	const isSqliteRow = parseSqlitePathCandidates(writePath).some(candidate => candidate.sqlitePath !== writePath);
+	if (isArchiveEntry || isSqliteRow) {
+		const target = isArchiveEntry ? "an archive entry" : "a SQLite row";
+		return new ToolError(
+			`write content must be a string for ${target}, but received an ${kind}. ` +
+				`JSON-encode it yourself and pass the text (e.g. content: JSON.stringify(...)).`,
+		);
+	}
 	return new ToolError(
 		`write content must be a string for non-JSON targets, but received an ${kind}. ` +
 			`Target a JSON path (.json/.jsonc/.json5/.ipynb/.webmanifest) to write the ${kind} directly, ` +
@@ -499,9 +570,9 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			if (typeof content !== "string") {
 				const deviceResult = await this.#writeXdDevice(path, content, signal, _onUpdate, context);
 				if (deviceResult) return deviceResult;
-				if (!isJsonSeriesTarget(path)) throw objectContentError(content);
+				if (!isJsonSeriesTarget(path)) throw objectContentError(path, content);
 				const absolutePath = resolvePlanPath(this.session, path);
-				content = await serializeJsonContent(absolutePath, content);
+				content = await serializeJsonContent(path, absolutePath, content);
 			}
 
 			// Strip hashline display prefixes (LINE+ID|) if the model copied them from read output
@@ -631,11 +702,9 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		if (!isRecord(args)) {
 			throw new ToolError("xd:// write content must be a JSON object of tool arguments");
 		}
-		if (!Value.Check(device.parameters, args)) {
-			const errors = Array.from(Value.Errors(device.parameters, args))
-				.map(e => `${e.path || "(root)"}: ${e.message}`)
-				.join("; ");
-			throw new ToolError(`Arguments do not match the wire schema of xd://${name}: ${errors}`);
+		const problems = validateAgainstSchema(device.parameters, args);
+		if (problems.length > 0) {
+			throw new ToolError(`Arguments do not match the wire schema of xd://${name}: ${problems.join("; ")}`);
 		}
 
 		const toolCallId = `xd-${crypto.randomUUID()}`;

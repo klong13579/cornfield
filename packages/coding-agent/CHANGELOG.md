@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`write` 的对象/数组 content 只进 JSON 目标，且现在提示词里说得出来**（`src/tools/write.ts`、`src/prompts/tools/write.md`、`test/write-content-object.test.ts`）：`content` 为 `string | object | array`，目标扩展名 ∈ {`.json`, `.jsonc`, `.json5`, `.ipynb`, `.webmanifest`} 时直接序列化写入（缩进沿用目标文件既有缩进，新文件用 tab），其余目标仍只吃字符串。`.jsonl` 明确不在名单里 —— 一行一个值是调用方的决定，漂亮打印出来的文件不再是 JSONL。对象内容的报错现按目标点名：archive 条目（`a.zip:entry`）与 SQLite 行（`db.sqlite:table`）给「自己 JSON-encode 后传文本」这一条真正可行的写法，其他目标给「改走 JSON 路径，或自己 stringify」。这条能力随 T6 在 v1.2.2 出货，但当时没进 changelog、提示词也一个字没写（模型选传参方式主要靠提示词，schema description 是次要通道），本次补齐并同步。
+
+### Changed
+
+- **8 个工具 prompt 按 `format-prompts` 规范化**（`src/prompts/tools/{apply-patch,atom,bash,hashline,patch,read,replace,vim}.md`）：补齐文件末尾换行、`...`→`…`、`[...]`→`[…]`。纯格式，无措辞或规则变化；`format-prompts --check` 现为全绿（此前这 8 个文件长期未过）。
+
+### Fixed
+
+- **MCP 工具经 `xd://` 执行恒失败，模型只看到一行 `Unknown type`**（`src/tools/write.ts`、`packages/ai/src/utils/validation.ts`、`scripts/verify-xdev-mounting.ts`、`packages/ai/test/validate-against-schema.test.ts`）：`write xd://mcp__…` 在 `#writeXdDevice` 里用 TypeBox 的 `Value.Check` 校验设备参数，而 TypeBox 0.34 的 `Value.Check` 按自己的 `Kind` 符号分派 —— 纯 JSON Schema 一律抛 `Unknown type`（实测：17/17 个 gitnexus 工具 schema 全抛，而内置设备 `xd://calc` 校验正常）。MCP 工具的 `parameters` 恰是纯 JSON Schema（`tool-bridge.ts` 的 `sanitizeSchemaForMCP(tool.inputSchema)` 再 `as TSchema` 强转一次），所以每个 MCP 设备调用都在到达 server 之前死掉，整个 MCP 设备层不可达。改用 `validateAgainstSchema`（AJV，直呼工具的路径本来就用它校验同一个 `parameters` 字段）：实测 17 个 schema 全部给出裁决、真实 gitnexus server 端到端 `list_repos`/`impact` 均有返回。门禁同步：`verify-xdev-mounting.ts` Case 6 的假 MCP 工具改用生产形态（`sanitizeSchemaForMCP` 的纯 schema）—— 它此前用 TypeBox 建 schema，恰好把这类缺陷放绿。
+
+- **`write` 用对象内容覆写带注释的 `.jsonc`/`.json5` 会静默删掉注释**（`src/tools/write.ts`、`test/write-content-object.test.ts`）：注释是这两种格式相对 `.json` 的全部增量，而 `JSON.stringify` 发不出来 —— 传对象会把整份文件重写、注释无声消失；这批改动之前根本没有这条损失路径（对象内容当时直接被拒）。现先扫描既有内容（跳过字符串字面量 —— `{"url": "http://x"}` 不箇注释，单引号按 JSON5 的字符串处理），命中注释即拒绝写入、原文件保持不动，报错指向唯一可行的写法：把完整文本按字符串传入。无注释的文件照旧直接序列化。
+
 ## [1.2.2] - 2026-09-13
 
 ### Fixed

@@ -837,6 +837,30 @@ function compileSchema(schema: object): import("ajv").ValidateFunction {
 	return validate;
 }
 
+/**
+ * Validate a value against a raw JSON Schema, returning the formatted problems
+ * (empty array when the value is valid).
+ *
+ * `parameters` reaches runtime from two origins: TypeBox builders (every
+ * built-in tool) and the JSON Schema an MCP server advertises, run through
+ * `sanitizeSchemaForMCP`. TypeBox's `Value.Check` dispatches on its own `Kind`
+ * symbol and throws `Unknown type` for the second origin — so a device call
+ * validated that way never reached the server. Measured 2026-09-14: every
+ * `write xd://mcp__…` returned the bare string `Unknown type`, while built-in
+ * devices (`xd://calc`) validated normally. AJV reads JSON Schema, which both
+ * origins are, and is the validator the direct tool-call path already applies
+ * to this same field.
+ */
+export function validateAgainstSchema(schema: object, value: unknown): string[] {
+	const validate = compileSchema(schema);
+	if (validate(value)) return [];
+	return (validate.errors ?? []).map(error => {
+		const missing = (error.params as { missingProperty?: string }).missingProperty;
+		const path = error.instancePath ? error.instancePath.replace(/^\//, "") : (missing ?? "(root)");
+		return `${path}: ${error.message ?? "invalid"}`;
+	});
+}
+
 const MAX_TYPE_COERCION_PASSES = 5;
 
 /**

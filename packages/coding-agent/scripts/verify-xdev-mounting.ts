@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validateToolArguments } from "@cornfield/ai";
+import { sanitizeSchemaForMCP } from "@cornfield/ai/utils/schema";
 import { Settings } from "@cornfield/coding-agent/config/settings";
 import { XdevProtocolHandler } from "@cornfield/coding-agent/internal-urls/xd-protocol";
 import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
@@ -29,7 +30,6 @@ import {
 	splitPostRegistrationMCPToolsForXdev,
 	XDEV_KEEP_TOP_LEVEL,
 } from "@cornfield/coding-agent/tools/xdev";
-import { Type } from "@sinclair/typebox";
 
 type Tool = Awaited<ReturnType<typeof createTools>>[number];
 
@@ -192,7 +192,16 @@ function fakeRegisteredTool(name: string, description: string): Tool {
 	return {
 		name,
 		description,
-		parameters: Type.Object({ query: Type.String() }),
+		// Mirrors tool-bridge.ts: an MCP tool's `parameters` are the server's own
+		// JSON Schema run through sanitizeSchemaForMCP, NOT a TypeBox type. The
+		// TypeBox-built stand-in this used to be kept a validator that throws
+		// `Unknown type` on a plain schema green, while every real
+		// `write xd://mcp__…` call died before reaching the server (2026-09-14).
+		parameters: sanitizeSchemaForMCP({
+			type: "object",
+			properties: { query: { type: "string" } },
+			required: ["query"],
+		}),
 		execute: async (_toolCallId: string, args: { query: string }) => ({
 			content: [{ type: "text", text: `executed ${name} (${args.query})` }],
 			details: {},

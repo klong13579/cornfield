@@ -99,4 +99,53 @@ describe("write object/array content", () => {
 		expect(message).toContain("path=xd://nope");
 		expect(message).toContain('"a":12345');
 	});
+
+	it("refuses to reserialize a commented .jsonc and leaves the file intact", async () => {
+		const dir = await makeTempDir();
+		const target = path.join(dir, "tsconfig.jsonc");
+		const original = '{\n\t// build settings\n\t"old": true\n}\n';
+		await Bun.write(target, original);
+		const tool = new WriteTool(createSession(dir));
+		const message = await captureError(tool.execute("call-1", { path: target, content: { name: "x" } }));
+		expect(message).toContain("contains comments");
+		expect(message).toContain("Pass the full file text");
+		expect(await Bun.file(target).text()).toBe(original);
+	});
+
+	it("does not mistake a // inside a string for a comment", async () => {
+		const dir = await makeTempDir();
+		const target = path.join(dir, "config.json5");
+		await Bun.write(target, "{\n  url: 'http://example.com',\n}\n");
+		const tool = new WriteTool(createSession(dir));
+		await tool.execute("call-1", { path: target, content: { url: "https://example.com" } });
+		const text = await Bun.file(target).text();
+		expect(JSON.parse(text)).toEqual({ url: "https://example.com" });
+		expect(text).toContain('\n  "url"');
+	});
+
+	it("names the archive entry as the string-only target", async () => {
+		const dir = await makeTempDir();
+		const tool = new WriteTool(createSession(dir));
+		const message = await captureError(
+			tool.execute("call-1", { path: "images.zip:meta.json", content: { width: 3 } }),
+		);
+		expect(message).toContain("must be a string for an archive entry");
+	});
+
+	it("names the SQLite row as the string-only target", async () => {
+		const dir = await makeTempDir();
+		const tool = new WriteTool(createSession(dir));
+		const message = await captureError(tool.execute("call-1", { path: "data.db:widgets", content: { width: 3 } }));
+		expect(message).toContain("must be a string for a SQLite row");
+	});
+
+	it("keeps .jsonl string-only, since one value per line is the caller's decision", async () => {
+		const dir = await makeTempDir();
+		const tool = new WriteTool(createSession(dir));
+		const message = await captureError(
+			tool.execute("call-1", { path: path.join(dir, "events.jsonl"), content: [{ a: 1 }] }),
+		);
+		expect(message).toContain("must be a string for non-JSON targets");
+		expect(message).toContain(".json/.jsonc/.json5/.ipynb/.webmanifest");
+	});
 });
