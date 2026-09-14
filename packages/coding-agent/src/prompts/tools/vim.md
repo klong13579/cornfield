@@ -1,5 +1,4 @@
 Vim-style `edit` mode. The tool name stays `edit`; every call requires `file`.
-
 - `{"file": "path"}` — view file.
 - `{"file": "path", "steps": [{"kbd": ["…"], "insert": "…"}]}` — edit file.
 
