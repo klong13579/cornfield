@@ -14,7 +14,7 @@
 
 - **MCP 工具经 `xd://` 执行恒失败，模型只看到一行 `Unknown type`**（`src/tools/write.ts`、`packages/ai/src/utils/validation.ts`、`scripts/verify-xdev-mounting.ts`、`packages/ai/test/validate-against-schema.test.ts`）：`write xd://mcp__…` 在 `#writeXdDevice` 里用 TypeBox 的 `Value.Check` 校验设备参数，而 TypeBox 0.34 的 `Value.Check` 按自己的 `Kind` 符号分派 —— 纯 JSON Schema 一律抛 `Unknown type`（实测：17/17 个 gitnexus 工具 schema 全抛，而内置设备 `xd://calc` 校验正常）。MCP 工具的 `parameters` 恰是纯 JSON Schema（`tool-bridge.ts` 的 `sanitizeSchemaForMCP(tool.inputSchema)` 再 `as TSchema` 强转一次），所以每个 MCP 设备调用都在到达 server 之前死掉，整个 MCP 设备层不可达。改用 `validateAgainstSchema`（AJV，直呼工具的路径本来就用它校验同一个 `parameters` 字段）：实测 17 个 schema 全部给出裁决、真实 gitnexus server 端到端 `list_repos`/`impact` 均有返回。门禁同步：`verify-xdev-mounting.ts` Case 6 的假 MCP 工具改用生产形态（`sanitizeSchemaForMCP` 的纯 schema）—— 它此前用 TypeBox 建 schema，恰好把这类缺陷放绿。
 
-- **`write` 用对象内容覆写带注释的 `.jsonc`/`.json5` 会静默删掉注释**（`src/tools/write.ts`、`test/write-content-object.test.ts`）：注释是这两种格式相对 `.json` 的全部增量，而 `JSON.stringify` 发不出来 —— 传对象会把整份文件重写、注释无声消失；这批改动之前根本没有这条损失路径（对象内容当时直接被拒）。现先扫描既有内容（跳过字符串字面量 —— `{"url": "http://x"}` 不箇注释，单引号按 JSON5 的字符串处理），命中注释即拒绝写入、原文件保持不动，报错指向唯一可行的写法：把完整文本按字符串传入。无注释的文件照旧直接序列化。
+- **`write` 用对象内容覆写带注释的 `.jsonc`/`.json5` 会静默删掉注释**（`src/tools/write.ts`、`test/write-content-object.test.ts`）：注释是这两种格式相对 `.json` 的全部增量，而 `JSON.stringify` 发不出来 —— 传对象会把整份文件重写、注释无声消失；这批改动之前根本没有这条损失路径（对象内容当时直接被拒）。现先扫描既有内容（跳过字符串字面量 —— `{"url": "http://x"}` 不算注释，单引号按 JSON5 的字符串处理），命中注释即拒绝写入、原文件保持不动，报错指向唯一可行的写法：把完整文本按字符串传入。无注释的文件照旧直接序列化。
 
 ## [1.2.2] - 2026-09-13
 
