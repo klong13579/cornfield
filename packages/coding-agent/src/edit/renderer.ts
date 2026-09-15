@@ -74,6 +74,25 @@ export interface EditToolDetails {
 	perFileResults?: EditToolPerFileResult[];
 }
 
+/**
+ * Fold a post-write validation note into the file's diagnostics so the tool
+ * result renders it next to the diff. A missing record still yields one carrying
+ * the note, so an adopted repair is never silent.
+ */
+export function withValidationNote(
+	diagnostics: FileDiagnosticsResult | undefined,
+	note: string,
+): FileDiagnosticsResult {
+	if (!diagnostics) {
+		return { server: "edit-validation", messages: [note], summary: note, errored: false };
+	}
+	return {
+		...diagnostics,
+		messages: [note, ...diagnostics.messages],
+		summary: diagnostics.summary ? `${note} ${diagnostics.summary}` : note,
+	};
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // TUI Renderer
 // ═══════════════════════════════════════════════════════════════════════════

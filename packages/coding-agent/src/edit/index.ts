@@ -91,10 +91,18 @@ import {
 import { executePatchSingle, type PatchEditEntry, type PatchParams, patchEditSchema } from "./modes/patch";
 import { executeReplaceSingle, type ReplaceEditEntry, type ReplaceParams, replaceEditSchema } from "./modes/replace";
 import { validateEditedFile } from "./post-write";
-import { type EditToolDetails, type EditToolPerFileResult, getLspBatchRequest, type LspBatchRequest } from "./renderer";
+import {
+	type EditToolDetails,
+	type EditToolPerFileResult,
+	getLspBatchRequest,
+	type LspBatchRequest,
+	withValidationNote,
+} from "./renderer";
 
 export { DEFAULT_EDIT_MODE, type EditMode, normalizeEditMode } from "../utils/edit-mode";
 export * from "./apply-patch";
+export * from "./auto-repair";
+export * from "./blackbox";
 export * from "./diff";
 export * from "./line-hash";
 export * from "./modes/apply-patch";
@@ -185,17 +193,6 @@ async function readOriginalContent(file: BunFile | undefined, dst: string): Prom
 	} catch {
 		return "";
 	}
-}
-
-function withValidationNote(diagnostics: FileDiagnosticsResult | undefined, note: string): FileDiagnosticsResult {
-	if (!diagnostics) {
-		return { server: "edit-validation", messages: [note], summary: note, errored: false };
-	}
-	return {
-		...diagnostics,
-		messages: [note, ...diagnostics.messages],
-		summary: diagnostics.summary ? `${note} ${diagnostics.summary}` : note,
-	};
 }
 
 function createEditWritethrough(session: ToolSession): WritethroughCallback {
