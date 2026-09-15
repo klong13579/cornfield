@@ -104,6 +104,7 @@ import {
 import { AgentSession } from "./session/agent-session";
 import { AuthStorage } from "./session/auth-storage";
 import { applyWindowing, convertToLlm } from "./session/messages";
+import { resolveSessionAgent } from "./session/session-agent";
 import { SessionManager } from "./session/session-manager";
 import { SkillWatcher } from "./session/skill-watcher";
 import { closeAllConnections } from "./ssh/connection-manager";
@@ -820,11 +821,29 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		setPreferredImageProvider(imageProvider);
 	}
 
+	// Resolve which Agent serves this session (WP4, §10) and record it in the header.
+	// A resumed session keeps the Agent already recorded there (its resolution is history);
+	// a fresh session resolves from persisted declarations. No UI or current-selection state
+	// is consulted, so a Schedule, a gateway webhook and a session restore all reach the same
+	// answer from the same facts.
+	const sessionAgent = await logger.time("sessionAgent", () =>
+		resolveSessionAgent({
+			cwd,
+			processAgentDir: agentDir,
+			sessionHeader: options.sessionManager?.getHeader() ?? null,
+		}),
+	);
 	const sessionManager =
 		options.sessionManager ??
 		logger.time("sessionManager", () =>
-			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
+			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir), undefined, sessionAgent.ref),
 		);
+	// A resumed session, or one created by a caller that had no resolution to pass
+	// (`--session-dir`), keeps its own header: record the resolution on it so the session
+	// and its forks stop depending on a re-resolution. No-op when an Agent is already there.
+	if (options.sessionManager) {
+		await sessionManager.setResolvedAgent(sessionAgent.ref);
+	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	const modelApiKeyAvailability = new Map<string, boolean>();
 	const getModelAvailabilityKey = (candidate: Model): string =>

@@ -26,6 +26,8 @@ import {
 	Snowflake,
 	toError,
 } from "@cornfield/utils";
+import type { DefaultAgentSource, ResolvedAgentRef } from "../agent-domain/default-agent";
+import type { AgentId } from "../agent-domain/types";
 import { ArtifactManager } from "./artifacts";
 import {
 	type BlobPutResult,
@@ -63,12 +65,25 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	/**
+	 * Resolved Agent that serves this session (WP4, §10), fixed at creation.
+	 *
+	 * Additive to the v3 header: a session written before agent pinning (or by a
+	 * non-interactive writer that never resolved one) simply has no value here.
+	 * Readers must never substitute a UI selection for a missing value — resolve
+	 * explicitly through `../session/session-agent` instead.
+	 */
+	agentId?: AgentId;
+	/** Which scope named `agentId`. Persisted with it so provenance survives the process. */
+	agentSource?: DefaultAgentSource;
 }
 
 export interface NewSessionOptions {
 	parentSession?: string;
 	/** Skip flushing the current session and delete it instead of saving. */
 	drop?: boolean;
+	/** Resolved Agent to record in the new header. Absent = not pinned (see `SessionHeader.agentId`). */
+	agent?: ResolvedAgentRef;
 }
 
 export interface SessionEntryBase {
@@ -1694,8 +1709,8 @@ export class SessionManager {
 	}
 
 	/** Initialize with a new session (used by factory methods) */
-	#initNewSession(): void {
-		this.#newSessionSync();
+	#initNewSession(options?: NewSessionOptions): void {
+		this.#newSessionSync(options);
 	}
 
 	/** Switch to a different session file (used for resume and branching) */
@@ -1794,6 +1809,12 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: oldSessionId,
 		};
+		// A fork stays in the source session's Agent — the fork continues the same work,
+		// so its Agent is carried over rather than re-resolved.
+		if (oldHeader?.agentId) {
+			newHeader.agentId = oldHeader.agentId;
+			newHeader.agentSource = oldHeader.agentSource;
+		}
 		this.#sessionName = newHeader.title;
 		this.#titleSource = newHeader.titleSource;
 
@@ -1920,6 +1941,12 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
 		};
+		// Resolved by the caller (never derived here): the store records the Agent, it
+		// does not decide it (§10). Absent means "not pinned", not "no Agent".
+		if (options?.agent) {
+			header.agentId = options.agent.agentId;
+			header.agentSource = options.agent.source;
+		}
 		this.#fileEntries = [header];
 		this.#byId.clear();
 		this.#labelsById.clear();
@@ -2247,12 +2274,39 @@ export class SessionManager {
 			header.titleSource = source;
 		}
 
-		// Update the session file header with the title (if already flushed)
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Record the resolved Agent on an existing header (WP4).
+	 *
+	 * Used when a session was not created through a resolving path — resumed from disk, or
+	 * created by a caller that had no resolution to pass (`--session-dir`). Writing it back
+	 * makes the resolution stick: the session and its forks stop depending on a re-resolution,
+	 * and a later process reads the recorded Agent instead of guessing (§10).
+	 *
+	 * A header that already records an Agent is left untouched: a session's Agent is history,
+	 * not a value to be re-decided. Returns true when the header changed.
+	 */
+	async setResolvedAgent(ref: ResolvedAgentRef): Promise<boolean> {
+		const header = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		if (!header || header.agentId) return false;
+		header.agentId = ref.agentId;
+		header.agentSource = ref.source;
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Rewrite the session file so the in-memory header reaches disk. No-op when the file was
+	 * never written (lazy persistence): the updated header then ships with the first flush.
+	 */
+	async #flushHeaderIfOnDisk(): Promise<void> {
 		const sessionFile = this.#sessionFile;
 		if (this.persist && sessionFile && this.storage.existsSync(sessionFile)) {
 			await this.#rewriteFile();
 		}
-		return true;
 	}
 
 	_persist(entry: SessionEntry): void {
@@ -2877,11 +2931,18 @@ export class SessionManager {
 	 * Create a new session.
 	 * @param cwd Working directory (stored in session header)
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.cornfield/agent/sessions/<encoded-cwd>/).
+	 * @param agent Agent resolved for this session by the caller (see `../session/session-agent`).
+	 *              Omitted when the caller did not resolve one; the header then carries none.
 	 */
-	static create(cwd: string, sessionDir?: string, storage: SessionStorage = new FileSessionStorage()): SessionManager {
+	static create(
+		cwd: string,
+		sessionDir?: string,
+		storage: SessionStorage = new FileSessionStorage(),
+		agent?: ResolvedAgentRef,
+	): SessionManager {
 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
 		const manager = new SessionManager(cwd, dir, true, storage);
-		manager.#initNewSession();
+		manager.#initNewSession(agent ? { agent } : undefined);
 		return manager;
 	}
 
@@ -2906,6 +2967,11 @@ export class SessionManager {
 		const newHeader = manager.#fileEntries[0] as SessionHeader;
 		newHeader.title = sourceHeader?.title;
 		newHeader.titleSource = sourceHeader?.titleSource;
+		// Same as the in-place fork: the forked session belongs to the source's Agent.
+		if (sourceHeader?.agentId) {
+			newHeader.agentId = sourceHeader.agentId;
+			newHeader.agentSource = sourceHeader.agentSource;
+		}
 		manager.#fileEntries = [newHeader, ...historyEntries];
 		manager.#sessionName = newHeader.title;
 		manager.#titleSource = newHeader.titleSource;
