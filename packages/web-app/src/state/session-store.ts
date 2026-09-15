@@ -592,7 +592,7 @@ export class SessionStore {
 	}
 
 	/** 记录本连接焦点 agent 并立即同步到 view（UI 立即跟随，不等 serve 快照）。 */
-	#setActiveAgent(agentId: string, workspace?: string): void {
+	#setActiveAgent(agentId: string, workspace?: string, targetSessionFile?: string): void {
 		this.#activeAgentId = agentId;
 		this.#activeWorkspace = workspace;
 		// 会话树是上一个会话的账本视图，换会话后不能继续展示（否则把另一个 Agent 的子会话
@@ -603,16 +603,8 @@ export class SessionStore {
 		// view.sessionId 是 serve 推来的焦点（agent 注册名）：它与目标不同，说明手上这批消息
 		// 属于**另一个 Agent**。留着它就是让 A 的工作显示在 B 的上下文里，等新快照到达再
 		// 自动填回。同一个会话上的重复切换不算切换，不动转录。
-		const sameSession = view.sessionId === agentId;
-		if (!sameSession) {
-			// Project 归属同样是会话级的，而它在途的请求也必须跟着作废：只清显示值、不动
-			// generation 的话，旧会话的响应在新快照到达前仍持有当前代际，就会把它的
-			// projects / currentProjectId / error 提交进已经切到新会话的视图。
-			this.#projectGeneration += 1;
-			this.#currentProjectId = undefined;
-			this.#projectsPending = true;
-			view.currentProjectId = undefined;
-			view.projectsPending = true;
+		const sameAgent = view.sessionId === agentId;
+		if (!sameAgent) {
 			view.messages = [];
 			view.live = undefined;
 			view.sessionName = undefined;
@@ -620,12 +612,33 @@ export class SessionStore {
 			view.isStreaming = false;
 			view.queued = 0;
 		}
+		// Project 归属跟着**会话身份**（agent + 会话文件）走，不只是 agent：同一个 Agent 下换一个
+		// 会话（打开另一个历史会话）同样是另一个会话的归属。目标会话文件未知的入口
+		// （switchSession / newSession）按空串算 —— 未知就是与已知不同：宁可让紧随其后的快照
+		// 重算一次，也不要让上一会话的归属（和它在途请求）继续落在屏幕上。
+		const identity = this.#projectIdentityOf(agentId, targetSessionFile);
+		if (identity !== this.#projectAttributionKey) {
+			// 代际必须在这里同步递增：只清显示值不动代际，旧会话的在途响应在新快照到达前
+			// 仍持有当前代际，会把它的 projects / currentProjectId / error 提交进已经切走的视图。
+			this.#projectGeneration += 1;
+			// 下一次 sync 无条件重算（身份对不上，但到底对到哪个快照要等它自己说）。
+			this.#projectAttributionKey = undefined;
+			this.#currentProjectId = undefined;
+			this.#projectsPending = true;
+			view.currentProjectId = undefined;
+			view.projectsPending = true;
+		}
 		view.activeAgentId = agentId;
 		view.activeWorkspace = workspace;
 		view.sessionTree = undefined;
 		view.sessionTreeError = undefined;
 		this.#view = view;
 		this.#notify();
+	}
+
+	/** 归属对应的会话身份：焦点 agent + 会话文件（未知用空串）。一个概念一处定义。 */
+	#projectIdentityOf(agentId: string | null, sessionFile: string | undefined): string {
+		return `${agentId ?? ""}|${sessionFile ?? ""}`;
 	}
 
 	/** 工作目录短名：会话 cwd 优先，回落 agentDir 末段；均无则 undefined。 */
@@ -695,7 +708,7 @@ export class SessionStore {
 		try {
 			await this.#client.switchSession(agentId);
 			// cli 会话显示其打开目录（header.cwd），agent 会话回落 agentDir
-			this.#setActiveAgent(agentId, this.#workspaceShortOf(record.cwd, agentId));
+			this.#setActiveAgent(agentId, this.#workspaceShortOf(record.cwd, agentId), record.sessionFile);
 		} catch {
 			// switch 失败（agent 已删除 / 未注册）不阻断历史回放，仅历史加载失败才可见报错
 		}
@@ -840,7 +853,7 @@ export class SessionStore {
 	 * 作废是**同步**的：在重算结果回来之前，界面上必须是「还不知道」，而不是上一个会话的归属。
 	 */
 	#syncProjectAttribution(): void {
-		const key = `${this.#activeAgentId ?? ""}|${this.#view?.sessionFile ?? ""}`;
+		const key = this.#projectIdentityOf(this.#activeAgentId, this.#view?.sessionFile);
 		if (key === this.#projectAttributionKey) return;
 		this.#projectAttributionKey = key;
 		this.#currentProjectId = undefined;

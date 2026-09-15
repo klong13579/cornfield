@@ -327,6 +327,44 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 		expect(store.getSnapshot().currentProjectId).toBe("dtc");
 	});
 
+	it("同一个 Agent 下换会话（打开另一个历史会话）：旧响应同样落不了地", async () => {
+		const { store } = await createConnectedStore();
+
+		// hr 的活跃会话：归属落地为 cornfield
+		pushSnapshot("hr", "/sessions/hr-live.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("cornfield");
+
+		// 制造一个在途请求（它会带着当前代际）
+		const inFlight = store.refreshProjects("hr");
+		await Bun.sleep(0);
+		const staleRequest = lastProjectRequestId();
+
+		// 同一个 Agent、另一个会话：agentId 没变，只有会话文件变了
+		const opening = store.openHistorySession({
+			id: "history-1",
+			agent: "hr",
+			sessionFile: "/sessions/hr-history.jsonl",
+		});
+		await Bun.sleep(0);
+		respond({}); // switch_session 回包，让 #setActiveAgent 真的跑到
+		await Bun.sleep(0);
+
+		// 旧会话的响应现在才回来：它的代际已作废，不得写入
+		respondTo(staleRequest, { projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+
+		const view = store.getSnapshot();
+		expect(view.currentProjectId).toBeUndefined();
+		expect(view.projectsPending).toBe(true);
+		expect(view.projectsError).toBeUndefined();
+
+		void opening;
+		void inFlight;
+	});
+
 	it("A 的迟到**错误**也不会把 B 打成错误态", async () => {
 		const { store } = await createConnectedStore();
 
