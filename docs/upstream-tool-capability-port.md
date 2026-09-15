@@ -3,7 +3,7 @@
 - 日期：2026-09-16
 - 上游：`can1357/oh-my-pi` @ `c5a8e0e`（快照 `/tmp/omp-upstream`）
 - 本地基线：`main` @ `3d9ddde0`
-- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；第 2 波待拆票
+- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；**第 2 波（第 5/8/10/11 条能力）四票已交付并钉住验证**（集成分支 `squad-20260916-upstream-tool-port-w2-integ`，待用户确认合并）—— 第 11 条的 section 半未落地（拆为候选新票）
 - 范围：**两棵树都有的 Tool，其能力差**（含行为、TUI 渲染、prompt）
 
 与另两篇的分工（禁止分叉）：
@@ -24,13 +24,13 @@
 | 2 | GitHub 补 5 个 op：`file_read`、`pr_create`、`search_code`、`search_commits`、`search_repos` | `gh.ts:261-361`、`gh-search.ts:458-523`、`gh-types.ts`、`gh-common.ts` | 本地 9 op（`gh.ts:132-143` `[复核]`） | S | 1 已交付 |
 | 3 | edit auto-repair：hunk 隔离（singles→pairs→贪心剥）+ reference 文本 + realign + blackbox 语料 | `edit/auto-repair.ts:110-133,183-202,229-266`、`edit/blackbox.ts` | 部分：`edit/post-write.ts:283-292` 用线性 diff 范围 `[复核]` | M | 1 已交付 |
 | 4 | todo：`blocked` 状态 + `blocker` + `block`/`unblock`/`view` | `tools/todo.ts:21-29,126-128` | 缺：`todo-write.ts:21` 四状态 `[复核]` | S | 1 已交付 |
-| 5 | read：tail 选择器 `-N` + 多段选择器渲染 | `read-selector.ts`、`read-format.ts` | 缺：本地对 `-N` 与不相邻多段直接报错 | M | 2 |
+| 5 | read：tail 选择器 `-N` + 多段选择器渲染 | `read-selector.ts`、`read-format.ts` | 缺：本地对 `-N` 与不相邻多段直接报错 | M | 2 已交付 |
 | 6 | 未解决 git 合并冲突浮出 + `conflict://N` 读写解决 | `tools/conflict-detect.ts:1-500` | 缺 | M | 2 |
 | 7 | PDF 读取（Chromium 渲染单页） | `read-pdf.ts` | 缺（本地 PDF 走文本抽取） | M | 2 |
-| 8 | `run_watch` 健壮性（429 退避、fast/slow 轮询、no-runs-give-up、completed jobs 缓存）+ `pr_checkout` worktree 冲突后缀 + `view` 的 stateReason 回退 | `gh-run-watch.ts:44-46,192-200,1015-1026`、`gh-pr-checkout.ts:96-117`、`gh-view.ts:81-114` | 部分 | S（每项） | 2 |
+| 8 | `run_watch` 健壮性（429 退避、fast/slow 轮询、no-runs-give-up、completed jobs 缓存）+ `pr_checkout` worktree 冲突后缀 + `view` 的 stateReason 回退 | `gh-run-watch.ts:44-46,192-200,1015-1026`、`gh-pr-checkout.ts:96-117`、`gh-view.ts:81-114` | 部分 | S（每项） | 2 已交付 |
 | 9 | GitHub 视图 SQLite 缓存层（soft/hard TTL、后台刷新、auth-key 隔离） | `github-cache.ts` | 缺 | M | 3 |
-| 10 | edit `sloppy` 模式 + inline-edit-recovery（模型把 edit 写成纯文本时捞回） | `session/inline-edit-recovery.ts`、`edit/schemas.ts` | 缺 | M | 2 |
-| 11 | 输出 schema 校验统一（yield 与 executor 共用）+ 增量 yield 的 section 校验【2026-09-16 执行中拆分：section 半依赖「增量 yield」能力，而本地 yield 是单次提交（`result:{data|error}`、`YieldItem` 无 type、`shouldTerminate` 收到即终止、executor 只取最后一次 yield），零消费者 → 本波只发「校验统一」，section 半拆为候选新票「增量 yield（分段提交）」】 | `tools/output-schema-validator.ts:1-307` | 部分：`yield.ts:82-100` 自 compile AJV `[复核]`，executor 另有一套；yield 当前无测试 | M | 2 |
+| 10 | edit `sloppy` 模式 + inline-edit-recovery（模型把 edit 写成纯文本时捞回） | `session/inline-edit-recovery.ts`、`edit/schemas.ts` | 缺 | M | 2 已交付 |
+| 11 | 输出 schema 校验统一（yield 与 executor 共用）+ 增量 yield 的 section 校验【2026-09-16 执行中拆分：section 半依赖「增量 yield」能力，而本地 yield 是单次提交（`result:{data|error}`、`YieldItem` 无 type、`shouldTerminate` 收到即终止、executor 只取最后一次 yield），零消费者 → 本波只发「校验统一」，section 半拆为候选新票「增量 yield（分段提交）」】 | `tools/output-schema-validator.ts:1-307` | 部分：`yield.ts:82-100` 自 compile AJV `[复核]`，executor 另有一套；yield 当前无测试 | M | 2 已交付（校验统一） |
 | 12 | 终端屏幕读取（把虚拟终端行导出为可重放样式） | `tools/terminal-output.ts` | 缺；**本地已有 `@xterm/headless` + `bash-interactive.ts:215` 读屏** `[复核]`，零新依赖 | S | 3 |
 | 13 | memory `reflect`（对长期记忆做 LLM 综合回答） | `tools/memory-reflect.ts:1-90` | 缺；本地有 `write_memory` + `query_episodic_memory`（`self-evolution/src/tools.ts:23-38` `[复核]`），只返回列表 | M | 3（受前作「记忆后端」决策阻塞） |
 
