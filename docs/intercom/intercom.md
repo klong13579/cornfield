@@ -172,7 +172,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 | `replyHint` | true | 收到的 ask 附回复指引(始终携带显式 `replyTo`) |
 | `stableId` | — | 重启后保持的会话地址 |
 
-环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`CORNFIELD_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)。
+环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)。
 
 ## 7. 前置条件与排障
 
@@ -201,7 +201,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
   连续拒绝 50 帧(持续洪水特征)才断开——一次性批量发送(如 260 条通知)
   只会被节流不会掉线
 - **掉线自愈**:优雅关闭 2s 内感知断线;SIGKILL/崩溃(无 FIN)由 liveness 心跳
-  (30s 间隔/5s 超时,`CORNFIELD_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS` 覆盖)
+  (30s 间隔/5s 超时,`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS` 覆盖)
   兜底,最迟 ~35s 感知;重连退避 1s→30s 无限重试,broker 恢复即自动入网
 
 ## 9. 相关实现
