@@ -16,13 +16,21 @@
  * exit from a previous incarnation can be recognised as stale instead of being
  * attributed to the process that replaced it.
  *
- * The graceful-stop ladder (a formal Child Session must not be SIGKILLed while
- * it can still finish cleanly):
+ * The stop ladder — and its deliberate end:
  *
  *   1. `abort`            — leave the in-flight turn in a defined state
  *   2. close stdin        — wire-stdio / rpc mode exit(0) on stdin EOF
- *   3. SIGTERM            — the process ignored EOF
- *   4. SIGKILL            — last resort; the process gets no chance to flush
+ *   3. SIGTERM            — the signal a running child can still handle
+ *   4. drain window       — and then STOP. There is no automatic SIGKILL.
+ *
+ * Step 4 is the point. SIGKILL skips every handler the child would have run on
+ * the way out (the restart sentinel, the tail of its session log, in-flight
+ * writes), so a supervisor that force-kills after a timeout is not stopping a
+ * child gracefully — it is destroying one and calling it stopped. When the
+ * ladder runs out, `stop()` reports that the child did **not** stop, names the
+ * pid, and leaves the decision to kill to the operator. This mirrors the
+ * existing `terminateSidecar()` contract in `src/commands/serve-sidecar.ts`:
+ * SIGTERM, one drain window, and no force-kill after it.
  */
 
 import { logger } from "@cornfield/utils";
@@ -79,7 +87,7 @@ export interface ChildSessionProcessOptions {
 	abortTimeoutMs?: number;
 	/** Time the child gets to exit after stdin closes. */
 	exitGraceMs?: number;
-	/** Time the child gets after SIGTERM before SIGKILL. */
+	/** Time the child gets to exit after SIGTERM before the stop is reported as failed. */
 	termGraceMs?: number;
 }
 
@@ -115,6 +123,28 @@ export class ChildSessionRequestTimeoutError extends ChildSessionProcessError {
 	constructor(message: string) {
 		super(message);
 		this.name = "ChildSessionRequestTimeoutError";
+	}
+}
+
+/**
+ * The child is still running after every step of the stop ladder.
+ *
+ * It is thrown, not swallowed: the process exists and keeps whatever it was
+ * doing, so reporting the stop as done would be a plausible lie about both the
+ * child's state and the resources it still holds.
+ */
+export class ChildSessionStopTimeoutError extends ChildSessionProcessError {
+	readonly pid: number;
+	/** What was already tried, in order, so the caller can decide the next step. */
+	readonly attempted: readonly string[];
+
+	constructor(input: { sessionId: string; pid: number; attempted: readonly string[]; waitedMs: number }) {
+		super(
+			`Child session "${input.sessionId}" (pid ${input.pid}) did not exit within ${input.waitedMs}ms of ${input.attempted.join(" then ")}; it is still running and was not force-killed`,
+		);
+		this.name = "ChildSessionStopTimeoutError";
+		this.pid = input.pid;
+		this.attempted = input.attempted;
 	}
 }
 
@@ -156,6 +186,8 @@ export class ChildSessionProcess {
 	#listeners: Array<(event: ChildSessionProcessEvent) => void> = [];
 	#nextRequestId = 0;
 	#readyWait: { resolve: () => void; reject: (error: Error) => void; timeout: NodeJS.Timeout } | null = null;
+	/** The stop ladder currently in flight, shared by every caller of `stop()`. */
+	#stopPromise: Promise<void> | null = null;
 
 	constructor(options: ChildSessionProcessOptions) {
 		this.sessionId = options.sessionId;
@@ -245,7 +277,7 @@ export class ChildSessionProcess {
 		this.#proc = proc;
 		this.#stdin = (proc.stdin as FileSink | null) ?? null;
 		if (!this.#stdin) {
-			proc.kill("SIGKILL");
+			proc.kill("SIGTERM");
 			this.#proc = null;
 			this.#state = "exited";
 			throw new ChildSessionProcessError(`Child session process "${bin}" produced no stdin pipe`);
@@ -278,15 +310,9 @@ export class ChildSessionProcess {
 		try {
 			await promise;
 		} catch (error) {
-			// A child that cannot complete the handshake must not be left running:
-			// nothing will ever talk to it, and the caller only sees a rejection.
-			if (this.#isRunning()) {
-				this.#expectedExit = true;
-				try {
-					proc.kill("SIGKILL");
-				} catch {}
-				await this.#waitForExit(proc, this.#options.termGraceMs);
-			}
+			// A child that cannot complete the handshake is not left silently running:
+			// reap it through the no-kill ladder and report the handshake failure.
+			if (this.#isRunning()) await this.#reapUnusableProcess(proc);
 			throw error;
 		}
 	}
@@ -344,22 +370,47 @@ export class ChildSessionProcess {
 	}
 
 	/**
-	 * Stop the child through the graceful ladder. Idempotent: a second call on an
-	 * already-exited process returns immediately.
+	 * Stop the child through the ladder, and stop there.
+	 *
+	 * Idempotent: a second call on an already-exited process returns immediately.
+	 * Throws {@link ChildSessionStopTimeoutError} when the child is still running
+	 * after the drain window — the caller must be able to tell "stopped" from
+	 * "asked to stop and was ignored".
 	 */
-	async stop(): Promise<void> {
+	stop(): Promise<void> {
 		const proc = this.#proc;
 		if (!proc || this.#state === "exited" || this.#state === "idle") {
 			this.#state = "exited";
-			return;
+			return Promise.resolve();
 		}
+		// One ladder, however many callers ask for it. Two independent stops (a
+		// caller's and the supervisor's own cleanup) must not race over the same
+		// process: the loser would report a stop failure that never happened.
+		if (this.#stopPromise) return this.#stopPromise;
 
+		const attempt = this.#runStopLadder(proc);
+		this.#stopPromise = attempt.then(
+			() => {
+				this.#stopPromise = null;
+			},
+			error => {
+				// Clear it so a later stop() retries the ladder — the child is still there.
+				this.#stopPromise = null;
+				throw error;
+			},
+		);
+		return this.#stopPromise;
+	}
+
+	async #runStopLadder(proc: Subprocess): Promise<void> {
+		const attempted: string[] = [];
 		this.#expectedExit = true;
 		this.#state = "stopping";
 
 		// 1. Let the child settle its in-flight turn. A child that is already idle
 		//    answers immediately; one that ignores the command falls through to EOF.
 		if (this.#stdin) {
+			attempted.push("abort");
 			try {
 				await this.#sendRequest({ type: "abort" }, this.#options.abortTimeoutMs);
 			} catch {
@@ -368,6 +419,7 @@ export class ChildSessionProcess {
 		}
 
 		// 2. stdin EOF: wire-stdio and rpc mode both exit(0) on it.
+		attempted.push("stdin close");
 		try {
 			this.#stdin?.end();
 		} catch (error) {
@@ -378,25 +430,55 @@ export class ChildSessionProcess {
 		}
 		if (await this.#waitForExit(proc, this.#options.exitGraceMs)) return;
 
-		// 3. SIGTERM.
+		// 3. SIGTERM — a signal a stuck-but-healthy child still handles, so its
+		//    exit path (sentinel, log flush) can run.
 		logger.warn("Child session did not exit on stdin EOF; sending SIGTERM", {
 			sessionId: this.sessionId,
 			pid: proc.pid,
 		});
+		attempted.push("SIGTERM");
 		try {
 			proc.kill("SIGTERM");
 		} catch {}
 		if (await this.#waitForExit(proc, this.#options.termGraceMs)) return;
 
-		// 4. SIGKILL — the process is not cooperating and gets no chance to flush.
-		logger.error("Child session ignored SIGTERM; sending SIGKILL", {
+		// 4. Out of graceful options — and that is where it ends. Killing the child
+		//    here would skip its own shutdown path and turn a failed stop into a
+		//    silent success; the caller gets the truth instead.
+		this.#state = "stopping";
+		logger.error("Child session ignored stdin close and SIGTERM; leaving it running", {
 			sessionId: this.sessionId,
 			pid: proc.pid,
 		});
+		throw new ChildSessionStopTimeoutError({
+			sessionId: this.sessionId,
+			pid: proc.pid,
+			attempted,
+			waitedMs: this.#options.exitGraceMs + this.#options.termGraceMs,
+		});
+	}
+
+	/**
+	 * Reap a child that never became usable, through the same no-kill ladder.
+	 *
+	 * Used after a failed handshake, where nothing will ever talk to the process.
+	 * A child that survives even this is left running and named in the log rather
+	 * than killed: it is still somebody's process, and the caller is told.
+	 */
+	async #reapUnusableProcess(proc: Subprocess): Promise<void> {
+		this.#expectedExit = true;
 		try {
-			proc.kill("SIGKILL");
+			this.#stdin?.end();
 		} catch {}
-		await this.#waitForExit(proc, this.#options.termGraceMs);
+		if (await this.#waitForExit(proc, this.#options.exitGraceMs)) return;
+		try {
+			proc.kill("SIGTERM");
+		} catch {}
+		if (await this.#waitForExit(proc, this.#options.termGraceMs)) return;
+		logger.error("Child session process survived stdin close and SIGTERM after a failed handshake", {
+			sessionId: this.sessionId,
+			pid: proc.pid,
+		});
 	}
 
 	// ── internals ────────────────────────────────────────────────────────────

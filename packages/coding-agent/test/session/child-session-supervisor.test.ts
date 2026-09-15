@@ -263,6 +263,38 @@ describe("ChildSessionSupervisor concurrency", () => {
 		expect(supervisor.concurrency()).toMatchObject({ active: 0, queued: 0 });
 	});
 
+	test("never spawns a child that was stopped while it was queued", async () => {
+		const first = await fakeChild();
+		const second = await fakeChild();
+		const registration = recordingProbe({ gate: true });
+		const supervisor = supervisorWith({ maxConcurrent: 1, registration: registration.probe });
+
+		const firstStart = supervisor.start(specFor(first, { sessionId: "child-1" }));
+		await waitFor(() => registration.seen.length === 1);
+		const firstChild = await (async () => {
+			registration.release();
+			return await firstStart;
+		})();
+
+		// The second child is queued behind the taken slot, then stopped before it
+		// ever gets one. Regression: the slot used to be handed over with nobody
+		// re-checking, so the stopped child spawned anyway.
+		const secondStart = supervisor.start(specFor(second, { sessionId: "child-2" })).then(
+			() => ({ revoked: false, message: "" }),
+			(error: unknown) => ({ revoked: true, message: (error as Error).message }),
+		);
+		await Bun.sleep(100);
+		await supervisor.stopAll();
+
+		// stopAll returns only once the queued start is settled — not merely asked.
+		const outcome = await secondStart;
+		expect(outcome.revoked).toBe(true);
+		expect(outcome.message).toContain("cancelled before launch");
+		expect(await second.recordedPid()).toBeNull();
+		expect(supervisor.concurrency()).toMatchObject({ active: 0, queued: 0 });
+		expect(firstChild.status()).toBe("cancelled");
+	});
+
 	test("never spawns a child whose start was cancelled while queued", async () => {
 		const first = await fakeChild();
 		const second = await fakeChild();
@@ -276,18 +308,16 @@ describe("ChildSessionSupervisor concurrency", () => {
 		const firstChild = await firstStart;
 
 		const controller = new AbortController();
-		const cancelled = supervisor.start(specFor(second, { sessionId: "child-2" }), {
-			signal: controller.signal,
-		});
+		const cancelled = supervisor.start(specFor(second, { sessionId: "child-2" }), { signal: controller.signal }).then(
+			() => null,
+			(cause: unknown) => cause as Error,
+		);
 		controller.abort();
 		// The queued start cannot observe the abort until the slot frees, so the
 		// child must not be spawned by the slot release itself.
 		await firstChild.stop();
 
-		const error = await cancelled.then(
-			() => null,
-			(cause: unknown) => cause as Error,
-		);
+		const error = await cancelled;
 		expect(error?.message).toContain("cancelled before launch");
 		expect(await second.recordedPid()).toBeNull();
 	});
@@ -328,6 +358,43 @@ describe("ChildSessionSupervisor crash restart", () => {
 	});
 });
 
+describe("ChildSessionSupervisor.awaitReady", () => {
+	test("returns immediately for a live child and refuses once it is terminal", async () => {
+		const fixture = await fakeChild();
+		const supervisor = supervisorWith();
+		const child = await supervisor.start(specFor(fixture));
+
+		await child.awaitReady();
+
+		await child.stop();
+		const error = await child.awaitReady().then(
+			() => null,
+			(cause: unknown) => cause as Error,
+		);
+		expect(error?.message).toContain("will not become ready");
+	});
+
+	test("spans a crash restart and resolves on the relaunch, not on the crash", async () => {
+		const fixture = await fakeChild({ behavior: "crash-after-ready", crashAfterMs: 100, crashCode: 5 });
+		// A long backoff keeps the call below inside the "relaunch scheduled but not
+		// started" window, which is the state that must wait rather than fail.
+		const supervisor = supervisorWith({
+			maxConcurrent: 2,
+			restart: { maxRestarts: 2, baseBackoffMs: 400, maxBackoffMs: 400 },
+		});
+
+		const child = await supervisor.start(specFor(fixture));
+		const firstPid = child.transport.pid!;
+		await waitFor(() => child.restarts() === 1);
+
+		await child.awaitReady();
+
+		expect(child.transport.pid).not.toBe(firstPid);
+		expect(child.transport.state).toBe("ready");
+		expect(child.status()).toBe("running");
+	});
+});
+
 describe("ChildSessionSupervisor pending requests", () => {
 	test("fails an in-flight request with the crash instead of replaying it", async () => {
 		const fixture = await fakeChild({ behavior: "crash-first-boot", crashAfterMs: 150, crashCode: 6 });
@@ -343,6 +410,46 @@ describe("ChildSessionSupervisor pending requests", () => {
 		expect(error?.message).toContain("exited with code 6");
 		// Nothing was silently replayed: the request ran once, on a process that died.
 		expect(await fixture.receivedRequests()).toEqual(["compact"]);
+	});
+
+	test("retries on the LAST allowed relaunch, when the budget is spent but the relaunch is already scheduled", async () => {
+		const fixture = await fakeChild({ behavior: "crash-first-boot", crashAfterMs: 150, crashCode: 6 });
+		// maxRestarts 1: by the time the retry looks at the budget it already reads as
+		// exhausted (`restarts === maxRestarts`) although the one relaunch is on its
+		// way. Regression: that was rejected as "will not be relaunched".
+		const supervisor = supervisorWith({
+			maxConcurrent: 2,
+			restart: { maxRestarts: 1, baseBackoffMs: 10, maxBackoffMs: 20 },
+		});
+
+		const child = await supervisor.start(specFor(fixture));
+		const result = await child.request<{ command: string; pid: number }>(
+			{ type: "get_state" },
+			{ timeoutMs: 10_000, retryOnRestart: true },
+		);
+
+		expect(result.command).toBe("get_state");
+		expect(child.restarts()).toBe(1);
+		expect(child.status()).toBe("running");
+	});
+
+	test("refuses to wait for a relaunch that the budget really did exhaust", async () => {
+		const fixture = await fakeChild({ behavior: "crash-after-ready", crashAfterMs: 80, crashCode: 5 });
+		const supervisor = supervisorWith({
+			maxConcurrent: 2,
+			restart: { maxRestarts: 1, baseBackoffMs: 10, maxBackoffMs: 20 },
+		});
+
+		const child = await supervisor.start(specFor(fixture));
+		await waitFor(() => child.status() === "failed");
+
+		const error = await child.request({ type: "get_state" }, { timeoutMs: 200, retryOnRestart: true }).then(
+			() => null,
+			(cause: unknown) => cause as Error,
+		);
+
+		// No relaunch is coming, so the retry must say so instead of hanging.
+		expect(error?.message).toMatch(/will not be relaunched|is failed/);
 	});
 
 	test("retries once after the relaunch when the caller declares the command idempotent", async () => {
@@ -374,6 +481,42 @@ describe("ChildSessionSupervisor terminal states", () => {
 		expect(child.status()).toBe("completed");
 		expect(child.toNode()).toMatchObject({ status: "completed", resultRef: "artifact://child-1" });
 		expect(supervisor.concurrency().active).toBe(0);
+	});
+
+	test("reports a child that refuses to stop as failed, not cancelled, and keeps its slot", async () => {
+		const fixture = await fakeChild({ behavior: "eof-blind" });
+		const supervisor = supervisorWith({
+			maxConcurrent: 1,
+			process: {
+				readyTimeoutMs: 10_000,
+				requestTimeoutMs: 5_000,
+				abortTimeoutMs: 200,
+				exitGraceMs: 200,
+				termGraceMs: 200,
+			},
+		});
+
+		const child = await supervisor.start(specFor(fixture));
+		const pid = child.transport.pid!;
+
+		const error = await child.stop().then(
+			() => null,
+			(cause: unknown) => cause as Error,
+		);
+
+		// Calling it cancelled would hide a live process that is still using the
+		// machine — and a released slot would let the supervisor oversubscribe it.
+		expect(error?.name).toBe("ChildSessionStopTimeoutError");
+		expect(child.status()).toBe("failed");
+		expect(child.toNode().status).toBe("failed");
+		expect(isAlive(pid)).toBe(true);
+		expect(supervisor.concurrency()).toMatchObject({ active: 1, limit: 1 });
+
+		// The operator decides; the supervisor never force-kills. Once the process is
+		// actually gone, the capacity it was really using comes back.
+		process.kill(pid, "SIGKILL");
+		await waitFor(() => !isAlive(pid));
+		await waitFor(() => supervisor.concurrency().active === 0);
 	});
 
 	test("stopAll stops every supervised child", async () => {

@@ -67,7 +67,15 @@ afterEach(async () => {
 		try {
 			await child.stop();
 		} catch {
-			// A test may already have killed it; stop() is idempotent.
+			// A child that walked away from the whole stop ladder is left running by
+			// design, so the test must not leak it. Cleaning up here is the *operator's*
+			// last resort — the test standing in for the human, never the supervisor.
+			const pid = child.pid;
+			if (pid !== undefined) {
+				try {
+					process.kill(pid, "SIGKILL");
+				} catch {}
+			}
 		}
 	}
 	for (const fixture of fixtures.splice(0)) await fixture.cleanup();
@@ -213,20 +221,27 @@ describe("ChildSessionProcess.stop", () => {
 		});
 	});
 
-	test("escalates past EOF and SIGTERM to SIGKILL for a child that ignores both", async () => {
+	test("reports a failed stop instead of force-killing a child that ignores the ladder", async () => {
 		const fixture = await fakeChild({ behavior: "eof-blind" });
 		const child = childOn(fixture, { abortTimeoutMs: 300, exitGraceMs: 300, termGraceMs: 500 });
 		await child.start();
 		const pid = child.pid!;
 
-		await child.stop();
+		const error = await rejectionOf(child.stop());
 
-		expect(child.state).toBe("exited");
-		// The abort went out first, the child recorded that it survived SIGTERM, and
-		// it is gone anyway — so the ladder had to reach SIGKILL.
+		// The whole ladder ran — abort, stdin close, SIGTERM — and the child is still
+		// there. SIGKILL would skip its shutdown path, so nothing sends it: the stop
+		// is reported as the failure it is.
+		expect(error.name).toBe("ChildSessionStopTimeoutError");
+		expect(error.message).toContain(`pid ${pid}`);
+		expect(error.message).toContain("was not force-killed");
 		expect(await fixture.receivedRequests()).toEqual(["abort"]);
 		expect(await fixture.survivedSigterm()).toBe(true);
-		expect(() => process.kill(pid, 0)).toThrow();
+		expect(child.state).toBe("stopping");
+		expect(() => process.kill(pid, 0)).not.toThrow();
+
+		// Only the operator's call removes it (the afterEach cleanup).
+		process.kill(pid, "SIGKILL");
 	});
 
 	test("is idempotent on an already-exited process", async () => {
@@ -238,6 +253,24 @@ describe("ChildSessionProcess.stop", () => {
 		await child.stop();
 
 		expect(child.state).toBe("exited");
+	});
+
+	test("shares one ladder between concurrent stops instead of racing over the process", async () => {
+		const fixture = await fakeChild({ behavior: "eof-blind" });
+		const child = childOn(fixture, { abortTimeoutMs: 300, exitGraceMs: 200, termGraceMs: 200 });
+		await child.start();
+		const pid = child.pid!;
+
+		const first = rejectionOf(child.stop());
+		await Bun.sleep(50);
+		const second = rejectionOf(child.stop());
+
+		// Both callers learn the same truth; neither invents a separate failure.
+		expect((await first).name).toBe("ChildSessionStopTimeoutError");
+		expect((await second).name).toBe("ChildSessionStopTimeoutError");
+		// One ladder ran, so the child saw the abort exactly once.
+		expect(await fixture.receivedRequests()).toEqual(["abort"]);
+		process.kill(pid, "SIGKILL");
 	});
 
 	test("is a no-op before the first start", async () => {

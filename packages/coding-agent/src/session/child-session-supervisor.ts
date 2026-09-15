@@ -14,6 +14,11 @@
  *     (each one builds, indexes and calls a model),
  *   - **crash restart** — a child that dies after becoming ready is relaunched
  *     with bounded exponential backoff, on the same session identity,
+ *   - **stop is never a force-kill** — `./child-session-process.ts` ends its
+ *     ladder at SIGTERM plus a drain window. A child that ignores all of it is
+ *     reported `failed` with the reason and *keeps its slot*, because it is
+ *     still running and still consuming capacity. Reporting it `cancelled`
+ *     would be a lie about both the child and the machine it is eating;
  *   - **pending requests** — a request in flight when the child dies is failed
  *     with the real cause. It is *not* silently replayed: replaying a prompt is
  *     not safe in general, so a caller that knows its command is idempotent must
@@ -140,6 +145,16 @@ export interface ChildSession {
 	status(): ChildStatus;
 	/** Number of relaunches performed so far. */
 	restarts(): number;
+	/**
+	 * Resolve once the current incarnation is live *and registered* — the
+	 * supervisor's own notion of ready, which is stronger than "the process
+	 * answered the handshake".
+	 *
+	 * Needed after a crash: `start()` covers the initial launch, but nothing else
+	 * tells a caller when a relaunch finished, so a caller would have to poll the
+	 * broker and would still race the supervisor's own confirmation window.
+	 */
+	awaitReady(): Promise<void>;
 	/** Tree node for this child, as the session-tree owner should persist it. */
 	toNode(): SessionNode;
 	/** Send one command to the current incarnation. */
@@ -172,6 +187,19 @@ interface ChildEntry {
 	launchAttempt: { fail: (error: Error) => void } | null;
 	/** Why the in-flight launch failed, when the exit beat it to the finishing line. */
 	launchFailure: Error | null;
+	/**
+	 * True while a relaunch is scheduled or running.
+	 *
+	 * Distinct from "budget left": on the last allowed attempt the budget is
+	 * already spent (`restarts === maxRestarts`) while the relaunch is still
+	 * coming. Reading the budget as "no relaunch will happen" would fail a
+	 * pending-request retry on the one attempt that was about to succeed.
+	 */
+	relaunchPending: boolean;
+	/** Settles when the in-flight `start()` — including a queued slot wait — is over. */
+	startSettled: Promise<void>;
+	/** Resolves `startSettled`; held separately so `start()` can settle it in a `finally`. */
+	settleStart: () => void;
 	resultRef?: string;
 }
 
@@ -221,6 +249,10 @@ class SupervisedChildSession implements ChildSession {
 			...(spec.objective ? { objective: spec.objective } : {}),
 			...(this.#entry.resultRef ? { resultRef: this.#entry.resultRef } : {}),
 		};
+	}
+
+	awaitReady(): Promise<void> {
+		return this.#supervisor.awaitReady(this.#entry);
 	}
 
 	async request<Result = unknown>(command: WireCommand, options: ChildSessionRequestOptions = {}): Promise<Result> {
@@ -310,6 +342,7 @@ export class ChildSessionSupervisor {
 			...(spec.env ? { env: spec.env } : {}),
 			...this.#processOptions,
 		});
+		const settled = Promise.withResolvers<void>();
 		const entry: ChildEntry = {
 			spec,
 			process,
@@ -322,6 +355,9 @@ export class ChildSessionSupervisor {
 			requestedStatus: null,
 			launchAttempt: null,
 			launchFailure: null,
+			relaunchPending: false,
+			startSettled: settled.promise,
+			settleStart: settled.resolve,
 		};
 		this.#children.set(spec.sessionId, entry);
 		process.subscribe(event => this.#onProcessEvent(entry, event));
@@ -331,9 +367,22 @@ export class ChildSessionSupervisor {
 			await this.#launch(entry);
 		} catch (error) {
 			await this.#stopProcess(entry);
-			this.#children.delete(spec.sessionId);
-			this.#releaseSlot(entry);
+			if (entry.process.state === "exited") {
+				// Nothing was left behind — drop the entry entirely.
+				this.#children.delete(spec.sessionId);
+				this.#releaseSlot(entry);
+			} else {
+				// The failed launch could not even be reaped: keep it visible as failed
+				// (and keep its slot) instead of deleting the only handle on a process
+				// that is still running.
+				entry.status = "failed";
+				entry.stopping = true;
+				entry.controller.abort();
+				this.#maybeReleaseSlot(entry);
+			}
 			throw error;
+		} finally {
+			entry.settleStart();
 		}
 
 		logger.debug("Child session started", {
@@ -351,13 +400,50 @@ export class ChildSessionSupervisor {
 				try {
 					await this.stopChild(entry, "cancelled");
 				} catch (error) {
-					logger.warn("Child session failed to stop", {
+					logger.error("Child session failed to stop and is still running", {
 						sessionId: entry.spec.sessionId,
+						pid: entry.process.pid,
 						error: error instanceof Error ? error.message : String(error),
 					});
 				}
 			}),
 		);
+	}
+
+	/**
+	 * Wait until the in-flight launch (initial or relaunch) has completed, or fail
+	 * with why it never will.
+	 *
+	 * Safe against the launch finishing mid-call: `#launch` clears `launchAttempt`
+	 * in the same synchronous block as it resolves the waiters, so observing a
+	 * launch in flight means it is parked at an `await` and has not resolved them.
+	 */
+	async awaitReady(entry: ChildEntry): Promise<void> {
+		if (isTerminal(entry.status)) {
+			throw new ChildSessionUnavailableError(
+				`Child session "${entry.spec.sessionId}" is ${entry.status}; it will not become ready`,
+			);
+		}
+		if (!entry.launchAttempt) {
+			if (entry.process.state === "ready") return;
+			// Between a crash and its relaunch the process is gone but the child is
+			// still coming back, so a pending relaunch is a "wait", not a failure.
+			if (!entry.relaunchPending) {
+				throw new ChildSessionUnavailableError(
+					`Child session "${entry.spec.sessionId}" is ${entry.process.state} and no launch is in flight`,
+				);
+			}
+		}
+		const { promise, resolve, reject } = Promise.withResolvers<void>();
+		entry.bootWaiters.push({ resolve, reject });
+		if (entry.controller.signal.aborted) {
+			reject(
+				new ChildSessionUnavailableError(
+					`Child session "${entry.spec.sessionId}" was stopped before it became ready`,
+				),
+			);
+		}
+		return promise;
 	}
 
 	/** Wait for the next successful relaunch, or fail with why there will not be one. */
@@ -367,7 +453,9 @@ export class ChildSessionSupervisor {
 				`Child session "${entry.spec.sessionId}" is ${entry.status}; it will not be relaunched`,
 			);
 		}
-		if (this.#restartBudgetExhausted(entry)) {
+		// "Is a relaunch coming" — not "is budget left". On the final allowed
+		// attempt the budget reads as spent while the relaunch is already scheduled.
+		if (!entry.relaunchPending) {
 			throw new ChildSessionUnavailableError(
 				`Child session "${entry.spec.sessionId}" will not be relaunched (restart budget ${this.#restart.maxRestarts} exhausted)`,
 			);
@@ -386,6 +474,15 @@ export class ChildSessionSupervisor {
 	}
 
 	/** Stop one child and give it a terminal status. Idempotent once terminal. */
+	/**
+	 * Stop one child and give it a terminal status. Idempotent once terminal.
+	 *
+	 * Throws when the child did not actually stop: it is then reported `failed`
+	 * (not the status the caller asked for) and keeps its slot, because it is
+	 * still running. Silently calling that outcome `cancelled` is exactly the
+	 * kind of plausible lie that leaves someone counting a machine that is not
+	 * there.
+	 */
 	async stopChild(entry: ChildEntry, status: "completed" | "cancelled"): Promise<void> {
 		if (isTerminal(entry.status)) return;
 		entry.requestedStatus = status;
@@ -395,7 +492,23 @@ export class ChildSessionSupervisor {
 			entry,
 			new ChildSessionUnavailableError(`Child session "${entry.spec.sessionId}" was stopped`),
 		);
-		await this.#stopProcess(entry);
+		// A `start()` still waiting for a slot has not spawned anything yet. The
+		// abort above makes it give the slot back the moment it gets one, so waiting
+		// here is what makes "stopped" mean settled rather than merely requested.
+		await entry.startSettled;
+		try {
+			await entry.process.stop();
+		} catch (error) {
+			entry.status = "failed";
+			entry.relaunchPending = false;
+			logger.error("Child session did not stop; it is still running and keeps its slot", {
+				sessionId: entry.spec.sessionId,
+				pid: entry.process.pid,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			this.#maybeReleaseSlot(entry);
+			throw error;
+		}
 		this.#terminalize(entry, status);
 	}
 
@@ -416,9 +529,13 @@ export class ChildSessionSupervisor {
 		}
 		await this.#slots.acquire();
 		entry.slotHeld = true;
-		// A queued acquire cannot be interrupted, so cancellation is checked right
-		// after the slot arrives: the child is then not spawned at all.
-		if (signal?.aborted) {
+		// A queued acquire cannot be interrupted, so the slot can arrive long after
+		// the request — by which time the child may already have been stopped
+		// (`stop()`, `complete()`, `stopAll()`). Everything that revokes a launch is
+		// checked HERE, before the first byte is spawned; checking only the caller's
+		// `signal` would let a stopped child be launched and then immediately
+		// re-stopped, spawning a process nobody asked for any more.
+		if (signal?.aborted || entry.stopping || entry.controller.signal.aborted || isTerminal(entry.status)) {
 			throw new Error(`Child session "${entry.spec.sessionId}" was cancelled before launch`);
 		}
 	}
@@ -483,7 +600,9 @@ export class ChildSessionSupervisor {
 		}
 
 		// A stop was requested: the caller that asked for it names the terminal status
-		// (completed vs cancelled), so this handler must not assign one of its own.
+		// (completed vs cancelled), so this handler must not assign one of its own —
+		// but a child that kept running after a failed stop only releases its slot
+		// now, when it is finally gone.
 		if (entry.stopping) {
 			logger.debug("Child session stopped", { sessionId: entry.spec.sessionId, pid: event.pid, reason });
 			if (entry.launchAttempt) {
@@ -491,6 +610,7 @@ export class ChildSessionSupervisor {
 					new ChildSessionUnavailableError(`Child session "${entry.spec.sessionId}" was stopped`),
 				);
 			}
+			this.#maybeReleaseSlot(entry);
 			return;
 		}
 
@@ -528,6 +648,7 @@ export class ChildSessionSupervisor {
 			return;
 		}
 		entry.restarts += 1;
+		entry.relaunchPending = true;
 		void this.#relaunch(entry, this.#backoffMs(entry));
 	}
 
@@ -549,6 +670,7 @@ export class ChildSessionSupervisor {
 		logger.debug("Relaunching child session", { sessionId: entry.spec.sessionId, attempt: entry.restarts });
 		try {
 			await this.#launch(entry);
+			entry.relaunchPending = false;
 		} catch (error) {
 			const failure = error instanceof Error ? error : new Error(String(error));
 			logger.warn("Child session relaunch failed", {
@@ -579,23 +701,46 @@ export class ChildSessionSupervisor {
 		for (const waiter of entry.bootWaiters.splice(0)) waiter.reject(error);
 	}
 
+	/**
+	 * Best-effort stop used while another failure is already being reported (a
+	 * failed launch, a failed relaunch). The caller is deciding the child's fate
+	 * either way, so the stop error is logged rather than layered on top —
+	 * `stopChild()`, where the stop outcome IS the result, calls the process
+	 * directly so the failure reaches the caller.
+	 */
 	async #stopProcess(entry: ChildEntry): Promise<void> {
 		try {
 			await entry.process.stop();
 		} catch (error) {
-			logger.warn("Child session process stop threw", {
+			logger.error("Child session could not be reaped and is still running", {
 				sessionId: entry.spec.sessionId,
+				pid: entry.process.pid,
 				error: error instanceof Error ? error.message : String(error),
 			});
 		}
 	}
 
-	/** Terminal states release the slot exactly once. */
 	#terminalize(entry: ChildEntry, status: TerminalStatus): void {
 		if (isTerminal(entry.status)) return;
 		entry.status = status;
 		entry.stopping = true;
+		entry.relaunchPending = false;
 		entry.controller.abort();
+		entry.settleStart();
+		this.#maybeReleaseSlot(entry);
+	}
+
+	/**
+	 * Release the slot when — and only when — this child no longer consumes capacity:
+	 * it is in a terminal state *and* its process is gone.
+	 *
+	 * A child that ignored the stop ladder is terminal (`failed`) but still alive,
+	 * so it keeps its slot until it dies on its own; counting it as free capacity
+	 * would let the supervisor oversubscribe the machine it is still sitting on.
+	 */
+	#maybeReleaseSlot(entry: ChildEntry): void {
+		if (!isTerminal(entry.status)) return;
+		if (entry.process.state !== "exited") return;
 		this.#releaseSlot(entry);
 	}
 
