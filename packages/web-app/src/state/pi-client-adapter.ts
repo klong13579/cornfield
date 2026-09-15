@@ -36,6 +36,11 @@ import type {
 import type {
 	AgentMessageDto,
 	ArtifactDto,
+	CronCreateInput,
+	CronRemoveResultDto,
+	CronTaskWriteResultDto,
+	CronTestRunResultDto,
+	CronUpdateInput,
 	DiagnosisAggregationDto,
 	DiagnosisReportListItemDto,
 	DiagnosisSummaryDto,
@@ -810,6 +815,31 @@ export class PiClientAdapter implements PiClient {
 	/** gateway cron 任务表（get_cron_tasks；gateway 生产端点直连）。 */
 	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
 		return this.#gatewayWire<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" });
+	}
+
+	/**
+	 * 调度定义写面（T10C）：四个命令都直连 gateway POST /wire（scheduler 的主人是 gateway）。
+	 * 失败原因（未注册的 agentId / 已不存在的 agentDir / 重名 / 未知 taskId）原样抛给调用方渲染，
+	 * 不在这里吞成 false。
+	 */
+	async cronCreate(input: CronCreateInput): Promise<CronTaskWriteResultDto> {
+		return this.#gatewayWire<CronTaskWriteResultDto>({ type: "cron_create", ...input });
+	}
+
+	async cronUpdate(taskId: string, input: CronUpdateInput): Promise<CronTaskWriteResultDto> {
+		return this.#gatewayWire<CronTaskWriteResultDto>({ type: "cron_update", taskId, ...input });
+	}
+
+	async cronRemove(taskId: string): Promise<CronRemoveResultDto> {
+		return this.#gatewayWire<CronRemoveResultDto>({ type: "cron_remove", taskId });
+	}
+
+	async cronTestRun(name: string, inMs?: number): Promise<CronTestRunResultDto> {
+		return this.#gatewayWire<CronTestRunResultDto>({
+			type: "cron_test_run",
+			name,
+			...(inMs !== undefined ? { inMs } : {}),
+		});
 	}
 
 	/**

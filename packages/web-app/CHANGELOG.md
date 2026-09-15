@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **定时任务工作台按 Agent / Project / Session scope 展示**（`src/pages/tasks/TasksView.tsx`, `src/pages/tasks/task-scope.ts`, `src/pages/insights/*`, `src/pages/voice/recording-scope.ts`, `src/lib/pi-client-api.ts`, `src/state/*`）：任务列表默认只看当前焦点 Agent 的任务（身份匹配，或旧行的执行 home 与其相同），身份未解析/未绑定的行单独成组、不归到任何 Agent 名下，并在行上写明「不会执行」的原因；Agent 组带声明的 Project 绑定（未声明只说未声明，不编一个项目）；执行记录里的 `agentSessionPath` 与投递目标会话即 Session scope。用量页按 Agent / Project 汇总目录行（求和派生，口径在 UI 标注；多 Agent / 未归属单独成组，不并入任何 Agent），会话 scope 只展示可确认的事实。听记历史按写入时标下的 provenance 分桶（本会话 / 本 Agent / 本 Project / 其他 / **未标注**）——旧记录不会被归给当前 Agent。
+
+- **定时任务写操作接通**（`src/pages/tasks/TasksView.tsx`, `src/state/{pi-client-adapter,session-store}.ts`）：创建 / 暂停启用 / 删除 / 试跑 / 改绑 Agent 全部经 gateway `POST /wire`（`cron_create` / `cron_update` / `cron_remove` / `cron_test_run`），失败原因（agentId 未注册、Agent home 不在、重名、未知 taskId）原样亮出，不再吞成「创建失败」。创建表单可选执行 Agent（缺省 = 当前焦点 Agent），创建时由网关解析并落盘 resolved agentId。
+
 ## [1.1.1] - 2026-09-06
 
 ### Added

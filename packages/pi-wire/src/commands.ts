@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent } from "@cornfield/ai";
+import type { CronCreateInput, CronUpdateInput } from "./results/cron";
 
 /**
  * Wire 命令面 (multiplex 子集)。
@@ -344,6 +345,21 @@ export type WireExtensionCommand =
 	 * 返回 { logs: [{ taskId, id, ts, status, exitCode, durationMs, output(截断), stderr(截断) }] }。
 	 */
 	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
+	/**
+	 * T10C：调度定义写面（docs/client/agent-hub.md §1.7「管理接口走 wire」/ §7-P1「cron 写操作走 wire 命令」）。
+	 *
+	 * 四个命令都是 gateway 领域命令（gateway :7892 POST /wire 直连，serve 转发），持久化到
+	 * 既有 scheduler storage / tasks 文件，**不**新建 scheduler。
+	 *
+	 * 形状见 `results/cron.ts`：`cron_create`/`cron_update` 入参里的 agent 绑定（agentId/agentDir）
+	 * 由网关用 agent-domain 解析成 `{ agentId, agentDir }` 再落盘（解析不到 → ok:false，
+	 * 不写一条跑不起来的 Schedule）；响应回写解析后的 `TaskRowDto`（含 agentResolution）。
+	 * 幂等键与执行语义（重复执行 / 失败重试 / 投递失败分开）沿用既有 scheduler，不在协议层重定义。
+	 */
+	| ({ id?: string; type: "cron_create" } & CronCreateInput)
+	| ({ id?: string; type: "cron_update"; taskId: string } & CronUpdateInput)
+	| { id?: string; type: "cron_remove"; taskId: string }
+	| { id?: string; type: "cron_test_run"; name: string; inMs?: number }
 	/**
 	 * P2-W3-3（B3 技能写协议）：启停一个技能。
 	 * serve 写 settings（~/.cornfield/agent/config.yml 的 skills.ignoredSkills 列表），随后

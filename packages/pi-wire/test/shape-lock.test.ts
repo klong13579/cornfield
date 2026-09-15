@@ -267,6 +267,11 @@ const COMMAND_TYPES = [
 	"list_commands",
 	"get_cron_tasks",
 	"get_cron_logs",
+	// 定时任务写面（T10C）：调度定义 CRUD + test-run，走既有 gateway scheduler
+	"cron_create",
+	"cron_update",
+	"cron_remove",
+	"cron_test_run",
 	"set_skill_enabled",
 	"set_model_disabled",
 	"inject_permission",

@@ -6,11 +6,17 @@ import type {
 	ConfigInheritanceRestoreDto,
 	ConfigScopeDto,
 	ConnectionInfoDto,
+	CronCreateInput,
 	CronLogEntryDto,
+	CronRemoveResultDto,
+	CronTaskWriteResultDto,
+	CronTestRunResultDto,
+	CronUpdateInput,
 	DashboardStatsDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	ListenRecordingDto,
 	MemoryProjectionDto,
 	MessageDto,
 	ModelCatalogDto,
@@ -34,15 +40,24 @@ import type {
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
 // Session Tree / Project DTO（T8）同样由 pi-wire 定义：消费方从本层引入，
 // 保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目形状。
+// 定时任务写面（T10C）同理：入参/回写形状都从 pi-wire 转发，前端不自建。
 export type {
 	ArtifactDto,
 	BroughtBackChildResultDto,
 	ChildSessionEscalationDto,
 	ChildSessionNodeDto,
 	ChildSessionStatusDto,
+	CronCreateInput,
+	CronRemoveResultDto,
+	CronTaskWriteResultDto,
+	CronTestRunResultDto,
+	CronUpdateInput,
 	ProjectListDto,
 	ProjectRecordDto,
+	ScheduleAgentResolution,
 	SessionTreeDto,
+	TaskDeliveryDto,
+	TaskRetryDto,
 } from "@cornfield/wire";
 
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
@@ -62,17 +77,13 @@ export interface FsImageResult {
 	truncated: boolean;
 }
 
-/** 听记历史条目（listen_list：~/.cornfield/listen/ 单条录音的元数据 + 转写全文）。 */
-export interface ListenRecordingDto {
-	name: string;
-	path: string;
-	/** ISO 时间（json recorded_at，缺失回退文件 mtime）。 */
-	recordedAt: string;
-	size: number;
-	text: string;
-	/** 原始音频文件名（/listen-audio/<audio>?token= 回放）；缺省 = 未留档。 */
-	audio?: string;
-}
+/**
+ * 听记历史条目（listen_list：单条录音的元数据 + 转写全文 + 来源标注）。
+ *
+ * T10C：改用 pi-wire 的规范形状（`@cornfield/wire` 的 `ListenRecordingDto`），serve 侧
+ * `stt/listen-service.ts` 也 import 同一份 —— 听记条目只有一种表示，两端不再各写一遍。
+ */
+export type { ListenProvenanceDto, ListenRecordingDto } from "@cornfield/wire";
 
 /**
  * list_remote_skills 返回的远程可装项（契约命令，h1 serve 端并行实现，运行期对齐）。
@@ -496,6 +507,24 @@ export interface PiClient {
 
 	/** 听记历史（listen_list：~/.cornfield/listen/ 全部录音 json，名称倒序 + 转写全文，前端本地搜索/预览）。 */
 	listenList(): Promise<{ ok: boolean; recordings: ListenRecordingDto[] }>;
+
+	/**
+	 * 新建调度定义（cron_create → gateway POST /wire）。
+	 *
+	 * `input.agentId`/`input.agentDir` 至少给一个：网关用 agent-domain 解析成
+	 * `{ agentId, agentDir }` 再落盘（就是「持久化 resolved agentId」）。解析不到 → 抛错，
+	 * 不写一条跑不起来的调度。回写落盘后的行（含 agentResolution）。
+	 */
+	cronCreate(input: CronCreateInput): Promise<CronTaskWriteResultDto>;
+	/** 改调度定义/改绑 Agent（cron_update；`taskId` 是调度定义 id，不是关联 id）。 */
+	cronUpdate(taskId: string, input: CronUpdateInput): Promise<CronTaskWriteResultDto>;
+	/** 删除调度定义（cron_remove）；返回被删掉的任务名。 */
+	cronRemove(taskId: string): Promise<CronRemoveResultDto>;
+	/**
+	 * 试跑（cron_test_run）：把调度临时改成一次性并触发，跑完自行恢复（test-run marker）。
+	 * 无可用 Agent 绑定的任务会被网关拒绝（否则操作者只等到超时，看不到真实原因）。
+	 */
+	cronTestRun(name: string, inMs?: number): Promise<CronTestRunResultDto>;
 
 	/**
 	 * 分帧转写（长录音）：base64 超 Bun WS 单帧 16MB 上限时走 begin→chunk→end。

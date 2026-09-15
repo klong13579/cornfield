@@ -10,6 +10,7 @@
  */
 
 import { findAgentSessionPath } from "../session-paths";
+import { resolveScheduleAgentBinding } from "./agent-binding";
 import {
 	type CronRunDiagnostics,
 	formatToolCallSummary,
@@ -374,9 +375,11 @@ export function buildDeliverySummary(
 /**
  * Resolve the effective agentDir for a task, with fallback to deprecated accountId.
  *
- * During the migration period, tasks may still have `accountId` but not
- * `agentDir`. This function returns `agentDir` if present, otherwise
- * returns `accountId` (which the caller can resolve to a path via config).
+ * The **registry-blind** accessor: it answers “what path did this row carry?”, which is what a
+ * caller that must not touch the registry (the standalone daemon, the mirror-session path) wants.
+ * The gateway's cron trigger does not use it — it resolves the full binding through
+ * `./agent-binding` (so a row carrying only `agentId` still finds its home, and a row carrying
+ * nothing is refused). See {@link resolveScheduleAgentBinding}.
  */
 export function resolveAgentDir(task: ScheduledTask): string | undefined {
 	return task.agentDir ?? task.accountId;
@@ -453,7 +456,29 @@ export class CronService {
 		const startedAt = Date.now();
 		const isAgent = task.taskType === "agent";
 
-		const agentDir = resolveAgentDir(task);
+		// A schedule runs as the Agent it was bound to — never as “whatever the gateway's
+		// cwd happens to resolve to”. The binding comes from the task's own persisted
+		// fields (agentId / agentDir), resolved through the registry:
+		//   - a task carrying only `agentId` gets its home from the registry;
+		//   - a task whose `agentDir` no Agent owns (legacy `OMP-workspace-test` accounts)
+		//     keeps running in that directory — the compat layer must not relocate an
+		//     operator's explicit path.
+		const taskBinding = await resolveScheduleAgentBinding(task);
+		const agentDir = taskBinding.agentDir;
+		/**
+		 * §1.7 “无绑定 agentDir 不执行”. An **agent** task with no resolvable home would
+		 * otherwise fall through to the cold subprocess with no cwd — running as whichever
+		 * Agent the gateway's own directory resolves to, and reporting success for work done
+		 * by someone else. Shell tasks keep their previous behaviour: they have no identity
+		 * to get wrong, and a bare health check must not start demanding a registry entry.
+		 */
+		const bindingFailure =
+			isAgent && !agentDir
+				? (taskBinding.error ??
+					"调度没有绑定 Agent（既无 agentId 也无 agentDir）——按 §1.7 不执行；请为它指定一个 Agent。")
+				: isAgent && taskBinding.enabled === false
+					? (taskBinding.error ?? `Agent「${taskBinding.agentId ?? "?"}」的 agentDir 不存在，调度不执行。`)
+					: null;
 		const cronContextPrefix = buildCronContextPrefixFromStorage(task, storage);
 
 		// B 方案: capture the test-run marker at the START of onTrigger
@@ -483,7 +508,7 @@ export class CronService {
 
 		let exitCode = 0;
 		let output = "";
-		let stderr = "";
+		let stderr = bindingFailure ?? "";
 		let timedOut = false;
 		let executeAgentFailed: { reason: string } | null = null;
 
@@ -509,12 +534,12 @@ export class CronService {
 		if (!task.command?.trim()) {
 			addDiag("cron-preflight", "warn", "Task has no command configured");
 		}
-		if (isAgent && !agentDir) {
-			addDiag("cron-preflight", "warn", "Agent task has no agentDir - will use shell fallback");
+		if (bindingFailure) {
+			addDiag("cron-preflight", "error", bindingFailure);
 		}
 
 		// Try injected executeAgent (warm bridge path)
-		if (isAgent && agentDir) {
+		if (isAgent && agentDir && !bindingFailure) {
 			addDiag("cron-setup", "info", `Warm bridge execution (agentDir: ${agentDir.split("/").pop()})`, {
 				exitCode: null,
 			});
@@ -548,7 +573,7 @@ export class CronService {
 		}
 
 		// Fallback: cold subprocess execution
-		if (!output) {
+		if (!output && !bindingFailure) {
 			const setupMsg = isAgent
 				? "Falling back to cold subprocess after warm bridge failure"
 				: "Running task via subprocess (no agent bridge)";
@@ -591,6 +616,20 @@ export class CronService {
 
 		const endedAt = Date.now();
 		const durationMs = endedAt - startedAt;
+
+		// A refused run is a failure, never a silent no-op: the operator asked for it and
+		// nobody else is going to report why it did not happen.
+		if (bindingFailure) {
+			addDiag("cron-preflight", "error", `Execution refused: ${bindingFailure}`);
+			exitCode = 1;
+			output = `[BINDING] 调度未执行：${bindingFailure}`;
+			log.warn("Cron task refused: unresolvable agent binding", {
+				taskId: task.id,
+				taskName: task.name,
+				resolution: taskBinding.resolution,
+				reason: bindingFailure,
+			});
+		}
 
 		// Link agent session trace for agent tasks. We use the per-agent
 		// finder from session-paths (single source of truth) rather than

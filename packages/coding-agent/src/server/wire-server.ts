@@ -60,6 +60,8 @@ import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { getDefaultSessionDirName } from "../session/session-manager";
 import type { SessionStore } from "../session/session-store";
+import { resolveListenProvenance } from "../stt/listen-provenance";
+import type { ListenProvenance } from "../stt/listen-service";
 import {
 	abortChunkedListenUpload,
 	appendChunkedListenUpload,
@@ -328,6 +330,35 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			return { error: `agent not attached: ${agentId} (send attach first)` };
 		}
 		return { agentId, attached };
+	};
+
+	/**
+	 * 听记的写入方来源（T10C）：焦点 agent 的 scope。
+	 *
+	 * 听记存在客户端级目录，页面要按 Agent/Project/Session 分它就必须在写入时标上 —— 但
+	 * **转写本身不能因为归属解析失败而失败**（音频是用户的数据，丢不得）。所以解析不到时
+	 * 返回空 provenance：落盘上就是「未标注」，而不是把这条录音冒充成焦点 Agent 的。
+	 */
+	const listenProvenance = async (agentId: string): Promise<ListenProvenance> => {
+		try {
+			const anchor = await resolveAgentScope({
+				agentId,
+				meta: registry.getMeta(agentId),
+				attached: registry.getAttached(agentId),
+			});
+			return await resolveListenProvenance({
+				agentId: anchor.agentId,
+				agentDir: anchor.agentDir,
+				cwd: anchor.sessionCwd,
+				...(anchor.sessionFile ? { sessionFile: anchor.sessionFile } : {}),
+			});
+		} catch (err) {
+			logger.warn("listen provenance unresolved; recording stays unattributed", {
+				agentId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return {};
+		}
 	};
 
 	/** 从 session JSONL 首行提取 session id。 */
@@ -702,7 +733,12 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						const { text, model } = await transcribeAudioWithDefaults(tmpPath, {
 							modelRegistry: defaultModelRegistry,
 						});
-						const savedPath = await saveListenText(text, desc, tmpPath);
+						const savedPath = await saveListenText(
+							text,
+							desc,
+							tmpPath,
+							await listenProvenance(ctx.activeAgentId),
+						);
 						done({ ok: true, text, path: savedPath, model });
 					} catch (err) {
 						fail(err instanceof Error ? err.message : "transcription failed");
@@ -753,7 +789,12 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						const { text, model } = await transcribeAudioWithDefaults(tmpPath, {
 							modelRegistry: defaultModelRegistry,
 						});
-						const savedPath = await saveListenText(text, finished.desc, finished.path);
+						const savedPath = await saveListenText(
+							text,
+							finished.desc,
+							finished.path,
+							await listenProvenance(ctx.activeAgentId),
+						);
 						done({ ok: true, text, path: savedPath, model });
 					} catch (err) {
 						fail(err instanceof Error ? err.message : "transcription failed");
@@ -894,6 +935,28 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					});
 					if (!res.ok) {
 						failWithCode("internal", res.error);
+						return;
+					}
+					done(res.result);
+					return;
+				}
+				/**
+				 * T10C：调度定义写面同样转发 gateway 生产端点 —— 调度器的主人是 gateway，
+				 * serve 不代它写 jobs.json（那会造出第二个存储真相）。
+				 *
+				 * 失败用字符串错误（不带 code）：「任务不存在 / Agent 绑定解析不到」是调用方错误，
+				 * 归到 `internal` 等于告诉调用方「服务器出 bug 了」。
+				 */
+				case "cron_create":
+				case "cron_update":
+				case "cron_remove":
+				case "cron_test_run": {
+					const payload: { type: string; [key: string]: unknown } = { ...command };
+					// `id` 是 wire 关联 id，不是调度定义的 id（后者是 taskId）——不往 gateway 透传。
+					delete payload.id;
+					const res = await callGatewayWire(payload);
+					if (!res.ok) {
+						fail(res.error);
 						return;
 					}
 					done(res.result);

@@ -24,6 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ModelRegistry } from "../config/model-registry";
 import { settings } from "../config/settings";
+import { resolveListenProvenance } from "./listen-provenance";
 import {
 	readSttNumber,
 	resolveEffectiveModelName,
@@ -288,7 +289,14 @@ export class ListenController {
 			});
 			this.#lastUsedModel = model;
 			this.#setState("saving");
-			const savedFile = await saveListenText(text, description, tempFile);
+			const savedFile = await saveListenText(
+				text,
+				description,
+				tempFile,
+				// TUI 没有注册表身份：确定的事实只有自己的 agentDir 与进程工作目录归属
+				// （TUI 会话根就是启动目录，与 CLI 语义一致）。
+				await resolveListenProvenance({ cwd: process.cwd() }),
+			);
 			this.#lastSavedPath = savedFile;
 			this.#setState("idle");
 			const modelLabel = this.#lastUsedModel ?? "";
@@ -332,6 +340,7 @@ export class ListenController {
 				text,
 				description ?? path.basename(filePath, path.extname(filePath)),
 				filePath,
+				await resolveListenProvenance({ cwd: process.cwd() }),
 			);
 			this.#lastSavedPath = savedFile;
 			this.#setState("idle");

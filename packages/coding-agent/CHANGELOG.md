@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **听记 provenance + 定时任务写面转发**（`src/stt/listen-provenance.ts`, `src/stt/listen-service.ts`, `src/stt/listen-controller.ts`, `src/server/wire-server.ts`, `src/modes/wire-stdio.ts`）：听记落盘新增 `provenance`（agentId / agentDir / projectId / sessionFile），由**写入方当时的事实**标定（serve 用 agent-scope 的锚点，TUI /record 用进程自己的 agentDir + 工作目录归属）；Project 读不到就不写这一项——旧记录（v1）就是「未标注」，不得在展示层被归给当前 Agent。`record_transcribe*` 落盘时打标，`listen_list` 原样带出。`cron_create` / `cron_update` / `cron_remove` / `cron_test_run` 在 serve WS 面转发 gateway 生产端点（写面失败用字符串错误，不冒充 `internal`）；wire-stdio 面把这四条列入「本模式未实现」而不是「未知命令」。
+
+### Changed
+
+- **听记条目改用 pi-wire 的规范形状**（`src/stt/listen-service.ts`）：`ListenRecordingSummary` 不再自建同形接口，改从 `@cornfield/wire` 引入 `ListenRecordingDto`（两端一份，字段加一处同时可见）。
+
 ### Fixed
 
 - **`read <url> sel="raw"` 不再对 JSON / feed 整形**（`src/tools/fetch.ts`、`test/tools/fetch-raw-mode.test.ts`）：`renderUrl` 里的 `raw` 只守了 HTML（`isHtml && !raw`），JSON 分支与 feed 分支在它之前就把正文改了 —— JSON 被 `formatJson` 重排，RSS/Atom 被 `parseFeedToMarkdown` 转成 markdown 并**截到 10 条**，而调用者明确要的是原文。现按 upstream 的位置加早退（在二进制分支之后、文本整形之前）：raw 对所有文本 content-type 原样返回 body。回归 4 条，用真实 HTTP server 覆盖「raw 拿到逐字 JSON / 不写 raw 仍美化」与「raw 拿到全部 12 条 / 不写 raw 截到 10 条」。

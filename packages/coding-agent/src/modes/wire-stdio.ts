@@ -783,6 +783,10 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			case "test_mcp_server":
 			case "get_cron_tasks":
 			case "get_cron_logs":
+			case "cron_create":
+			case "cron_update":
+			case "cron_remove":
+			case "cron_test_run":
 			case "fork_from":
 			case "undo_exchange":
 			case "retry_from":

@@ -4,7 +4,12 @@ import type {
 	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
 	ConfigScopeDto,
+	CronCreateInput,
 	CronLogEntryDto,
+	CronRemoveResultDto,
+	CronTaskWriteResultDto,
+	CronTestRunResultDto,
+	CronUpdateInput,
 	DashboardStatsDto,
 	DiagnosisAggregationDto,
 	EnvironmentSummaryDto,
@@ -1025,6 +1030,28 @@ export class SessionStore {
 	/** cron 执行日志（get_cron_logs，代理到 pi-client）。 */
 	fetchCronLogs(opts?: { taskId?: string; days?: number; limit?: number }): Promise<{ logs: CronLogEntryDto[] }> {
 		return this.#client.getCronLogs(opts);
+	}
+
+	/**
+	 * 调度定义写面（T10C，代理到 pi-client → gateway POST /wire）。
+	 *
+	 * 失败抛错（不返回 boolean）：「agentId 未注册 / agentDir 已不在 / 重名 / 未知 taskId」
+	 * 是调用方必须看到的原因，吞成 false 等于把可修复的错误变成莫名的「创建失败」。
+	 */
+	cronCreate(input: CronCreateInput): Promise<CronTaskWriteResultDto> {
+		return this.#client.cronCreate(input);
+	}
+
+	cronUpdate(taskId: string, input: CronUpdateInput): Promise<CronTaskWriteResultDto> {
+		return this.#client.cronUpdate(taskId, input);
+	}
+
+	cronRemove(taskId: string): Promise<CronRemoveResultDto> {
+		return this.#client.cronRemove(taskId);
+	}
+
+	cronTestRun(name: string, inMs?: number): Promise<CronTestRunResultDto> {
+		return this.#client.cronTestRun(name, inMs);
 	}
 
 	// ── 帧归约 ──

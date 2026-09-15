@@ -1,5 +1,5 @@
 /**
- * Gateway wire endpoint core（P2-4）——传输无关的 gateway 领域命令处理。
+ * Gateway wire endpoint core（P2-4；T10C 补调度写面与 Agent 绑定）——传输无关的 gateway 领域命令处理。
  *
  * 接收 wire 命令（cron CRUD / get_cron_tasks / get_cron_logs / gateway_status），
  * 直接回答 gateway 自己的领域（调度器 storage + 进程内状态），不再让 serve 侧
@@ -7,15 +7,34 @@
  *
  * 与传输形态解耦：HTTP POST / WS / serve 转发都调 `handleGatewayWireCommand`。
  *
- * 形状契约：get_cron_tasks / get_cron_logs / gateway_status 的返回形状与旧 serve
- * 直读代理一致（pi-wire 的 TaskRowDto / CronLogEntryDto / GatewayStatusDto）——
- * web-app 消费方无需改动；cron_create / cron_update / cron_remove / cron_test_run
- * 是新增写面（无既有消费方，纯增量）。
+ * 形状契约：返回形状是 pi-wire 的 TaskRowDto / CronLogEntryDto / GatewayStatusDto；
+ * cron_create / cron_update / cron_remove / cron_test_run 是写面（见 `../pi-wire/src/results/cron.ts`）。
+ *
+ * ## T10C：写面落盘的是**解析后的** Agent 身份
+ *
+ * `agentId` 在创建/改绑时由 {@link resolveScheduleAgentForWrite} 解析并持久化（同时落 agentDir），
+ * 到点执行按存下来的身份走，不读 UI 当前选中（`docs/client/agent-hub.md` §1.7/§1.10）。
+ * 解析不到 → `ok:false`，不写一条跑不起来的 Schedule。
  */
+
+import type { AgentDirectoryEntry } from "@cornfield/coding-agent/agent-domain/agent-directory";
 import { logger } from "@cornfield/utils";
-import type { CronLogEntryDto, TaskRowDto } from "@cornfield/wire";
+import type {
+	CronLogEntryDto,
+	CronRemoveResultDto,
+	CronTaskWriteResultDto,
+	CronTestRunResultDto,
+	TaskDeliveryDto,
+	TaskRetryDto,
+	TaskRowDto,
+} from "@cornfield/wire";
+import {
+	resolveScheduleAgentBinding,
+	resolveScheduleAgentForWrite,
+	type ScheduleAgentBinding,
+} from "./scheduler/agent-binding";
 import { runTestRun } from "./scheduler/test-run";
-import type { ScheduledTask, SchedulerStorage } from "./scheduler/types";
+import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./scheduler/types";
 
 /** cron 日志 output/stderr 截断上限（与旧 serve 直读代理一致）。 */
 const CRON_LOG_MAX_OUTPUT = 2048;
@@ -39,7 +58,7 @@ export interface GatewayAccountPatch {
 
 export interface GatewayWireDeps {
 	storage: SchedulerStorage;
-	/** scheduler reload 触发（test-run 用；gateway 启动时装配）。 */
+	/** scheduler reload 触发（写面改完调度定义/绑定后重排；gateway 启动时装配）。 */
 	reloadScheduler?: () => Promise<void> | void;
 	/** gateway 进程内状态（旧 status.json 的权威源；live gateway stale=false）。 */
 	gatewayStatus: () => Promise<GatewayStatusPayload> | GatewayStatusPayload;
@@ -51,6 +70,14 @@ export interface GatewayWireDeps {
 	applyGatewayAccountPatch?: (accountId: string, patch: GatewayAccountPatch) => Promise<GatewayWireResult>;
 	/** 进程内 reload（reload_gateway；fallback 重新 loadConfig + reload）。 */
 	reloadGateway?: () => Promise<GatewayWireResult>;
+	/**
+	 * 测试注入：Agent 注册目录（registry + workspace 声明的读模型）。
+	 *
+	 * 注入的是**世界**而不是**规则**：绑定三态（registered / unregistered / unbound）的判断只有
+	 * `resolveScheduleAgentBinding` 一份，测试换掉注册表内容，不换解析语义 —— 否则单测与生产
+	 * 可能对「unbound 是什么」有不同理解，而写面据此误报一个运行面并不认的状态。
+	 */
+	loadAgentDirectory?: () => Promise<AgentDirectoryEntry[]>;
 }
 
 /** 群信息（gateway sessions.db 中 isGroup=true 的记录）。 */
@@ -79,24 +106,56 @@ export interface GatewayStatusPayload {
 
 export type GatewayWireResult = { ok: true; result: unknown } | { ok: false; error: string };
 
-/** ScheduledTask → web-app TaskRowDto（与旧 jobs.json 只读代理同形）。 */
-function toTaskRowDto(task: ScheduledTask): TaskRowDto {
-	return {
+/**
+ * ScheduledTask → web-app TaskRowDto。
+ *
+ * `accountId` 按**原样**透出（`task.accountId`）：旧实现写成 `task.accountId ?? task.agentDir`
+ * 把 agentDir 冒充成 accountId，读的人没法区分「这是个通道账号」还是「这是个目录」。
+ * 绑定事实全部由 `agentId` / `agentDir` / `agentResolution` / `agentEnabled` / `agentError` 表达。
+ */
+function toTaskRowDto(task: ScheduledTask, binding: ScheduleAgentBinding): TaskRowDto {
+	const row: TaskRowDto = {
 		id: task.id,
 		name: task.name,
-		description: task.description,
 		status: task.status,
 		scheduleType: task.scheduleType ?? "cron",
 		cron: task.cron,
 		command: task.command,
-		nextRunAt: task.nextRunAt,
-		lastRunAt: task.lastRunAt,
 		enabled: task.status !== "disabled",
-		accountId: task.accountId ?? task.agentDir,
 		runCount: task.runCount,
 		failCount: task.failCount,
 		consecutiveFailures: task.consecutiveFailures,
+		agentResolution: binding.resolution,
+		createdAt: task.createdAt,
+		updatedAt: task.updatedAt,
 	};
+	if (task.description !== undefined) row.description = task.description;
+	if (task.nextRunAt !== undefined) row.nextRunAt = task.nextRunAt;
+	if (task.lastRunAt !== undefined) row.lastRunAt = task.lastRunAt;
+	if (task.accountId !== undefined) row.accountId = task.accountId;
+	if (binding.agentId !== undefined) row.agentId = binding.agentId;
+	if (binding.agentDir !== undefined) row.agentDir = binding.agentDir;
+	if (binding.displayName !== undefined) row.agentDisplayName = binding.displayName;
+	if (binding.enabled !== undefined) row.agentEnabled = binding.enabled;
+	if (binding.projectIds !== undefined) row.projectIds = binding.projectIds;
+	if (binding.error !== undefined) row.agentError = binding.error;
+	if (task.taskType !== undefined) row.taskType = task.taskType;
+	if (task.timeoutMs !== undefined) row.timeoutMs = task.timeoutMs;
+	if (task.retry !== undefined) row.retry = task.retry;
+	if (task.repeatCount !== undefined) row.repeatCount = task.repeatCount;
+	if (task.repeatCompleted !== undefined) row.repeatCompleted = task.repeatCompleted;
+	if (task.delivery !== undefined) row.delivery = task.delivery;
+	if (task.lastDeliveryError !== undefined) row.lastDeliveryError = task.lastDeliveryError;
+	return row;
+}
+
+/** 行 + 绑定解析（读面统一出口：写面与 get_cron_tasks 用同一条路径生成行）。 */
+async function toTaskRowDtoResolved(
+	task: ScheduledTask,
+	loadEntries: GatewayWireDeps["loadAgentDirectory"],
+): Promise<TaskRowDto> {
+	const binding = await resolveScheduleAgentBinding(task, loadEntries);
+	return toTaskRowDto(task, binding);
 }
 
 function truncateLog(s: string | undefined): { text?: string; truncated?: boolean } {
@@ -105,16 +164,93 @@ function truncateLog(s: string | undefined): { text?: string; truncated?: boolea
 	return { text: s.slice(0, CRON_LOG_MAX_OUTPUT), truncated };
 }
 
+/** 执行记录 → wire 日志行（含 agentSessionPath：Session scope 的权威链接）。 */
+function toLogEntryDto(exec: TaskExecution): CronLogEntryDto {
+	const out = truncateLog(exec.output);
+	const err = truncateLog(exec.stderr);
+	const entry: CronLogEntryDto = {
+		taskId: exec.taskId,
+		id: exec.id,
+		ts: exec.startedAt,
+		status: exec.status,
+		exitCode: exec.exitCode ?? null,
+		durationMs: exec.endedAt != null ? exec.endedAt - exec.startedAt : null,
+	};
+	if (out.text !== undefined) entry.output = out.text;
+	if (out.truncated !== undefined) entry.outputTruncated = out.truncated;
+	if (err.text !== undefined) entry.stderr = err.text;
+	if (exec.agentSessionPath !== undefined) entry.agentSessionPath = exec.agentSessionPath;
+	return entry;
+}
+
+// ── wire 载荷消毒 ────────────────────────────────────────────────────────────
+// wire 命令来自进程外（serve 转发 / 浏览器直连），每个字段都是 untrusted。逐字段收窄，而不是把
+// `{[key: string]: unknown}` 硬 cast 成命令类型：cast 会让「字段存在但类型错」静默通过，
+// 于是一个 `timeoutMs: "5m"` 会被当成合法输入写进调度定义。
+
+function str(v: unknown): string | undefined {
+	return typeof v === "string" ? v : undefined;
+}
+
+function num(v: unknown): number | undefined {
+	return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function strArray(v: unknown): string[] | undefined {
+	return Array.isArray(v) && v.every(x => typeof x === "string") ? (v as string[]) : undefined;
+}
+
+function statusOf(v: unknown): ScheduledTask["status"] | undefined {
+	return v === "active" || v === "paused" || v === "disabled" ? v : undefined;
+}
+
+function scheduleTypeOf(v: unknown): "cron" | "interval" | "once" | undefined {
+	return v === "cron" || v === "interval" || v === "once" ? v : undefined;
+}
+
+function retryOf(v: unknown): TaskRetryDto | undefined {
+	if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+	const raw = v as Record<string, unknown>;
+	const maxAttempts = num(raw.maxAttempts);
+	const backoffMs = Array.isArray(raw.backoffMs)
+		? (raw.backoffMs as unknown[]).filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+		: undefined;
+	if (maxAttempts === undefined || backoffMs === undefined) return undefined;
+	const retryOn = strArray(raw.retryOn);
+	return retryOn ? { maxAttempts, backoffMs, retryOn } : { maxAttempts, backoffMs };
+}
+
+function deliveryOf(v: unknown): TaskDeliveryDto | undefined {
+	if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+	const raw = v as Record<string, unknown>;
+	const channel = str(raw.channel);
+	const mode = raw.mode === "announce" || raw.mode === "none" ? raw.mode : undefined;
+	if (!channel || !mode) return undefined;
+	const delivery: TaskDeliveryDto = { channel, mode };
+	const accountId = str(raw.accountId);
+	const toUserId = str(raw.toUserId);
+	const toConversationId = str(raw.toConversationId);
+	if (accountId) delivery.accountId = accountId;
+	if (toUserId) delivery.toUserId = toUserId;
+	if (toConversationId) delivery.toConversationId = toConversationId;
+	return delivery;
+}
+
 /** wire 命令 → gateway 领域。返回统一结果形状（传输层包帧）。 */
 export async function handleGatewayWireCommand(
 	command: { type: string; [key: string]: unknown },
 	deps: GatewayWireDeps,
 ): Promise<GatewayWireResult> {
 	const { storage } = deps;
+	const loadEntries = deps.loadAgentDirectory;
+	/** 读/写两条路径共用同一条绑定规则，只有注册表来源可换。 */
+	const resolveBinding = (ref: { agentId?: string; agentDir?: string; accountId?: string }) =>
+		resolveScheduleAgentBinding(ref, loadEntries);
 
 	switch (command.type) {
 		case "get_cron_tasks": {
-			return { ok: true, result: { tasks: storage.listTasks().map(toTaskRowDto) } };
+			const tasks = await Promise.all(storage.listTasks().map(task => toTaskRowDtoResolved(task, loadEntries)));
+			return { ok: true, result: { tasks } };
 		}
 
 		case "get_cron_logs": {
@@ -131,101 +267,137 @@ export async function handleGatewayWireCommand(
 			const executions = storage
 				.getRecentExecutions({ limit, sinceMs: cutoff })
 				.filter(exec => (targetTask ? exec.taskId === targetTask.id : true));
-			const logs: CronLogEntryDto[] = executions.map(exec => {
-				const out = truncateLog(exec.output);
-				const err = truncateLog(exec.stderr);
-				return {
-					taskId: exec.taskId,
-					id: exec.id,
-					ts: exec.startedAt,
-					status: exec.status,
-					exitCode: exec.exitCode ?? null,
-					durationMs: exec.endedAt != null ? exec.endedAt - exec.startedAt : null,
-					output: out.text,
-					outputTruncated: out.truncated,
-					stderr: err.text,
-				};
-			});
-			return { ok: true, result: { logs } };
+			return { ok: true, result: { logs: executions.map(toLogEntryDto) } };
 		}
 
 		case "cron_create": {
-			const name = typeof command.name === "string" ? command.name.trim() : "";
-			const cron = typeof command.cron === "string" ? command.cron.trim() : "";
-			const rawCommand = typeof command.command === "string" ? command.command : "";
+			const name = str(command.name)?.trim() ?? "";
+			const cron = str(command.cron)?.trim() ?? "";
+			const rawCommand = str(command.command) ?? "";
 			if (!name || !cron || !rawCommand) {
 				return { ok: false, error: "cron_create requires name, cron, command" };
 			}
 			if (storage.getTaskByName(name)) {
 				return { ok: false, error: `task already exists: ${name}` };
 			}
+			const resolved = await resolveScheduleAgentForWrite(
+				{ agentId: str(command.agentId), agentDir: str(command.agentDir) },
+				resolveBinding,
+			);
+			if (!resolved.ok) return { ok: false, error: resolved.error };
+			const binding = resolved.binding;
+
 			const task = storage.addTask({
 				name,
 				cron,
 				command: rawCommand,
 				status: command.status === "paused" ? "paused" : "active",
 				taskType: command.taskType === "agent" ? "agent" : "shell",
-				scheduleType: (typeof command.scheduleType === "string" ? command.scheduleType : "cron") as
-					| "cron"
-					| "interval"
-					| "once",
-				description: typeof command.description === "string" ? command.description : undefined,
-				model: typeof command.model === "string" ? command.model : undefined,
-				provider: typeof command.provider === "string" ? command.provider : undefined,
-				enabledToolsets: Array.isArray(command.enabledToolsets) ? (command.enabledToolsets as string[]) : undefined,
-				timeoutMs: typeof command.timeoutMs === "number" ? command.timeoutMs : undefined,
-				repeatCount: typeof command.repeatCount === "number" ? command.repeatCount : undefined,
-				skills: Array.isArray(command.skills) ? (command.skills as string[]) : undefined,
-				preScript: typeof command.preScript === "string" ? command.preScript : undefined,
+				scheduleType: scheduleTypeOf(command.scheduleType) ?? "cron",
+				// Resolved identity, persisted: a firing schedule must not depend on the
+				// reader's selected Agent, nor on the registry being readable at fire time.
+				agentId: binding.agentId,
+				agentDir: binding.agentDir,
+				description: str(command.description),
+				model: str(command.model),
+				provider: str(command.provider),
+				enabledToolsets: strArray(command.enabledToolsets),
+				timeoutMs: num(command.timeoutMs),
+				repeatCount: num(command.repeatCount),
+				retry: retryOf(command.retry),
+				skills: strArray(command.skills),
+				preScript: str(command.preScript),
+				delivery: deliveryOf(command.delivery),
 				consecutiveFailures: 0,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
 				runCount: 0,
 				failCount: 0,
 			});
-			return { ok: true, result: { task } };
+			await notifyScheduleChanged(deps);
+			const result: CronTaskWriteResultDto = { task: await toTaskRowDtoResolved(task, loadEntries) };
+			return { ok: true, result };
 		}
 
 		case "cron_update": {
-			const id = typeof command.id === "string" ? command.id : "";
-			if (!id || !storage.getTask(id)) {
-				return { ok: false, error: `unknown task: ${id}` };
+			const taskId = str(command.taskId) ?? "";
+			const existing = taskId ? storage.getTask(taskId) : undefined;
+			if (!existing) {
+				return { ok: false, error: `unknown task: ${taskId}` };
 			}
 			const updates: Partial<ScheduledTask> = {};
-			if (typeof command.cron === "string") updates.cron = command.cron;
-			if (typeof command.command === "string") updates.command = command.command;
-			if (typeof command.status === "string") updates.status = command.status as ScheduledTask["status"];
-			if (typeof command.description === "string") updates.description = command.description;
-			if (typeof command.model === "string") updates.model = command.model;
-			if (typeof command.provider === "string") updates.provider = command.provider;
-			if (typeof command.timeoutMs === "number") updates.timeoutMs = command.timeoutMs;
-			if (typeof command.repeatCount === "number") updates.repeatCount = command.repeatCount;
-			if (Array.isArray(command.enabledToolsets)) updates.enabledToolsets = command.enabledToolsets as string[];
-			if (Array.isArray(command.skills)) updates.skills = command.skills as string[];
-			if (typeof command.preScript === "string") updates.preScript = command.preScript;
-			storage.updateTask(id, updates);
-			return { ok: true, result: { task: storage.getTask(id) } };
+			const name = str(command.name)?.trim();
+			if (name) updates.name = name;
+			if (str(command.cron) !== undefined) updates.cron = str(command.cron);
+			if (str(command.command) !== undefined) updates.command = str(command.command);
+			const status = statusOf(command.status);
+			if (status) updates.status = status;
+			if (str(command.description) !== undefined) updates.description = str(command.description);
+			if (command.taskType === "shell" || command.taskType === "agent") updates.taskType = command.taskType;
+			if (str(command.model) !== undefined) updates.model = str(command.model);
+			if (str(command.provider) !== undefined) updates.provider = str(command.provider);
+			if (num(command.timeoutMs) !== undefined) updates.timeoutMs = num(command.timeoutMs);
+			if (num(command.repeatCount) !== undefined) updates.repeatCount = num(command.repeatCount);
+			if (strArray(command.enabledToolsets) !== undefined)
+				updates.enabledToolsets = strArray(command.enabledToolsets);
+			if (strArray(command.skills) !== undefined) updates.skills = strArray(command.skills);
+			if (str(command.preScript) !== undefined) updates.preScript = str(command.preScript);
+			const retry = retryOf(command.retry);
+			if (retry) updates.retry = retry;
+			const delivery = deliveryOf(command.delivery);
+			if (delivery) updates.delivery = delivery;
+
+			// Rebinding is a write of the *resolved* identity, exactly like create: accept it
+			// only when it resolves, and never leave a half-applied binding (identity from the
+			// request, home from the old row).
+			const rebindId = str(command.agentId);
+			const rebindDir = str(command.agentDir);
+			if (rebindId !== undefined || rebindDir !== undefined) {
+				const resolved = await resolveScheduleAgentForWrite(
+					{ agentId: rebindId ?? existing.agentId, agentDir: rebindDir },
+					resolveBinding,
+				);
+				if (!resolved.ok) return { ok: false, error: resolved.error };
+				updates.agentId = resolved.binding.agentId;
+				updates.agentDir = resolved.binding.agentDir;
+			}
+
+			storage.updateTask(taskId, updates);
+			await notifyScheduleChanged(deps);
+			const updated = storage.getTask(taskId)!;
+			const result: CronTaskWriteResultDto = { task: await toTaskRowDtoResolved(updated, loadEntries) };
+			return { ok: true, result };
 		}
 
 		case "cron_remove": {
-			const id = typeof command.id === "string" ? command.id : "";
-			const task = id ? storage.getTask(id) : undefined;
+			const taskId = str(command.taskId) ?? "";
+			const task = taskId ? storage.getTask(taskId) : undefined;
 			if (!task) {
-				return { ok: false, error: `unknown task: ${id}` };
+				return { ok: false, error: `unknown task: ${taskId}` };
 			}
-			storage.deleteTask(id);
-			return { ok: true, result: { removed: task.name } };
+			storage.deleteTask(taskId);
+			await notifyScheduleChanged(deps);
+			const result: CronRemoveResultDto = { removed: task.name };
+			return { ok: true, result };
 		}
 
 		case "cron_test_run": {
-			const name = typeof command.name === "string" ? command.name : "";
-			if (!storage.getTaskByName(name)) {
+			const name = str(command.name) ?? "";
+			const target = name ? storage.getTaskByName(name) : undefined;
+			if (!target) {
 				return { ok: false, error: `unknown task: ${name}` };
+			}
+			// A test-run is still a run: it must not be armed for a task that cannot execute
+			// (no resolvable binding) — otherwise the operator waits for a timeout instead of
+			// reading the real reason.
+			const binding = await resolveBinding(target);
+			if (binding.resolution !== "registered" || binding.error !== undefined) {
+				return { ok: false, error: binding.error ?? "调度没有可用的 Agent 绑定，test-run 不会触发。" };
 			}
 			try {
 				const started = await runTestRun({
 					name,
-					inMs: typeof command.inMs === "number" ? command.inMs : undefined,
+					inMs: num(command.inMs),
 					storage,
 					markerBaseDir: storage.getMarkerBaseDir(),
 					origin: { sessionPath: "wire" },
@@ -233,7 +405,17 @@ export async function handleGatewayWireCommand(
 						void deps.reloadScheduler?.();
 					},
 				});
-				return { ok: true, result: started };
+				if (started.kind !== "started") {
+					return { ok: false, error: `test-run rejected: ${started.kind}` };
+				}
+				const result: CronTestRunResultDto = {
+					kind: "started",
+					name: started.name,
+					inMs: started.inMs,
+					expiresAt: started.expiresAt,
+					startedAt: started.startedAt,
+				};
+				return { ok: true, result };
 			} catch (err) {
 				logger.error("wire:cron-test-run failed", { name, error: String(err) });
 				return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -293,3 +475,17 @@ export async function handleGatewayWireCommand(
 			return { ok: false, error: `gateway wire: unknown command ${command.type}` };
 	}
 }
+
+/** 写面绑定解析：使用注入的解析器（测试）时，把「解析不到」也判成失败——
+ * 注入不该改变写面的验收条件，只改变它的输入来源。
+ */ /** 调度定义变了：让 engine 重排（未装配 reload 时只是没有热重排，不是失败）。 */
+async function notifyScheduleChanged(deps: GatewayWireDeps): Promise<void> {
+	if (!deps.reloadScheduler) return;
+	try {
+		await deps.reloadScheduler();
+	} catch (err) {
+		logger.warn("wire:cron write applied but scheduler reload failed", { error: String(err) });
+	}
+}
+
+/** 读面用：任务名（未知任务返回 undefined，调用方自己决定语义）。 */

@@ -96,7 +96,7 @@ describe("gateway wire endpoint", () => {
 		const taskId = created.ok ? (created.result as { task: { id: string } }).task.id : "";
 
 		const updated = await handleGatewayWireCommand(
-			{ type: "cron_update", id: taskId, cron: "0 12 * * *", status: "paused" },
+			{ type: "cron_update", taskId, cron: "0 12 * * *", status: "paused" },
 			deps,
 		);
 		expect(updated.ok).toBe(true);
@@ -106,10 +106,10 @@ describe("gateway wire endpoint", () => {
 			expect(task.status).toBe("paused");
 		}
 
-		const removed = await handleGatewayWireCommand({ type: "cron_remove", id: taskId }, deps);
+		const removed = await handleGatewayWireCommand({ type: "cron_remove", taskId }, deps);
 		expect(removed.ok).toBe(true);
 
-		const missing = await handleGatewayWireCommand({ type: "cron_remove", id: taskId }, deps);
+		const missing = await handleGatewayWireCommand({ type: "cron_remove", taskId }, deps);
 		expect(missing.ok).toBe(false);
 	});
 
