@@ -28,7 +28,7 @@ import { Type } from "@sinclair/typebox";
 // can be rendered in a unit test without registering runtime helpers. The
 // hashline and atom prompts reference session-specific helpers (e.g. `{{hline}}`)
 // and are exercised end-to-end via the agent loop, not here.
-const TESTABLE_MODES = ["replace", "patch", "apply_patch"];
+const TESTABLE_MODES = ["replace", "patch", "apply_patch", "sloppy"];
 
 const originalEditVariant = Bun.env.PI_EDIT_VARIANT;
 

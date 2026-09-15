@@ -144,6 +144,12 @@ export interface AgentOptions {
 	onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
 
 	/**
+	 * Rewrites a finalized assistant message before the loop reads its tool calls.
+	 * See `AgentLoopConfig.transformAssistantMessage`.
+	 */
+	transformAssistantMessage?: (message: AssistantMessage) => void | Promise<void>;
+
+	/**
 	 * Optional streaming doom-loop detector. See `DoomLoopConfig` in
 	 * `packages/agent/src/streaming/doom-loop-detector.ts`. When unset, the
 	 * agent loop runs without the detector — useful for tests, eval
@@ -271,6 +277,7 @@ export class Agent {
 	#onPayload?: SimpleStreamOptions["onPayload"];
 	#onResponse?: SimpleStreamOptions["onResponse"];
 	#onAssistantMessageEvent?: (message: AssistantMessage, event: AssistantMessageEvent) => void;
+	#transformAssistantMessage?: (message: AssistantMessage) => void | Promise<void>;
 	#doomLoop?: DoomLoopConfig;
 	#lengthStall?: AgentLoopConfig["lengthStall"];
 
@@ -312,6 +319,7 @@ export class Agent {
 		this.#intentTracing = opts.intentTracing === true;
 		this.#getToolChoice = opts.getToolChoice;
 		this.#onAssistantMessageEvent = opts.onAssistantMessageEvent;
+		this.#transformAssistantMessage = opts.transformAssistantMessage;
 		this.#doomLoop = opts.doomLoop;
 		this.#lengthStall = opts.lengthStall;
 	}
@@ -449,6 +457,14 @@ export class Agent {
 		fn: ((message: AssistantMessage, event: AssistantMessageEvent) => void) | undefined,
 	): void {
 		this.#onAssistantMessageEvent = fn;
+	}
+
+	/**
+	 * Install the finalized-message transform used by the loop. Passing `undefined`
+	 * (or never calling this) leaves the loop without the hook.
+	 */
+	setTransformAssistantMessage(fn: ((message: AssistantMessage) => void | Promise<void>) | undefined): void {
+		this.#transformAssistantMessage = fn;
 	}
 
 	emitExternalEvent(event: AgentEvent) {
@@ -826,6 +842,7 @@ export class Agent {
 			transformToolCallArguments: this.#transformToolCallArguments,
 			intentTracing: this.#intentTracing,
 			onAssistantMessageEvent: this.#onAssistantMessageEvent,
+			transformAssistantMessage: this.#transformAssistantMessage,
 			doomLoop: this.#doomLoop,
 			lengthStall: this.#lengthStall,
 			getToolChoice,

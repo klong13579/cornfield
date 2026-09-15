@@ -137,6 +137,26 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	transformToolCallArguments?: (args: Record<string, unknown>, toolName: string) => Record<string, unknown>;
 
 	/**
+	 * Optional transform applied to a finalized assistant message before the loop
+	 * (and anything else) observes it.
+	 *
+	 * Called inside the stream attempt, on the finalized message and before it is
+	 * published as `message_start`/`message_end` — so the rewrite is what the event
+	 * subscribers, the session log, the tool dispatcher and the next provider
+	 * request all see, and a tool call it materializes executes like any other call
+	 * in that turn. The hook may mutate the message in place, including replacing
+	 * its `content`.
+	 *
+	 * Runs at most once per turn: it fires only for a message the loop will keep,
+	 * and messages carrying an `errorMessage` (an errored response, an abort, or a
+	 * discarded incomplete/doom attempt) are never handed to it.
+	 *
+	 * The hook is best-effort: a throwing hook is logged and the turn continues with
+	 * the message it produced. Callers that pass no hook keep today's behaviour.
+	 */
+	transformAssistantMessage?: (message: AssistantMessage) => void | Promise<void>;
+
+	/**
 	 * Enable intent tracing for tool calls.
 	 * When enabled, the harness injects a `string` field into tool schemas sent to the model,
 	 * then strips from arguments before executing tools.

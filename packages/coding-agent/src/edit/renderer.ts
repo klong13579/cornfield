@@ -30,6 +30,7 @@ import type { VimToolDetails } from "../vim/types";
 import type { DiffError, DiffResult } from "./diff";
 import { type ApplyPatchEntry, expandApplyPatchToEntries, expandApplyPatchToPreviewEntries } from "./modes/apply-patch";
 import type { Operation } from "./modes/patch";
+import { extractInlineSloppyRegions, parseSloppyPayload } from "./modes/sloppy";
 import type { PerFileDiffPreview } from "./streaming";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -367,6 +368,28 @@ function getAtomRenderSummary(args: EditRenderArgs, editMode: EditMode | undefin
 	return { entries: getAtomInputPaths(args.input).map(path => ({ path })) };
 }
 
+/**
+ * Paths a sloppy payload targets, read from its complete blocks. A malformed
+ * block is skipped rather than reported here — the tool result carries the
+ * parse error, and the call line must not invent a second one.
+ */
+function getSloppyRenderSummary(args: EditRenderArgs, editMode: EditMode | undefined): AtomRenderSummary | undefined {
+	if (editMode !== "sloppy" || typeof args.input !== "string") {
+		return undefined;
+	}
+	const entries: Array<{ path: string }> = [];
+	for (const region of extractInlineSloppyRegions(args.input)) {
+		try {
+			for (const block of parseSloppyPayload(region.payload)) {
+				entries.push({ path: block.path });
+			}
+		} catch {
+			// Fall through: the tool reports the malformed payload.
+		}
+	}
+	return entries.length > 0 ? { entries } : undefined;
+}
+
 function getApplyPatchRenderSummary(
 	args: EditRenderArgs,
 	isPartial: boolean,
@@ -467,9 +490,11 @@ export const editToolRenderer = {
 
 		const editArgs = args as EditRenderArgs;
 		const atomSummary = getAtomRenderSummary(editArgs, renderContext?.editMode);
+		const sloppySummary = getSloppyRenderSummary(editArgs, renderContext?.editMode);
 		const applyPatchSummary = getApplyPatchRenderSummary(editArgs, options.isPartial, renderContext?.editMode);
 		const firstApplyPatchEntry = applyPatchSummary?.entries[0];
 		const firstAtomEntry = atomSummary?.entries[0];
+		const firstSloppyEntry = sloppySummary?.entries[0];
 		// Extract path from first edit entry when top-level path is absent (new schema)
 		const firstEdit = Array.isArray(editArgs.edits) && editArgs.edits.length > 0 ? editArgs.edits[0] : undefined;
 		const rawPath =
@@ -478,6 +503,7 @@ export const editToolRenderer = {
 			filePathFromEditEntry(firstEdit?.path) ||
 			getPartialJsonEditPath(editArgs) ||
 			firstAtomEntry?.path ||
+			firstSloppyEntry?.path ||
 			firstApplyPatchEntry?.path ||
 			"";
 		const rename = editArgs.rename || firstEdit?.rename || firstEdit?.move || firstApplyPatchEntry?.rename;
@@ -487,7 +513,8 @@ export const editToolRenderer = {
 			options?.spinnerFrame !== undefined ? formatStatusIcon("running", uiTheme, options.spinnerFrame) : "";
 		let text = `${formatTitle(getOperationTitle(op), uiTheme)} ${spinner ? `${spinner} ` : ""}${description}`;
 		// Show file count hint for multi-file edits
-		let fileCount = atomSummary?.entries.length ?? applyPatchSummary?.entries.length ?? 0;
+		let fileCount =
+			atomSummary?.entries.length ?? sloppySummary?.entries.length ?? applyPatchSummary?.entries.length ?? 0;
 		if (Array.isArray(editArgs.edits)) {
 			fileCount = countEditFiles(editArgs.edits);
 		}
@@ -540,12 +567,15 @@ function renderSingleFileResult(
 	const firstEdit = args?.edits?.[0];
 	const atomSummary = getAtomRenderSummary(args ?? {}, options.renderContext?.editMode);
 	const firstAtomEntry = atomSummary?.entries[0];
+	const sloppySummary = getSloppyRenderSummary(args ?? {}, options.renderContext?.editMode);
+	const firstSloppyEntry = sloppySummary?.entries[0];
 	const rawPath =
 		args?.file_path ||
 		args?.path ||
 		filePathFromEditEntry(firstEdit?.path) ||
 		(details && "path" in details ? details.path : "") ||
 		firstAtomEntry?.path ||
+		firstSloppyEntry?.path ||
 		"";
 	const op = args?.op || firstEdit?.op || details?.op;
 	const rename = args?.rename || firstEdit?.rename || firstEdit?.move || details?.move;
