@@ -74,7 +74,7 @@ async function withClient<T>(fn: (client: PiClient) => Promise<T>): Promise<T> {
 	}
 }
 
-type FsWriteResult = { path: string; bytesWritten: number; version: string };
+type FsWriteResult = { path: string; bytesWritten: number; version: string; normalized?: boolean };
 type FsReadResult = { path: string; text: string; truncated: boolean; version: string };
 
 /** 单次整段写的服务端上界（`src/server/wire-server.ts` 的 FS_MAX_WRITE_BYTES）。 */
@@ -227,6 +227,10 @@ describe("fs_write 乐观并发（expectedVersion ↔ fs_read version）", () =>
 				expectedVersion: base.version,
 			});
 			expect(res.path).toBe("cas-match.txt");
+			// `normalized` 必须在：它回答「落盘的字节是不是我发的那份」。缺了它，客户端就无从知道
+			// 服务端改写过内容（lsp.formatOnWrite 格式化），编辑器会停在一个「已保存但不等于磁盘」的谎上。
+			// 默认配置下写入逐字节精确（已实测：无尾换行/CRLF/空串都同字节），所以这里恒为 false。
+			expect(res.normalized).toBe(false);
 			expect(res.bytesWritten).toBe(3);
 			expect(res.version).toMatch(/^[0-9a-f]{64}$/);
 			expect(res.version).not.toBe(base.version);
