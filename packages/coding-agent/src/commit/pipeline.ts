@@ -28,7 +28,7 @@ const RECENT_COMMITS_COUNT = 8;
 const TYPES_DESCRIPTION = prompt.render(typesDescriptionPrompt);
 
 /**
- * Execute the omp commit pipeline for staged changes.
+ * Execute the cornfield commit pipeline for staged changes.
  */
 export async function runCommitCommand(args: CommitCommandArgs): Promise<void> {
 	if (args.legacy) {

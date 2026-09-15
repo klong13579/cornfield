@@ -1,5 +1,5 @@
 /**
- * MECE rules for `omp agent validate`.
+ * MECE rules for `cornfield agent validate`.
  *
  * Each rule checks one ownership boundary violation across prompt files.
  * Rules with `repair` can auto-fix when `--fix` is passed.

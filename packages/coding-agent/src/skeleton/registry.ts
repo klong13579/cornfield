@@ -2,7 +2,7 @@
  * agentDir registry.
  *
  * Persists a `name → path` map at `~/.cornfield/agent/registry.json` so that
- * `omp agent list` / `omp agent show <name>` can find agentDirs regardless
+ * `cornfield agent list` / `cornfield agent show <name>` can find agentDirs regardless
  * of where they live (default `~/.cornfield/agents/`, custom `--dir` paths,
  * nested account ids like `ops/hr`, etc.).
  *
@@ -85,7 +85,7 @@ export async function loadRegistry(): Promise<Registry> {
 			return parsed as Registry;
 		}
 	} catch {
-		// Corrupt JSON — start fresh. The user can recover via `omp agent reconcile`.
+		// Corrupt JSON — start fresh. The user can recover via `cornfield agent reconcile`.
 	}
 	return structuredClone(EMPTY_REGISTRY);
 }

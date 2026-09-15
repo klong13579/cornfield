@@ -1640,7 +1640,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 	}
 	/**
-	 * Parent-side: metadata injected into every child omp this session spawns via
+	 * Parent-side: metadata injected into every child cornfield process this session spawns via
 	 * a Herdr project pane, so the child registers with this session as parent
 	 * and auto-reports completion. parentTarget is this session's intercom id
 	 * (stable-id aware); the alias name is the human-readable fallback.

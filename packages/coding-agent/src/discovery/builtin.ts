@@ -35,7 +35,7 @@ import {
 } from "./helpers";
 
 const PROVIDER_ID = "native";
-const DISPLAY_NAME = "OMP";
+const DISPLAY_NAME = "CornField";
 const DESCRIPTION = "Native cornfield configuration from ~/.cornfield and .cornfield/";
 const PRIORITY = 100;
 

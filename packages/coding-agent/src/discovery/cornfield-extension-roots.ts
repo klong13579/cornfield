@@ -172,7 +172,7 @@ export async function listCornfieldExtensionRoots(ctx: LoadContext): Promise<Cor
  * `prompts/`, and `.mcp.json` are wired into discovery — mirrors how
  * `getAllPluginExtensionPaths` already feeds the extension factory loader.
  *
- * Marketplace and `omp plugin link` installs write to the plugin manager's
+ * Marketplace and `cornfield plugin link` installs write to the plugin manager's
  * `node_modules` (or symlink into it) rather than to `extensions:` in
  * settings; without this branch the sub-discovery provider would still miss
  * everything those install paths produce.
