@@ -195,44 +195,134 @@ function trimmed(value: string | undefined): string | undefined {
 }
 
 /**
- * The Agent reference a write should persist, resolved from the request's own fields.
+ * What a write asks for the binding to become. An explicit union, because “no field sent”
+ * and “clear the field” are different intentions and a resolver that guesses between them
+ * silently changes who a schedule runs as.
  *
- * Two failure modes are refused rather than persisted, because “ok, but it will never fire”
- * is exactly the plausible lie this workbench exists to remove (`docs/client/agent-hub.md` §1.6):
- *   - a **declared** `agentId` that is not registered;
- *   - a **declared** Agent whose `agentDir` is gone (identity resolved, home did not).
+ *   keep    leave the stored binding alone (update that only touches other fields)
+ *   unbind  clear both fields — the row stays, it just will not execute until rebound
+ *   bind    resolve and persist this identity/home
+ */
+export type ScheduleAgentWrite =
+	| { kind: "keep" }
+	| { kind: "unbind" }
+	| { kind: "bind"; agentId?: string; agentDir?: string };
+
+/**
+ * Resolve the binding a write should persist.
  *
- * An **undeclared** binding (no `agentId`, no `agentDir`) is allowed through: the row keeps its
- * `agentResolution: "unbound"` state and the run path refuses to execute it, so the operator can
- * stage a schedule first and bind it later. Blocking creation would make that state unrepresentable
- * in the API while it still exists in storage (legacy rows).
+ * The rules, and why each one is a refusal rather than a silent choice:
  *
- * `agentDir` is always persisted when it resolved, even when it duplicates the registry home:
+ * 1. **A declared `agentId` must be registered.** Silently keeping a usable directory would
+ *    bind a different Agent than the caller named (`docs/client/agent-hub.md` §1.6).
+ * 2. **`agentId` + `agentDir` must agree.** Two authorities naming two homes for one Agent is
+ *    a caller error; persisting the directory while dropping the id (or vice versa) hides it.
+ * 3. **`agentDir` alone replaces the identity** — it is the whole binding, not a patch. A legacy
+ *    directory (no registered Agent owns it) persists with `agentId` cleared, so a rebind never
+ *    leaves the old Agent's key pointing at a new home.
+ * 4. **A resolved Agent whose home is gone is refused** — the row would never fire.
+ *
+ * `{ kind: "bind" }` with neither field is a caller error (use `unbind` to clear, `keep` for a
+ * no-op) — an empty bind is exactly the ambiguous case this union exists to remove.
+ *
+ * The directory is always persisted when it resolved, even when it duplicates the registry home:
  * a firing schedule must not depend on the registry being readable at fire time.
  */
 export async function resolveScheduleAgentForWrite(
-	ref: ScheduleAgentRef,
-	resolve: (ref: ScheduleAgentRef) => Promise<ScheduleAgentBinding> = resolveScheduleAgentBinding,
+	write: ScheduleAgentWrite,
+	loadEntries: () => Promise<AgentDirectoryEntry[]> = loadAgentDirectory,
 ): Promise<{ ok: true; binding: ScheduleAgentBinding } | { ok: false; error: string }> {
-	const binding = await resolve(ref);
-	const declaredId = trimmed(ref.agentId);
-
-	if (binding.resolution === "unbound") {
-		// Undeclared: legal to persist, never executed (the run path refuses it).
-		return { ok: true, binding };
+	if (write.kind === "keep") {
+		return { ok: false, error: "keep 不需要解析：调用方应在无绑定变更时跳过本函数。" };
 	}
-	// An explicitly declared id that does not exist is a caller error, even when a usable
-	// directory was supplied — silently keeping the directory would bind a different Agent
-	// than the caller asked for.
-	if (declaredId && !binding.agentId) {
+	if (write.kind === "unbind") {
+		return {
+			ok: true,
+			binding: {
+				resolution: "unbound",
+				error: "调度未绑定 Agent——不会执行；绑一个 Agent 后即恢复。",
+			},
+		};
+	}
+
+	const declaredId = trimmed(write.agentId);
+	const declaredDir = trimmed(write.agentDir);
+	if (!declaredId && !declaredDir) {
+		return { ok: false, error: "绑定变更需要 agentId 或 agentDir（清空绑定用 unbind）。" };
+	}
+
+	let entries: AgentDirectoryEntry[];
+	try {
+		entries = await loadEntries();
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		// Fail closed: a declared identity cannot be validated without the registry, and writing
+		// it unvalidated is how a schedule ends up bound to something that does not exist.
+		return { ok: false, error: `Agent registry 读不出来，无法校验绑定：${reason}` };
+	}
+
+	const byId = declaredId ? findAgentRecord(entries, declaredId) : undefined;
+	if (declaredId && !byId) {
 		return { ok: false, error: `agentId「${declaredId}」未注册，无法绑定（先用 cornfield agent 注册它）。` };
 	}
-	// A bare `agentDir` that no Agent owns stays legal: those are the pre-registry bindings
-	// (`agent-profile.ts` compat rules — they must keep working with no migration). The row
-	// reports `agentResolution: "unregistered"`, so the workbench shows an unknown identity
-	// instead of guessing one. Only a *resolved* Agent that is unusable blocks the write.
-	if (binding.enabled === false) {
-		return { ok: false, error: binding.error ?? "绑定的 Agent 的 agentDir 不存在，调度不会执行。" };
+
+	if (declaredId && declaredDir) {
+		const owner = findAgentRecordByDir(entries, declaredDir);
+		if (owner && owner.agent.agentId !== declaredId) {
+			return {
+				ok: false,
+				error: `agentId「${declaredId}」与 agentDir「${declaredDir}」指向不同 Agent（该目录是「${owner.agent.agentId}」的家）。只传其中一个字段来改绑，不要同时给不一致的两个。`,
+			};
+		}
+		if (!owner) {
+			return {
+				ok: false,
+				error: `agentDir「${declaredDir}」不是 Agent「${declaredId}」注册的家（${byId!.agent.agentDir}）。`,
+			};
+		}
+		return finish(byId!, declaredDir);
 	}
+
+	if (byId) {
+		return finish(byId, byId.agent.agentDir);
+	}
+
+	// `agentDir` alone: the whole binding. A registered home resolves to its Agent's identity;
+	// a legacy directory (no registered owner) keeps the path and clears the identity.
+	const owner = findAgentRecordByDir(entries, declaredDir!);
+	if (!owner) {
+		return {
+			ok: true,
+			binding: {
+				agentDir: declaredDir,
+				agentDirSource: "declared",
+				resolution: "unregistered",
+				error: `agentDir「${declaredDir}」不是任何已注册 Agent 的家（身份未知，按路径执行）。`,
+			},
+		};
+	}
+	return finish(owner, declaredDir!);
+}
+
+/** 已注册身份的收尾（enabled 检查 + 绑定对象）：id-only 与 id/dir 一致两条路径共用。 */
+function finish(
+	entry: AgentDirectoryEntry,
+	agentDir: string,
+): { ok: true; binding: ScheduleAgentBinding } | { ok: false; error: string } {
+	if (!entry.agent.enabled) {
+		return {
+			ok: false,
+			error: `Agent「${entry.agent.agentId}」的 agentDir 不存在（${entry.agent.agentDir}），调度不会执行。`,
+		};
+	}
+	const binding: ScheduleAgentBinding = {
+		agentId: entry.agent.agentId,
+		agentDir,
+		agentDirSource: "declared",
+		displayName: entry.agent.displayName,
+		enabled: true,
+		resolution: "registered",
+	};
+	if (entry.agent.projectIds) binding.projectIds = [...entry.agent.projectIds];
 	return { ok: true, binding };
 }

@@ -66,22 +66,38 @@ export function decodeFolderPath(folderKey: string): string | null {
 }
 
 /**
- * 一个目录的归属。
+ * 一个归属轴的判定结果 —— 三态**不能互相顶替**：
  *
- * `agentIds[i]` 与 `agentNames[i]` 同序（同一份会话身份串解析出的 id/显示名）：
- * registry 里有该 Agent 时给它的 id/name，没有时两个数组都回落原始身份串本身（`list_sessions`
- * 的 `agent` 字段 = `agentName ?? agentId`）——resolved 不了就不编一个 id 出来。
+ *   known       名单已加载且判过（值在 `value` 里）
+ *   unassigned  名单已加载，但这个目录不落在任何项上（确实未归属）
+ *   unknown     名单没加载 / 读失败 —— 这时**不能**下任何结论（尤其不能当「未归属」）
+ *
+ * 用带标签的 union 而不是「一个可选值 + 一个布尔」：后者的两个字段可以互相矛盾，
+ * 而这里的状态与数据不可能不一致。
  */
+export type AttributionAxis<T> = { state: "known"; value: T } | { state: "unassigned" } | { state: "unknown" };
+
+/** 目录的 Agent 归属值：会话身份串（id + 显示名，同序）。 */
+export interface AgentAttributionValue {
+	ids: string[];
+	names: string[];
+}
+
+/** 一个目录的归属（两个轴各自带状态）。 */
 export interface FolderAttribution {
-	agentIds: string[];
-	agentNames: string[];
-	/** 命中的 Project id（最深的祖先 root 获胜）；undefined = 未归属，或 registry 未读到。 */
-	projectId?: string;
+	agents: AttributionAxis<AgentAttributionValue>;
+	/** Project 归属值 = 命中的 projectId（最深的祖先 root 获胜）。 */
+	project: AttributionAxis<string>;
+	/** 目录绝对路径（Project 匹配的解码结果）；非绝对路径 = null。 */
+	path: string | null;
 }
 
 export interface FolderAttributionSources {
-	/** list_sessions 真索引（Agent 归属的唯一来源）。 */
-	sessions: readonly SessionRecordSummary[];
+	/**
+	 * list_sessions 真索引（Agent 归属的唯一来源）。
+	 * **undefined = 索引未加载/读失败** —— 此时 Agent 归属是 unknown，不得判「未归属」。
+	 */
+	sessions?: readonly SessionRecordSummary[];
 	/**
 	 * list_projects 的 projects。**undefined = registry 还没读到**；
 	 * `[]` = 读到了、确实没声明过。两者不可混：前者不得判「未归属」。
@@ -144,27 +160,49 @@ export function matchProjectForPath(
 function attributeFromIndex(
 	folderKey: string,
 	sources: FolderAttributionSources,
-	byFolder: Map<string, SessionRecordSummary[]>,
+	byFolder: Map<string, SessionRecordSummary[]> | undefined,
 ): FolderAttribution {
+	const path = decodeFolderPath(folderKey);
+	return {
+		agents: attributeAgents(folderKey, sources, byFolder),
+		project: attributeProject(path, sources),
+		path,
+	};
+}
+
+/** Agent 轴：索引未加载 → unknown（不是未归属）。 */
+function attributeAgents(
+	folderKey: string,
+	sources: FolderAttributionSources,
+	byFolder: Map<string, SessionRecordSummary[]> | undefined,
+): AttributionAxis<AgentAttributionValue> {
+	if (!byFolder) return { state: "unknown" };
 	const identities: string[] = [];
 	for (const session of byFolder.get(folderKey) ?? []) {
 		if (!identities.includes(session.agent)) identities.push(session.agent);
 	}
+	if (identities.length === 0) return { state: "unassigned" };
 	// 身份串无序，先排序再解析：同一份输入永远得到同一份分组（排序不稳定会让 UI 抖）。
 	identities.sort((a, b) => a.localeCompare(b));
 	const resolved = identities.map(identity => resolveAgentIdentity(identity, sources.agents));
-	const path = decodeFolderPath(folderKey);
-	const project = path === null ? undefined : matchProjectForPath(sources.projects, path);
-	return {
-		agentIds: resolved.map(row => row.id),
-		agentNames: resolved.map(row => row.name),
-		...(project ? { projectId: project.projectId } : {}),
-	};
+	return { state: "known", value: { ids: resolved.map(row => row.id), names: resolved.map(row => row.name) } };
+}
+
+/** Project 轴：registry 未加载 → unknown（不是未归属）。 */
+function attributeProject(path: string | null, sources: FolderAttributionSources): AttributionAxis<string> {
+	if (!sources.projects) return { state: "unknown" };
+	if (path === null) return { state: "unassigned" };
+	const project = matchProjectForPath(sources.projects, path);
+	return project ? { state: "known", value: project.projectId } : { state: "unassigned" };
 }
 
 /** 单个目录的归属（内部分配索引只建一次，适合零散查询）。 */
 export function attributeFolder(folderKey: string, sources: FolderAttributionSources): FolderAttribution {
-	return attributeFromIndex(folderKey, sources, indexSessionsByFolder(sources.sessions));
+	return attributeFromIndex(
+		folderKey,
+		sources,
+		sources.sessions ? indexSessionsByFolder(sources.sessions) : undefined,
+	);
 }
 
 /** 一批目录的归属（会话索引只扫一遍；用量面板对所有 stats 行走这条）。 */
@@ -172,7 +210,7 @@ export function attributeFolders(
 	folderKeys: Iterable<string>,
 	sources: FolderAttributionSources,
 ): FolderAttributionIndex {
-	const byFolder = indexSessionsByFolder(sources.sessions);
+	const byFolder = sources.sessions ? indexSessionsByFolder(sources.sessions) : undefined;
 	const index = new Map<string, FolderAttribution>();
 	for (const key of folderKeys) {
 		if (index.has(key)) continue;
@@ -181,8 +219,8 @@ export function attributeFolders(
 	return index;
 }
 
-/** 分组种类：未归属与多 Agent 都不并入任何 Agent 组。 */
-export type ScopeGroupKind = "agent" | "shared" | "unassigned" | "project";
+/** 分组种类：未知（名单未加载）、未归属、多 Agent 都不并入任何具名组。 */
+export type ScopeGroupKind = "agent" | "shared" | "unassigned" | "unknown" | "project";
 
 /**
  * 一个 scope 分组的求和结果（口径见文件头；`errorRate` 是加权重算出来的）。
@@ -244,12 +282,15 @@ function finalize(groups: Map<string, RollupAccumulator>): ScopeRollupRow[] {
 }
 
 const UNASSIGNED_AGENT_LABEL = "未归属（索引里没有落在这个目录的会话）";
+const UNKNOWN_AGENT_LABEL = "归属未知（会话索引未加载）";
 const SHARED_AGENT_LABEL = "多 Agent 目录（会话索引指向多个 Agent）";
 const UNASSIGNED_PROJECT_LABEL = "未归属（目录路径不落在任何已声明 Project）";
+const UNKNOWN_PROJECT_LABEL = "归属未知（Project registry 未加载）";
 
 /**
- * 按 Agent 汇总。归属为空的目录行进 `unassigned` 组，命中多个 Agent 的进 `shared` 组：
- * 两者都**不并入任何 Agent**（把多 Agent 目录整份计给每个 Agent 就是重复计数，拆开是编数据）。
+ * 按 Agent 汇总。归属未知（索引未加载）与未归属、多 Agent 各自成组：
+ * 三者都**不并入任何 Agent**（把未知当未归属是拿一个没读过的名单下结论；
+ * 把多 Agent 目录整份计给每个 Agent 就是重复计数，拆开是编数据）。
  */
 export function rollupByAgent(
 	rows: readonly StatsFolderRowDto[],
@@ -257,22 +298,24 @@ export function rollupByAgent(
 ): ScopeRollupRow[] {
 	const groups = new Map<string, RollupAccumulator>();
 	for (const row of rows) {
-		const agents = attribution.get(row.folder);
-		const names = agents?.agentNames ?? [];
-		if (names.length === 0) {
+		const agents = attribution.get(row.folder)?.agents;
+		if (!agents || agents.state === "unknown") {
+			addRow(groupOf(groups, "unknown", "unknown", UNKNOWN_AGENT_LABEL), row);
+			continue;
+		}
+		if (agents.state === "unassigned") {
 			addRow(groupOf(groups, "unassigned", "unassigned", UNASSIGNED_AGENT_LABEL), row);
 			continue;
 		}
+		const { ids, names } = agents.value;
 		if (names.length > 1) {
-			const ids = agents?.agentIds ?? names;
 			addRow(
 				groupOf(groups, `shared:${ids.join("|")}`, "shared", `${SHARED_AGENT_LABEL}：${names.join(" + ")}`),
 				row,
 			);
 			continue;
 		}
-		const identity = agents?.agentIds[0] ?? names[0];
-		addRow(groupOf(groups, `agent:${identity}`, "agent", names[0]), row);
+		addRow(groupOf(groups, `agent:${ids[0]}`, "agent", names[0]!), row);
 	}
 	return finalize(groups);
 }
@@ -288,33 +331,40 @@ export function rollupByProject(
 ): ScopeRollupRow[] {
 	const groups = new Map<string, RollupAccumulator>();
 	for (const row of rows) {
-		const projectId = attribution.get(row.folder)?.projectId;
-		if (!projectId) {
+		const project = attribution.get(row.folder)?.project;
+		if (!project || project.state === "unknown") {
+			addRow(groupOf(groups, "unknown", "unknown", UNKNOWN_PROJECT_LABEL), row);
+			continue;
+		}
+		if (project.state === "unassigned") {
 			addRow(groupOf(groups, "unassigned", "unassigned", UNASSIGNED_PROJECT_LABEL), row);
 			continue;
 		}
-		const label = projects?.find(project => project.projectId === projectId)?.name ?? projectId;
-		addRow(groupOf(groups, `project:${projectId}`, "project", label), row);
+		const label = projects?.find(item => item.projectId === project.value)?.name ?? project.value;
+		addRow(groupOf(groups, `project:${project.value}`, "project", label), row);
 	}
 	return finalize(groups);
 }
 
-/** 当前会话在 list_sessions 索引里的位置（三态：没身份 / 有身份但不在索引 / 命中）。 */
+/** 当前会话在 list_sessions 索引里的位置（四态：没身份 / 索引未加载 / 有身份但不在索引 / 命中）。 */
 export type CurrentSessionFacts =
 	| { state: "no-identity" }
+	| { state: "unknown" }
 	| { state: "unindexed"; sessionFile?: string; sessionId?: string }
 	| { state: "indexed"; session: SessionRecordSummary; folderKey: string | null };
 
 /**
  * 在当前会话与 list_sessions 索引之间做匹配。
  *
- * 优先按 sessionFile 精确匹配（两份路径都做文本归一）；只有拿不到 sessionFile 时才按会话 id 匹配：
+ * 优先按 sessionFile 精确匹配（两份路径都做归一）；只有拿不到 sessionFile 时才按会话 id 匹配：
  * 有 sessionFile 却匹配不上就是「不在索引里」——再按 id 猜一次会把索引里的另一个会话认成当前会话。
+ * `sessions === undefined`（索引未加载/读失败）→ `unknown`：不能断言「不在索引里」。
  */
 export function findCurrentSession(
-	sessions: readonly SessionRecordSummary[],
+	sessions: readonly SessionRecordSummary[] | undefined,
 	current: { sessionFile?: string; sessionId?: string },
 ): CurrentSessionFacts {
+	if (!sessions) return { state: "unknown" };
 	if (current.sessionFile) {
 		const wanted = normalizePath(current.sessionFile);
 		const hit = sessions.find(
@@ -343,18 +393,22 @@ export interface ScopeSectionsInput {
 }
 
 /**
- * 把 stats 目录行分到四个桶：
+ * 把 stats 目录行分到各桶（每个轴各自分开未知/未归属）：
  *   byAgent            单一 Agent 的目录行汇总（kind "agent"）
  *   byProject          命中 Project 的目录行汇总（kind "project"）
+ *   unknownAgent       名单未加载（会话索引没读到）→ 归属未知，不判未归属
  *   unassignedAgent    未归属 / 多 Agent 的目录行汇总（kind "unassigned" | "shared"）——
  *                      不并入任何 Agent
+ *   unknownProject     registry 未加载 → Project 归属未知
  *   unassignedProject  未归属 Project 的目录行汇总
  *   sessionRows        当前会话所在目录的**原始行**（目录级，不是会话级；调用方必须标注）
  */
 export interface ScopeSections {
 	byAgent: ScopeRollupRow[];
 	byProject: ScopeRollupRow[];
+	unknownAgent: ScopeRollupRow[];
 	unassignedAgent: ScopeRollupRow[];
+	unknownProject: ScopeRollupRow[];
 	unassignedProject: ScopeRollupRow[];
 	sessionRows: StatsFolderRowDto[];
 }
@@ -365,9 +419,11 @@ export function scopeSections(input: ScopeSectionsInput): ScopeSections {
 	const sessionFolderKey = input.sessionFolderKey ?? null;
 	return {
 		byAgent: agentGroups.filter(group => group.kind === "agent"),
-		unassignedAgent: agentGroups.filter(group => group.kind !== "agent"),
+		unknownAgent: agentGroups.filter(group => group.kind === "unknown"),
+		unassignedAgent: agentGroups.filter(group => group.kind === "unassigned" || group.kind === "shared"),
 		byProject: projectGroups.filter(group => group.kind === "project"),
-		unassignedProject: projectGroups.filter(group => group.kind !== "project"),
+		unknownProject: projectGroups.filter(group => group.kind === "unknown"),
+		unassignedProject: projectGroups.filter(group => group.kind === "unassigned"),
 		sessionRows: sessionFolderKey === null ? [] : input.rows.filter(row => row.folder === sessionFolderKey),
 	};
 }

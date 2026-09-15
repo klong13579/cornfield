@@ -176,7 +176,9 @@ export function InsightsView(): React.JSX.Element {
 	const store = useSessionStore();
 	const [period, setPeriod] = useState<StatsPeriodDto>("7d");
 	const [stats, setStats] = useState<DashboardStatsDto | null>(null);
-	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
+	// undefined = 索引未加载/读失败（与「加载了但里面没有这条会话」是两件事：
+	// 前者不能判未归属，也不能说会话不在索引里）。
+	const [sessions, setSessions] = useState<SessionRecordSummary[] | undefined>(undefined);
 	const [sessionsError, setSessionsError] = useState<string | null>(null);
 	const [fetching, setFetching] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -217,7 +219,8 @@ export function InsightsView(): React.JSX.Element {
 				setSessionsError(null);
 			})
 			.catch(err => {
-				setSessions([]);
+				// 读失败保持 undefined：空数组会被下游当成「确实没有会话」。
+				setSessions(undefined);
 				setSessionsError(errorText(err));
 			});
 	}, [store, view.connected]);
@@ -264,8 +267,8 @@ export function InsightsView(): React.JSX.Element {
 	}, [store, view.connected, activeAgentId]);
 
 	// 目录行 → 归属索引（会话索引只扫一遍）。
-	// `view.projects === undefined`（没读到）时不传 registry：attributeFolders 会把「还没读到」
-	// 退化成「未归属」，所以 UI 必须先按 pending / error 分流再渲染 Project 分区。
+	// 两个来源各自三态：`view.projects === undefined`（没读到）与 `sessions === undefined`（会话索引没加载）
+	// 都交给 attributeFolders 当 **unknown**（不是未归属）—— UI 再把 unknown 分区单独渲染出来。
 	const attribution = useMemo(
 		() =>
 			attributeFolders(
@@ -322,7 +325,12 @@ export function InsightsView(): React.JSX.Element {
 	}
 
 	const empty = stats && stats.overall.totalRequests === 0 && stats.byModel.length === 0;
-	const sessionsNote = sessionsError === null ? `会话索引 ${sessions.length} 条` : "会话索引读取失败";
+	const sessionsNote =
+		sessionsError !== null
+			? "会话索引读取失败"
+			: sessions === undefined
+				? "会话索引未加载"
+				: `会话索引 ${sessions.length} 条`;
 	// 分区依赖 stats.byFolder：还没到 / 拉失败 / 就绪 三态分开渲染。
 	// stats 未到时把分区画成「该时段没有目录级行」就是把「还没读到」说成「确实没有」。
 	const statsState: StatsState = stats
@@ -615,8 +623,13 @@ function FolderTable({
 					</thead>
 					<tbody>
 						{rows.map(r => {
-							const agents = attribution.get(r.folder);
-							const agentNames = agents?.agentNames ?? [];
+							const agents = attribution.get(r.folder)?.agents;
+							const agentText =
+								!agents || agents.state === "unknown"
+									? "未知（索引未加载）"
+									: agents.state === "unassigned"
+										? "—"
+										: agents.value.names.join(" + ");
 							return (
 								<tr key={r.folder} className="border-t border-hairline">
 									<td className="max-w-[360px] px-5 py-2.5 font-mono text-[11.5px] text-ink-subtle">
@@ -633,9 +646,7 @@ function FolderTable({
 									<td className="px-3 py-2.5 text-right font-mono tabular-nums text-ink-subtle">
 										{fmtMoney(r.totalCost)}
 									</td>
-									<td className="px-5 py-2.5 text-ink-subtle">
-										{agentNames.length > 0 ? agentNames.join(" + ") : "—"}
-									</td>
+									<td className="px-5 py-2.5 text-ink-subtle">{agentText}</td>
 								</tr>
 							);
 						})}
@@ -768,7 +779,7 @@ function ScopeBreakdown({
 }): React.JSX.Element {
 	const windowLabel = PERIODS.find(p => p.id === period)?.label ?? period;
 	const sumNote = `按目录行求和 · ${windowLabel}`;
-	const hasRows = sections.byAgent.length + sections.unassignedAgent.length > 0;
+	const hasRows = sections.byAgent.length + sections.unassignedAgent.length + sections.unknownAgent.length > 0;
 	return (
 		<div className="rounded-xl border border-hairline bg-surface">
 			<div className="flex items-baseline justify-between gap-4 px-5 pt-4 pb-2">
@@ -800,7 +811,7 @@ function ScopeBreakdown({
 						</div>
 						<RollupTable
 							groups={sections.byAgent}
-							emptyText="没有归属于单一 Agent 的目录行（见下方未归属 / 多 Agent）"
+							emptyText="没有归属于单一 Agent 的目录行（见下方未归属 / 多 Agent / 归属未知）"
 						/>
 					</div>
 					<div>
@@ -816,36 +827,32 @@ function ScopeBreakdown({
 							<div className="px-5 pb-1 text-[12px] text-ink-faint">
 								Project 归属计算中——此期间不判定「未归属」
 							</div>
-						) : projectState.kind === "unread" ? (
-							<div className="px-5 pb-1 text-[12px] text-ink-faint">
-								Project registry 还没读到——不判定「未归属」
-							</div>
 						) : (
-							<RollupTable
-								groups={sections.byProject}
-								emptyText="没有落在已声明 Project 下的目录行（见下方未归属）"
-							/>
+							<>
+								<RollupTable
+									groups={sections.byProject}
+									emptyText="没有落在已声明 Project 下的目录行（见下方未归属 / 归属未知）"
+								/>
+								{sections.unknownProject.length > 0 && (
+									<RollupTable groups={sections.unknownProject} emptyText="" />
+								)}
+							</>
 						)}
 					</div>
 					<div>
 						<div className="flex items-baseline justify-between gap-4 px-5 py-2">
-							<div className="section-title text-[12.5px]">未归属 / 多 Agent 目录</div>
+							<div className="section-title text-[12.5px]">未归属 / 多 Agent / 归属未知目录</div>
 							<div className="text-[11px] text-ink-faint">
-								不并入任何 Agent（多 Agent 目录整份计给每个 Agent 就是重复计数）
+								都不并入任何 Agent（多 Agent 目录整份计给每个 Agent
+								就是重复计数；未知当成未归属是拿没读过的名单下结论）
 							</div>
 						</div>
 						<RollupTable groups={sections.unassignedAgent} emptyText="无未归属目录行" />
-						{projectState.kind === "ready" && (
-							<>
-								<div className="px-5 pt-3 pb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-									Project 未归属
-								</div>
-								<RollupTable
-									groups={sections.unassignedProject}
-									emptyText="所有目录行都落在已声明 Project 下"
-								/>
-							</>
-						)}
+						{sections.unknownAgent.length > 0 && <RollupTable groups={sections.unknownAgent} emptyText="" />}
+						<div className="px-5 pt-3 pb-2 text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+							Project 未归属 / 归属未知
+						</div>
+						<RollupTable groups={sections.unassignedProject} emptyText="所有目录行都落在已声明 Project 下" />
 					</div>
 				</div>
 			)}
@@ -936,7 +943,14 @@ function SessionScopeCard({
 				</div>
 			) : (
 				<div className="px-5 pb-5 text-[12.5px] text-ink-subtle">
-					{current.state === "unindexed" ? (
+					{current.state === "unknown" ? (
+						<>
+							<div>会话索引未加载——现在无法确认这条会话在不在索引里。</div>
+							<div className="mt-1 text-[11px] text-ink-faint">
+								“没读到”不是“不在索引里”，这里不把两者合着说。
+							</div>
+						</>
+					) : current.state === "unindexed" ? (
 						<>
 							<div>该会话不在索引里——list_sessions 没返回这条会话，因此没有可确认的会话级数字。</div>
 							<div className="mt-1 font-mono text-[11px] text-ink-faint">

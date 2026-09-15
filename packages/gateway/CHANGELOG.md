@@ -10,6 +10,8 @@
 
 - **执行路径不再静默换人做**（`src/scheduler/cron-service.ts`）：agent 任务的执行 home 改由绑定解析得出（只有 `agentId` 的任务也能找到家），且**无可用绑定 / Agent home 不在时不执行**——旧行为会带着空 cwd 退回冷启动子进程（在 gateway 自己的目录身份下干活）并报成功。拒绝时记 `failure` + 从行上可见原因（`docs/client/agent-hub.md` §1.6/§1.7）。shell 任务保持原行为（无身份可弄错）。
 
+- **改绑是“声明式”的：传什么就是什么**（`src/scheduler/agent-binding.ts`, `src/wire-endpoint.ts`, pi-wire `CronUpdateInput.unbind`）：写面用显式联合 `keep | unbind | bind` —— 不给字段=不动、`unbind:true`=清空（与 agentId/agentDir 互斥）、给了字段=整个绑定换成它。**只给 `agentDir` 时旧 `agentId` 被替换**（目录命中注册 Agent → 采用其身份；legacy 目录 → identity 清掉），不再隐式保留旧身份；`agentId` 与 `agentDir` 同时给且指向不同 Agent（或目录不是该 Agent 注册的家）→ `ok:false`，不静默采用目录。registry 读不出来 → 拒绝（不写未校验的绑定）。
+
 ### Fixed
 
 - **`TaskRowDto.accountId` 不再由 agentDir 顶替**（`src/wire-endpoint.ts`）：旧实现 `task.accountId ?? task.agentDir` 把目录当成账号上报，读的人无法区分两者；现在按原样透出，绑定事实一律走 agent 字段。

@@ -167,8 +167,7 @@ describe("attributeFolder", () => {
 			sessions: [session({ agent: "HR", sessionFile: byDateFile("--Users--me--proj") })],
 			agents,
 		});
-		expect(attribution.agentIds).toEqual(["hr"]);
-		expect(attribution.agentNames).toEqual(["HR"]);
+		expect(attribution.agents).toEqual({ state: "known", value: { ids: ["hr"], names: ["HR"] } });
 	});
 
 	it("registry 里没有的 Agent → 原样回落身份串（不编 id）", () => {
@@ -176,8 +175,7 @@ describe("attributeFolder", () => {
 			sessions: [session({ agent: "外包-甲", sessionFile: byDateFile("--Users--me--proj") })],
 			agents,
 		});
-		expect(attribution.agentIds).toEqual(["外包-甲"]);
-		expect(attribution.agentNames).toEqual(["外包-甲"]);
+		expect(attribution.agents).toEqual({ state: "known", value: { ids: ["外包-甲"], names: ["外包-甲"] } });
 	});
 
 	it("同一目录多个 Agent → 全列出（不硬塞给某一个）", () => {
@@ -192,8 +190,7 @@ describe("attributeFolder", () => {
 			],
 			agents,
 		});
-		expect(attribution.agentIds).toEqual(["hr", "ops"]);
-		expect(attribution.agentNames).toEqual(["HR", "Ops"]);
+		expect(attribution.agents).toEqual({ state: "known", value: { ids: ["hr", "ops"], names: ["HR", "Ops"] } });
 	});
 
 	it("gateway 扁平文件不构成目录归属：只认 by-date 会话", () => {
@@ -204,32 +201,41 @@ describe("attributeFolder", () => {
 			],
 			agents,
 		});
-		expect(attribution.agentNames).toEqual(["HR"]);
+		expect(attribution.agents).toEqual({ state: "known", value: { ids: ["hr"], names: ["HR"] } });
 	});
 
-	it("索引里没有任何会话落在这个目录 → Agent 归属为空（未知）", () => {
+	it("索引已加载但没有任何会话落在这个目录 → unassigned（确实未归属）", () => {
 		const attribution = attributeFolder("/Users/me/proj", {
 			sessions: [session({ agent: "Ops", sessionFile: flatFile("/Users/me/agents/ops") })],
 			agents,
 		});
-		expect(attribution.agentIds).toEqual([]);
-		expect(attribution.agentNames).toEqual([]);
+		expect(attribution.agents).toEqual({ state: "unassigned" });
 	});
 
-	it("Project 归属：命中写 projectId，未命中就不写这个字段", () => {
+	it("索引未加载（sessions 缺省）→ unknown，**不是** unassigned（没读过名单不下结论）", () => {
+		const attribution = attributeFolder("/Users/me/proj", { agents });
+		expect(attribution.agents).toEqual({ state: "unknown" });
+	});
+
+	it("Project 归属：命中/未命中/未加载三态分开", () => {
 		const hit = attributeFolder("/Users/me/proj", {
 			sessions: [],
 			projects: [project("p-child", "/Users/me/proj")],
 		});
-		expect(hit.projectId).toBe("p-child");
+		expect(hit.project).toEqual({ state: "known", value: "p-child" });
+
 		const miss = attributeFolder("/Users/me/nowhere", { sessions: [], projects: [project("p", "/Users/me/proj")] });
-		expect(miss.projectId).toBeUndefined();
-		expect("projectId" in miss).toBe(false);
+		expect(miss.project).toEqual({ state: "unassigned" });
 	});
 
-	it("registry 未读到（projects 缺省）时不给 projectId", () => {
+	it("registry 未读到（projects 缺省）→ unknown（**不得**当未归属）", () => {
 		const attribution = attributeFolder("/Users/me/proj", { sessions: [] });
-		expect(attribution.projectId).toBeUndefined();
+		expect(attribution.project).toEqual({ state: "unknown" });
+	});
+
+	it("registry 读到了但确实没声明过（[]）→ unassigned（空名单是一个事实）", () => {
+		const attribution = attributeFolder("/Users/me/proj", { sessions: [], projects: [] });
+		expect(attribution.project).toEqual({ state: "unassigned" });
 	});
 });
 
@@ -246,9 +252,9 @@ describe("attributeFolders", () => {
 		const index = attributeFolders(["/Users/me/proj", "/Users/me/other", "/Users/me/proj"], sources);
 		expect([...index.keys()]).toEqual(["/Users/me/proj", "/Users/me/other"]);
 		expect(index.get("/Users/me/proj")).toEqual(attributeFolder("/Users/me/proj", sources));
-		expect(index.get("/Users/me/proj")?.projectId).toBe("p-child");
-		expect(index.get("/Users/me/other")?.agentNames).toEqual(["Ops"]);
-		expect(index.get("/Users/me/other")?.projectId).toBe("p-parent");
+		expect(index.get("/Users/me/proj")?.project).toEqual({ state: "known", value: "p-child" });
+		expect(index.get("/Users/me/other")?.agents).toEqual({ state: "known", value: { ids: ["ops"], names: ["Ops"] } });
+		expect(index.get("/Users/me/other")?.project).toEqual({ state: "known", value: "p-parent" });
 	});
 });
 
@@ -401,7 +407,7 @@ describe("rollupByProject", () => {
 		expect(sections.unassignedProject[0]?.kind).toBe("unassigned");
 	});
 
-	it("registry 未读到（projects 缺省）→ 所有行都落未归属桶（UI 需先判 pending，不得直接显示）", () => {
+	it("registry 未读到（projects 缺省）→ 行落**归属未知**桶，不进未归属（没读过名单不下结论）", () => {
 		const rows = [folderRow("/Users/me/proj/src", { totalRequests: 20 })];
 		const pendingAttribution = attributeFolders(
 			rows.map(row => row.folder),
@@ -409,6 +415,21 @@ describe("rollupByProject", () => {
 		);
 		const sections = scopeSections({ rows, attribution: pendingAttribution });
 		expect(sections.byProject).toEqual([]);
+		expect(sections.unassignedProject).toEqual([]);
+		expect(sections.unknownProject).toHaveLength(1);
+		expect(sections.unknownProject[0]?.kind).toBe("unknown");
+		expect(sections.unknownProject[0]?.label).toContain("registry 未加载");
+		expect(sections.unknownProject[0]?.totalRequests).toBe(20);
+	});
+
+	it("registry 读到了但确实没声明过（[]）→ 才进未归属桶", () => {
+		const rows = [folderRow("/Users/me/proj/src", { totalRequests: 20 })];
+		const loose = attributeFolders(
+			rows.map(row => row.folder),
+			{ sessions: [], projects: [] },
+		);
+		const sections = scopeSections({ rows, attribution: loose, projects: [] });
+		expect(sections.unknownProject).toEqual([]);
 		expect(sections.unassignedProject[0]?.totalRequests).toBe(20);
 	});
 

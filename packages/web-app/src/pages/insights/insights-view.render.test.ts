@@ -149,8 +149,10 @@ describe("InsightsView 的未知状态不被顶替", () => {
 		const html = render({});
 		expect(html).toContain("用量统计加载中——分区需要 stats byFolder");
 		expect(html).not.toContain("该时段没有目录级行");
-		expect(html).toContain("该会话不在索引里");
-		expect(html).toContain("目录级数字不能冒充会话级指标");
+		// 静态渲染不跑 effect：会话索引还没加载 → 不能说「不在索引里」（那是另一个结论）
+		expect(html).toContain("会话索引未加载");
+		expect(html).not.toContain("该会话不在索引里");
+		expect(html).toContain("“没读到”不是“不在索引里”");
 	});
 
 	it("学习面在数据未到时说「尚未读取」，不显示 0 计数", () => {

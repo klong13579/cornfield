@@ -17,7 +17,7 @@ export interface RecordingScope {
 	agentId?: string;
 	/** 焦点 Agent 的 home（CLI 写入的记录没有 agentId，只有 home）。 */
 	agentDir?: string;
-	/** 当前会话文件（服务端 attach 会话）。 */
+	/** 当前会话文件（服务端 attach 会话）。比较时做路径归一（分隔符/重复/trailing）。 */
 	sessionFile?: string;
 	/** 当前 Project。 */
 	projectId?: string;
@@ -46,9 +46,13 @@ export const RECORDING_BUCKET_ORDER: RecordingBucket[] = ["session", "agent", "p
 export function bucketOf(recording: ListenRecordingDto, scope: RecordingScope): RecordingBucket {
 	const provenance = recording.provenance;
 	if (!provenance) return "unlabeled";
-	if (scope.sessionFile && provenance.sessionFile && provenance.sessionFile === scope.sessionFile) return "session";
+	// 路径比较先归一：同一份会话文件在不同写入方手里可能是 `/x//y/`、`\x\y` 或带尾随分隔符，
+	// 字面量相等会把同一条录音判成「别的会话」（或反过来漏掉本会话）。
+	if (scope.sessionFile && provenance.sessionFile && samePath(provenance.sessionFile, scope.sessionFile)) {
+		return "session";
+	}
 	if (scope.agentId && provenance.agentId && provenance.agentId === scope.agentId) return "agent";
-	if (scope.agentDir && provenance.agentDir && normalizePath(provenance.agentDir) === normalizePath(scope.agentDir)) {
+	if (scope.agentDir && provenance.agentDir && samePath(provenance.agentDir, scope.agentDir)) {
 		return "agent";
 	}
 	if (scope.projectId && provenance.projectId && provenance.projectId === scope.projectId) return "project";
@@ -98,6 +102,11 @@ export function recordingScopeLabel(recording: ListenRecordingDto): string {
 	if (provenance.sessionFile) return provenance.sessionFile.split("/").pop() ?? provenance.sessionFile;
 	if (provenance.projectId) return provenance.projectId;
 	return RECORDING_BUCKET_LABELS.unlabeled;
+}
+
+/** 路径是否指向同一个位置（比较用，非解析）：分隔符统一、折叠重复、去尾随。 */
+function samePath(a: string, b: string): boolean {
+	return normalizePath(a) === normalizePath(b);
 }
 
 function normalizePath(value: string): string {

@@ -48,6 +48,30 @@ describe("bucketOf", () => {
 		expect(bucketOf(rec({ name: "cli", provenance: { agentDir: `${HR_DIR}/` } }), SCOPE)).toBe("agent");
 	});
 
+	test("sessionFile 比较先做路径归一（尾随分隔符 / 重复分隔符 / 反斜杠）", () => {
+		const variants = [
+			`${SCOPE.sessionFile}/`,
+			SCOPE.sessionFile.replace("/sessions/", "//sessions/"),
+			SCOPE.sessionFile.replaceAll("/", "\\"),
+		];
+		for (const variant of variants) {
+			expect(bucketOf(rec({ name: `v-${variant.length}`, provenance: { sessionFile: variant } }), SCOPE)).toBe(
+				"session",
+			);
+		}
+	});
+
+	test("agentDir 比较同样归一（否则同一个家会被判成别人的）", () => {
+		expect(
+			bucketOf(rec({ name: "a", provenance: { agentDir: `\\Users\\me\\.cornfield\\agents\\hr\\` } }), SCOPE),
+		).toBe("agent");
+	});
+
+	test("不同会话文件不会被归成同一会话", () => {
+		const other = SCOPE.sessionFile.replace("conv.jsonl", "other.jsonl");
+		expect(bucketOf(rec({ name: "x", provenance: { sessionFile: other } }), SCOPE)).toBe("other");
+	});
+
 	test("有标注但不属于本 scope → 其他（不塞进本 Agent）", () => {
 		expect(bucketOf(rec({ name: "x", provenance: { agentId: "coding", agentDir: CODING_DIR } }), SCOPE)).toBe(
 			"other",

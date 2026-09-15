@@ -32,6 +32,7 @@ import {
 	resolveScheduleAgentBinding,
 	resolveScheduleAgentForWrite,
 	type ScheduleAgentBinding,
+	type ScheduleAgentWrite,
 } from "./scheduler/agent-binding";
 import { runTestRun } from "./scheduler/test-run";
 import type { ScheduledTask, SchedulerStorage, TaskExecution } from "./scheduler/types";
@@ -280,10 +281,16 @@ export async function handleGatewayWireCommand(
 			if (storage.getTaskByName(name)) {
 				return { ok: false, error: `task already exists: ${name}` };
 			}
-			const resolved = await resolveScheduleAgentForWrite(
-				{ agentId: str(command.agentId), agentDir: str(command.agentDir) },
-				resolveBinding,
-			);
+			const createId = str(command.agentId);
+			const createDir = str(command.agentDir);
+			// create 总是显式的：给了字段就解析（两个都给必须一致），什么都没给 = 明确不绑。
+			// 「不绑」是合法状态（行上报 unbound、运行面拒绝执行），而不是错误 —— 但也不允许
+			// 把一个含糊的空 bind 交给解析器去猜。
+			const createWrite: ScheduleAgentWrite =
+				createId !== undefined || createDir !== undefined
+					? { kind: "bind", agentId: createId, agentDir: createDir }
+					: { kind: "unbind" };
+			const resolved = await resolveScheduleAgentForWrite(createWrite, loadEntries);
 			if (!resolved.ok) return { ok: false, error: resolved.error };
 			const binding = resolved.binding;
 
@@ -347,17 +354,24 @@ export async function handleGatewayWireCommand(
 			const delivery = deliveryOf(command.delivery);
 			if (delivery) updates.delivery = delivery;
 
-			// Rebinding is a write of the *resolved* identity, exactly like create: accept it
-			// only when it resolves, and never leave a half-applied binding (identity from the
-			// request, home from the old row).
+			// 改绑就是一次声明式的写入：传了什么就是什么。**不**与旧行合并 ——
+			// 「只给了 agentDir」意味着整个绑定改成那个目录（identity 随之重算或被清掉），
+			// 否则旧 agentId 会粘在一个新 home 上。三个意图显式分开：不给=不动，unbind=清空，给了=绑定。
 			const rebindId = str(command.agentId);
 			const rebindDir = str(command.agentDir);
-			if (rebindId !== undefined || rebindDir !== undefined) {
-				const resolved = await resolveScheduleAgentForWrite(
-					{ agentId: rebindId ?? existing.agentId, agentDir: rebindDir },
-					resolveBinding,
-				);
+			const unbind = command.unbind === true;
+			const write: ScheduleAgentWrite = unbind
+				? { kind: "unbind" }
+				: rebindId !== undefined || rebindDir !== undefined
+					? { kind: "bind", agentId: rebindId, agentDir: rebindDir }
+					: { kind: "keep" };
+			if (unbind && (rebindId !== undefined || rebindDir !== undefined)) {
+				return { ok: false, error: "unbind 与 agentId/agentDir 互斥：要么清空绑定，要么绑到某个 Agent。" };
+			}
+			if (write.kind !== "keep") {
+				const resolved = await resolveScheduleAgentForWrite(write, loadEntries);
 				if (!resolved.ok) return { ok: false, error: resolved.error };
+				// undefined 即“清掉”：两个存储实现都会把它写成 null/删键（JSON 掉 undefined、SQLite 写 NULL）。
 				updates.agentId = resolved.binding.agentId;
 				updates.agentDir = resolved.binding.agentDir;
 			}

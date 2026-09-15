@@ -214,6 +214,102 @@ describe("cron_update：恢复旧行的绑定", () => {
 		expect(persisted?.agentId).toBe("hr");
 	});
 
+	test("只给 agentDir（注册 home）→ **整个绑定换成该目录**，旧 agentId 不保留", async () => {
+		const task = seedLegacyTask(storage, { name: "dir-only-registered", agentId: "hr", agentDir: HR_DIR });
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, agentDir: CODING_DIR }, deps);
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+		const row = (res.result as { task: Record<string, unknown> }).task;
+		expect(row.agentId).toBe("coding");
+		expect(row.agentDir).toBe(CODING_DIR);
+
+		const persisted = storage.getTask(task.id);
+		expect(persisted?.agentId).toBe("coding");
+		expect(persisted?.agentDir).toBe(CODING_DIR);
+	});
+
+	test("只给 legacy agentDir（无注册拥有者）→ identity 被清掉”（旧 agentId 不得粘在新 home 上）", async () => {
+		const task = seedLegacyTask(storage, { name: "dir-only-legacy", agentId: "hr", agentDir: HR_DIR });
+		const legacyDir = "/Users/me/OMP-workspace-test/omp-atomix";
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, agentDir: legacyDir }, deps);
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+		const row = (res.result as { task: Record<string, unknown> }).task;
+		expect(row.agentResolution).toBe("unregistered");
+		expect(row.agentId).toBeUndefined();
+		expect(row.agentDir).toBe(legacyDir);
+
+		const persisted = storage.getTask(task.id);
+		expect(persisted?.agentId).toBeUndefined();
+		expect(persisted?.agentDir).toBe(legacyDir);
+	});
+
+	test("同时给 agentId + 指向另一 Agent 的 agentDir → 拒绝，原绑定不动", async () => {
+		const task = seedLegacyTask(storage, { name: "conflict", agentId: "hr", agentDir: HR_DIR });
+		const res = await handleGatewayWireCommand(
+			{ type: "cron_update", taskId: task.id, agentId: "hr", agentDir: CODING_DIR },
+			deps,
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.error).toContain("指向不同 Agent");
+		expect(storage.getTask(task.id)?.agentId).toBe("hr");
+		expect(storage.getTask(task.id)?.agentDir).toBe(HR_DIR);
+	});
+
+	test("create 同时给不一致的两个字段 → 拒绝（不静默采用目录）", async () => {
+		const res = await handleGatewayWireCommand(
+			{
+				type: "cron_create",
+				name: "conflict-create",
+				cron: "0 9 * * *",
+				command: "echo 1",
+				agentId: "hr",
+				agentDir: CODING_DIR,
+			},
+			deps,
+		);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.error).toContain("指向不同 Agent");
+		expect(storage.getTaskByName("conflict-create")).toBeUndefined();
+	});
+
+	test("unbind → 清空绑定（落盘真的没值，重启后也没值）且与再绑互斥", async () => {
+		const task = seedLegacyTask(storage, { name: "to-unbind", agentId: "hr", agentDir: HR_DIR });
+
+		const conflict = await handleGatewayWireCommand(
+			{ type: "cron_update", taskId: task.id, unbind: true, agentId: "hr" },
+			deps,
+		);
+		expect(conflict.ok).toBe(false);
+		expect(storage.getTask(task.id)?.agentId).toBe("hr");
+
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, unbind: true }, deps);
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+		const row = (res.result as { task: Record<string, unknown> }).task;
+		expect(row.agentResolution).toBe("unbound");
+		expect(row.agentId).toBeUndefined();
+		expect(row.agentDir).toBeUndefined();
+
+		// 真落盘：新 storage 实例（= 重启）里也不带绑定
+		const reopened = new JsonFileStorage(path.join(tmpDir, "jobs.json"));
+		const persisted = reopened.getTask(task.id);
+		expect(persisted?.agentId).toBeUndefined();
+		expect(persisted?.agentDir).toBeUndefined();
+		reopened.close();
+	});
+
+	test("unbind 后再绑回来（恢复）→ agentId 重新落盘", async () => {
+		const task = seedLegacyTask(storage, { name: "rebind-after-unbind", agentId: "hr", agentDir: HR_DIR });
+		await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, unbind: true }, deps);
+		expect(storage.getTask(task.id)?.agentId).toBeUndefined();
+
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, agentId: "coding" }, deps);
+		expect(res.ok).toBe(true);
+		expect(storage.getTask(task.id)?.agentId).toBe("coding");
+		expect(storage.getTask(task.id)?.agentDir).toBe(CODING_DIR);
+	});
+
 	test("未知 taskId → ok:false", async () => {
 		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: "nope", cron: "0 1 * * *" }, deps);
 		expect(res.ok).toBe(false);

@@ -6,7 +6,13 @@
 
 - **定时任务工作台按 Agent / Project / Session scope 展示**（`src/pages/tasks/TasksView.tsx`, `src/pages/tasks/task-scope.ts`, `src/pages/insights/*`, `src/pages/voice/recording-scope.ts`, `src/lib/pi-client-api.ts`, `src/state/*`）：任务列表默认只看当前焦点 Agent 的任务（身份匹配，或旧行的执行 home 与其相同），身份未解析/未绑定的行单独成组、不归到任何 Agent 名下，并在行上写明「不会执行」的原因；Agent 组带声明的 Project 绑定（未声明只说未声明，不编一个项目）；执行记录里的 `agentSessionPath` 与投递目标会话即 Session scope。用量页按 Agent / Project 汇总目录行（求和派生，口径在 UI 标注；多 Agent / 未归属单独成组，不并入任何 Agent），会话 scope 只展示可确认的事实。听记历史按写入时标下的 provenance 分桶（本会话 / 本 Agent / 本 Project / 其他 / **未标注**）——旧记录不会被归给当前 Agent。
 
-- **定时任务写操作接通**（`src/pages/tasks/TasksView.tsx`, `src/state/{pi-client-adapter,session-store}.ts`）：创建 / 暂停启用 / 删除 / 试跑 / 改绑 Agent 全部经 gateway `POST /wire`（`cron_create` / `cron_update` / `cron_remove` / `cron_test_run`），失败原因（agentId 未注册、Agent home 不在、重名、未知 taskId）原样亮出，不再吞成「创建失败」。创建表单可选执行 Agent（缺省 = 当前焦点 Agent），创建时由网关解析并落盘 resolved agentId。
+- **定时任务写操作接通**（`src/pages/tasks/TasksView.tsx`, `src/state/{pi-client-adapter,session-store}.ts`）：创建 / 暂停启用 / 删除 / 试跑 / 改绑 Agent 全部经 gateway `POST /wire`（`cron_create` / `cron_update` / `cron_remove` / `cron_test_run`），失败原因（agentId 未注册、Agent home 不在、绑定的两个字段不一致、重名、未知 taskId）原样亮出，不再吞成「创建失败」。创建表单可选执行 Agent（缺省 = 当前焦点 Agent），创建时由网关解析并落盘 resolved agentId。
+
+### Fixed
+
+- **用量页的两个轴都保留「未加载」态**（`src/pages/insights/insights-scope.ts`, `InsightsView.tsx`）：`FolderAttribution` 的 Agent/Project 两个轴改成带标签的三态（`known` / `unassigned` / `unknown`）——registry 未读到（`projects === undefined`）或会话索引未加载（`sessions === undefined`）时归属是 **unknown**，不再被归进「未归属」；分区表把「归属未知」单独成组并写明原因（“没读过名单”与“确实未归属”不再互相顶替）。Session scope 同理：「会话索引未加载」不再说成「该会话不在索引里」。
+
+- **听记 scope 的 sessionFile 比较先做路径归一**（`src/pages/voice/recording-scope.ts`）：尾随分隔符 / 重复分隔符 / 反斜杠写法的同一个会话文件以前字面量比较不通过，会把本会话的录音判成「其他」；现在与 agentDir 用同一份归一规则。
 
 ## [1.1.1] - 2026-09-06
 

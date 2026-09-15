@@ -176,9 +176,20 @@ export interface CronUpdateInput {
 	description?: string;
 	status?: "active" | "paused" | "disabled";
 	taskType?: "shell" | "agent";
-	/** 改绑 Agent（恢复旧 Schedule 的绑定走这条）。解析不到 → ok:false，原绑定不动。 */
+	/**
+	 * 改绑 Agent（恢复旧 Schedule 的绑定走这条）。解析不到 → ok:false，原绑定不动。
+	 *
+	 * 声明式语义：
+	 * - 两个字段都不给 = 不动绑定（只有改别的字段时才这样）；
+	 * - 只给 `agentId` → 落盘该 Agent 的注册 home；
+	 * - 只给 `agentDir` → **整个绑定换成该目录**（identity 重算或清掉），不隐式保留旧 agentId；
+	 * - 两个都给 → 必须一致（指向同一个 Agent），不一致 → ok:false；
+	 * - `unbind: true` → 清空绑定（与上面两个字段互斥）。
+	 */
 	agentId?: string;
 	agentDir?: string;
+	/** 显式清空绑定：行保留、不执行；与 agentId/agentDir 互斥。 */
+	unbind?: boolean;
 	model?: string;
 	provider?: string;
 	enabledToolsets?: string[];

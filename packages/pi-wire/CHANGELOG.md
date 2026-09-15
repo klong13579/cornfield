@@ -8,6 +8,8 @@
 
 - **听记条目形状 canon化**（`src/results/listen.ts`）：`ListenRecordingDto` + `ListenProvenanceDto`（写入时标下的 agentId / agentDir / projectId / sessionFile）进 pi-wire，serve 与 web-app 共用一份（客户端级听记库里的归属只能来自这个字段，缺省 = 未标注）。
 
+- **`CronUpdateInput.unbind`**（`src/results/cron.ts`）：改绑语义写进契约 —— 两个字段都不给 = 不动绑定；只给 `agentId`/`agentDir` = **整个绑定换成它**（不隐式保留旧身份）；两个都给必须指向同一个 Agent，否则网关 `ok:false`；`unbind: true` 显式清空（与上面两个字段互斥）。
+
 ## [1.1.1] - 2026-09-06
 
 ### Added

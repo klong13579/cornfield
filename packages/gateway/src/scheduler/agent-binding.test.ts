@@ -107,51 +107,108 @@ describe("bindFromDirectory", () => {
 });
 
 describe("resolveScheduleAgentForWrite", () => {
-	test("未声明任何绑定 → 合法（行上报 unbound，运行面拒绝执行）", async () => {
-		const resolved = await resolveScheduleAgentForWrite({}, async () => ({
-			resolution: "unbound",
-			error: "无绑定",
-		}));
-		expect(resolved.ok).toBe(true);
-		if (resolved.ok) expect(resolved.binding.resolution).toBe("unbound");
-	});
+	const loadEntries = async (): Promise<AgentDirectoryEntry[]> => ENTRIES;
 
-	test("声明的 agentId 未注册 → 拒绝写入（不静默改用别的 home）", async () => {
-		const resolved = await resolveScheduleAgentForWrite({ agentId: "ghost", agentDir: "/tmp/whatever" }, async () =>
-			bindFromDirectory(ENTRIES, "/tmp/whatever", "ghost"),
-		);
+	test("keep：不改绑定（调用方根本不该走解析）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "keep" }, loadEntries);
 		expect(resolved.ok).toBe(false);
-		if (!resolved.ok) expect(resolved.error).toContain("ghost");
 	});
 
-	test("声明的 Agent 已注册但 home 不在 → 拒绝写入（调度跑不起来，不能报成功）", async () => {
-		const resolved = await resolveScheduleAgentForWrite({ agentDir: "/Users/me/.cornfield/agents/gone" }, async () =>
-			bindFromDirectory(ENTRIES, "/Users/me/.cornfield/agents/gone", undefined),
-		);
-		expect(resolved.ok).toBe(false);
-		if (!resolved.ok) expect(resolved.error).toContain("agentDir 不存在");
-	});
-
-	test("legacy 目录（不是任何注册 Agent 的家）→ 允许写入并保留声明的路径", async () => {
-		const resolved = await resolveScheduleAgentForWrite(
-			{ agentDir: "/Users/me/OMP-workspace-test/omp-atomix" },
-			async () => bindFromDirectory(ENTRIES, "/Users/me/OMP-workspace-test/omp-atomix", undefined),
-		);
+	test("unbind：清空绑定（agentId/agentDir 都不落盘，行保留、不执行）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "unbind" }, loadEntries);
 		expect(resolved.ok).toBe(true);
 		if (resolved.ok) {
-			expect(resolved.binding.agentDir).toBe("/Users/me/OMP-workspace-test/omp-atomix");
+			expect(resolved.binding.resolution).toBe("unbound");
 			expect(resolved.binding.agentId).toBeUndefined();
+			expect(resolved.binding.agentDir).toBeUndefined();
 		}
 	});
 
-	test("已注册且 home 在 → 落盘的身份是解析后的 agentId + agentDir", async () => {
-		const resolved = await resolveScheduleAgentForWrite({ agentId: "hr" }, async () =>
-			bindFromDirectory(ENTRIES, undefined, "hr"),
-		);
+	test("bind 两个字段都不给：调用方错误（清空要用 unbind，不是空 bind）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "bind" }, loadEntries);
+		expect(resolved.ok).toBe(false);
+		if (!resolved.ok) expect(resolved.error).toContain("unbind");
+	});
+
+	test("只给 agentId：落盘注册 home（agentDir 由注册表补全）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "bind", agentId: "hr" }, loadEntries);
 		expect(resolved.ok).toBe(true);
 		if (resolved.ok) {
 			expect(resolved.binding.agentId).toBe("hr");
 			expect(resolved.binding.agentDir).toBe("/Users/me/.cornfield/agents/hr");
 		}
+	});
+
+	test("声明的 agentId 未注册 → 拒绝写入（不静默改用别的 home / 别的身份）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "bind", agentId: "ghost" }, loadEntries);
+		expect(resolved.ok).toBe(false);
+		if (!resolved.ok) expect(resolved.error).toContain("ghost");
+	});
+
+	test("只给 agentDir：**整个绑定换成该目录**，identity 随之解析出来（不是补丁）", async () => {
+		const resolved = await resolveScheduleAgentForWrite(
+			{ kind: "bind", agentDir: "/Users/me/.cornfield/agents/coding" },
+			loadEntries,
+		);
+		expect(resolved.ok).toBe(true);
+		if (resolved.ok) {
+			expect(resolved.binding.agentId).toBe("coding");
+			expect(resolved.binding.agentDir).toBe("/Users/me/.cornfield/agents/coding");
+		}
+	});
+
+	test("只给 legacy agentDir（无注册拥有者）→ 落盘路径且** identity 被清空**（旧 agentId 不得粘上来）", async () => {
+		const legacyDir = "/Users/me/OMP-workspace-test/omp-atomix";
+		const resolved = await resolveScheduleAgentForWrite({ kind: "bind", agentDir: legacyDir }, loadEntries);
+		expect(resolved.ok).toBe(true);
+		if (resolved.ok) {
+			expect(resolved.binding.agentDir).toBe(legacyDir);
+			expect(resolved.binding.agentId).toBeUndefined();
+			expect(resolved.binding.resolution).toBe("unregistered");
+		}
+	});
+
+	test("同时给 agentId + agentDir 且指向**不同** Agent → 拒绝（不静默采用目录）", async () => {
+		const resolved = await resolveScheduleAgentForWrite(
+			{ kind: "bind", agentId: "hr", agentDir: "/Users/me/.cornfield/agents/coding" },
+			loadEntries,
+		);
+		expect(resolved.ok).toBe(false);
+		if (!resolved.ok) {
+			expect(resolved.error).toContain("指向不同 Agent");
+			expect(resolved.error).toContain("coding");
+		}
+	});
+
+	test("同时给 agentId + 不平的 agentDir（目录不是任何注册 Agent 的家）→ 拒绝", async () => {
+		const resolved = await resolveScheduleAgentForWrite(
+			{ kind: "bind", agentId: "hr", agentDir: "/tmp/somewhere-else" },
+			loadEntries,
+		);
+		expect(resolved.ok).toBe(false);
+		if (!resolved.ok) expect(resolved.error).toContain("不是 Agent「hr」注册的家");
+	});
+
+	test("同时给且一致（同一 Agent 的注册 home）→ 通过", async () => {
+		const resolved = await resolveScheduleAgentForWrite(
+			{ kind: "bind", agentId: "hr", agentDir: "/Users/me/.cornfield/agents/hr" },
+			loadEntries,
+		);
+		expect(resolved.ok).toBe(true);
+		if (resolved.ok) expect(resolved.binding.agentId).toBe("hr");
+	});
+
+	test("已注册但 home 不在 → 拒绝写入（调度跑不起来，不能报成功）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "bind", agentId: "gone" }, loadEntries);
+		expect(resolved.ok).toBe(false);
+		if (!resolved.ok) expect(resolved.error).toContain("agentDir 不存在");
+	});
+
+	test("registry 读不出来 → 拒绝（声明的身份无法校验，不写未校验的绑定）", async () => {
+		const resolved = await resolveScheduleAgentForWrite({ kind: "bind", agentId: "hr" }, async () => {
+			throw new Error("registry.json 损坏");
+		});
+		expect(resolved.ok).toBe(false);
+		if (!resolved.ok) expect(resolved.error).toContain("registry.json 损坏");
 	});
 });
