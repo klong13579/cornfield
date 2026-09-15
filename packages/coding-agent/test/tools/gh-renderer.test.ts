@@ -116,6 +116,67 @@ describe("githubToolRenderer", () => {
 		expect(rendered).not.toContain("alpha");
 		expect(rendered).toContain("more log lines");
 	});
+
+	it("states why a commit watch gave up instead of claiming it is still waiting", async () => {
+		const surface = await createRenderSurface({ width: 72 });
+		const reason =
+			"No workflow runs found for owner/repo@abc123def456 after 90s (23 polls). The commit may not trigger any GitHub " +
+			"Actions workflows, or Actions may be disabled for this repository. Pass `run` to watch a specific run.";
+
+		const rendered = surface.expectWithinWidth(
+			githubToolRenderer.renderResult(
+				{
+					content: [{ type: "text", text: reason }],
+					details: {
+						watch: {
+							mode: "commit",
+							state: "completed",
+							repo: "owner/repo",
+							headSha: "abc123def456",
+							pollCount: 23,
+							runs: [],
+							note: reason,
+						},
+					},
+				},
+				{ expanded: false, isPartial: false },
+				surface.theme,
+				{ op: "run_watch" },
+			),
+		);
+
+		expect(rendered).toContain("workflow runs for abc123def456 on owner/repo");
+		expect(rendered).toContain("No workflow runs found for owner/repo@abc123def456");
+		expect(rendered).not.toContain("waiting for workflow runs");
+	});
+
+	it("keeps saying it is waiting while a commit watch is still looking for runs", async () => {
+		const surface = await createRenderSurface({ width: 72 });
+
+		const rendered = surface.text(
+			githubToolRenderer.renderResult(
+				{
+					content: [{ type: "text", text: "# Watching GitHub Actions for abc123def456" }],
+					details: {
+						watch: {
+							mode: "commit",
+							state: "watching",
+							repo: "owner/repo",
+							headSha: "abc123def456",
+							pollCount: 1,
+							runs: [],
+						},
+					},
+				},
+				{ expanded: false, isPartial: true },
+				surface.theme,
+				{ op: "run_watch" },
+			),
+		);
+
+		expect(rendered).toContain("watching abc123def456 on owner/repo");
+		expect(rendered).toContain("waiting for workflow runs...");
+	});
 });
 
 /**
