@@ -8,7 +8,6 @@ import path from "node:path";
 import type { AgentEvent, ThinkingLevel } from "@cornfield/agent";
 import { logger, prompt, untilAborted } from "@cornfield/utils";
 import type { TSchema } from "@sinclair/typebox";
-import Ajv, { type ValidateFunction } from "ajv";
 import { ModelRegistry } from "../config/model-registry";
 import { resolveModelOverride } from "../config/model-resolver";
 import type { PromptTemplate } from "../config/prompt-templates";
@@ -29,7 +28,8 @@ import type { AuthStorage } from "../session/auth-storage";
 import { SessionManager } from "../session/session-manager";
 import { truncateTail } from "../session/streaming-output";
 import type { ContextFileEntry } from "../tools";
-import { jtdToJsonSchema, normalizeSchema } from "../tools/jtd-to-json-schema";
+import { normalizeSchema } from "../tools/jtd-to-json-schema";
+import { buildOutputValidator } from "../tools/output-schema-validator";
 import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
@@ -47,7 +47,6 @@ import {
 } from "./types";
 
 const MCP_CALL_TIMEOUT_MS = 60_000;
-const ajv = new Ajv({ allErrors: true, strict: false, logger: false });
 
 /** Agent event types to forward for progress tracking. */
 const agentEventTypes = new Set<AgentEvent["type"]>([
@@ -178,18 +177,6 @@ function parseStringifiedJson(value: unknown): unknown {
 	}
 }
 
-function buildOutputValidator(schema: unknown): { validate?: ValidateFunction; error?: string } {
-	const { normalized, error } = normalizeSchema(schema);
-	if (error) return { error };
-	if (normalized === undefined) return {};
-	const jsonSchema = jtdToJsonSchema(normalized);
-	try {
-		return { validate: ajv.compile(jsonSchema as any) };
-	} catch (err) {
-		return { error: err instanceof Error ? err.message : String(err) };
-	}
-}
-
 function tryParseJsonOutput(text: string): unknown | undefined {
 	const trimmed = text.trim();
 	if (!trimmed) return undefined;
@@ -233,7 +220,7 @@ function resolveFallbackCompletion(rawOutput: string, outputSchema: unknown): { 
 	if (candidate === undefined) return null;
 	const { validate, error } = buildOutputValidator(outputSchema);
 	if (error) return null;
-	if (validate && !validate(candidate)) return null;
+	if (validate && !validate(candidate).valid) return null;
 	return { data: candidate };
 }
 
@@ -301,8 +288,12 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 		}
 	} else {
 		const allowFallback = exitCode === 0 && !doneAborted && !signalAborted;
-		const { normalized: normalizedSchema, error: schemaError } = normalizeSchema(outputSchema);
-		const hasOutputSchema = normalizedSchema !== undefined && !schemaError;
+		// "Was a schema declared?" is a different question from "does this payload satisfy it?",
+		// and only needs the declaration read, not a compiled validator: `normalizeSchema` is a
+		// pure read, while building the validator converts the declaration (and throws on shapes
+		// that defeat conversion, which this branch must keep tolerating).
+		const { normalized: normalizedSchema } = normalizeSchema(outputSchema);
+		const hasOutputSchema = normalizedSchema !== undefined;
 		const fallback = allowFallback ? resolveFallbackCompletion(rawOutput, outputSchema) : null;
 		if (fallback) {
 			const completeData = normalizeCompleteData(fallback.data, reportFindings);

@@ -432,3 +432,89 @@ describe("YieldTool", () => {
 		expect(tool.lenientArgValidation).toBe(true);
 	});
 });
+
+/**
+ * Guards on the behavior `yield` already had before the output-schema validation was
+ * unified. Every assertion here is a contract the unified entry point must reproduce,
+ * including the exact model-facing wording and the accept/reject decision per case.
+ */
+describe("YieldTool schema validation guards", () => {
+	const strictSchema = {
+		type: "object",
+		properties: { token: { type: "string", minLength: 3 } },
+		required: ["token"],
+		additionalProperties: false,
+	};
+
+	it("accepts any object when no output schema is declared", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: undefined }));
+		const result = await tool.execute("guard-undefined", { result: { data: { anything: [1, 2, 3] } } } as never);
+		expect(result.details).toEqual({ data: { anything: [1, 2, 3] }, status: "success", error: undefined });
+	});
+
+	it("accepts any data when the declared schema is not valid JSON", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: "{ not json" }));
+		// The declaration failed to parse, so no validator is bound and the tool stays strict
+		// (strict is only cleared on the schema-processing failure path).
+		expect(tool.strict).toBe(true);
+		expect(getSuccessDataSchema(tool.parameters as unknown as Record<string, unknown>).description).toContain(
+			"accepting unconstrained object",
+		);
+		const result = await tool.execute("guard-unparseable", { result: { data: { ok: true } } } as never);
+		expect(result.details).toEqual({ data: { ok: true }, status: "success", error: undefined });
+	});
+
+	it("accepts any data when the declared schema rejects every output", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: false }));
+		expect(getSuccessDataSchema(tool.parameters as unknown as Record<string, unknown>).description).toContain(
+			"boolean false schema rejects all outputs",
+		);
+		const result = await tool.execute("guard-false-schema", { result: { data: { ok: true } } } as never);
+		expect(result.details).toEqual({ data: { ok: true }, status: "success", error: undefined });
+	});
+
+	it("rejects null data even when a schema is declared", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: strictSchema }));
+		await expect(tool.execute("guard-null", { result: { data: null } } as never)).rejects.toThrow(
+			"data is required when yield indicates success",
+		);
+	});
+
+	it("rejects a result object carrying neither data nor error", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: strictSchema }));
+		await expect(tool.execute("guard-empty", { result: {} } as never)).rejects.toThrow(
+			"result must contain either `data` or `error`",
+		);
+	});
+
+	it("names the missing required field in the failure message", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: strictSchema }));
+		await expect(tool.execute("guard-missing", { result: { data: { other: 1 } } } as never)).rejects.toThrow(
+			"Output does not match schema: must have required property 'token'",
+		);
+	});
+
+	it("rejects extra fields on a closed schema", async () => {
+		const tool = new YieldTool(createSession({ outputSchema: strictSchema }));
+		await expect(
+			tool.execute("guard-extra", { result: { data: { token: "abcd", extra: 1 } } } as never),
+		).rejects.toThrow("Output does not match schema: must NOT have additional properties");
+	});
+
+	it("points at the offending nested value", async () => {
+		const nestedSchema = {
+			type: "object",
+			properties: {
+				items: {
+					type: "array",
+					items: { type: "object", properties: { n: { type: "integer" } }, required: ["n"] },
+				},
+			},
+			required: ["items"],
+		};
+		const tool = new YieldTool(createSession({ outputSchema: nestedSchema }));
+		await expect(tool.execute("guard-nested", { result: { data: { items: [{}] } } } as never)).rejects.toThrow(
+			"Output does not match schema: /items/0: must have required property 'n'",
+		);
+	});
+});
