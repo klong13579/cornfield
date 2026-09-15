@@ -74,6 +74,52 @@ async function withClient<T>(fn: (client: PiClient) => Promise<T>): Promise<T> {
 	}
 }
 
+type FsWriteResult = { path: string; bytesWritten: number; version: string };
+type FsReadResult = { path: string; text: string; truncated: boolean; version: string };
+
+/** 单次整段写的服务端上界（`src/server/wire-server.ts` 的 FS_MAX_WRITE_BYTES）。 */
+const FS_MAX_WRITE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * `expectedVersion` 还没进 @cornfield/wire 的命令类型（pi-wire 是另一张票的范围），
+ * 所以这里和服务端 / web-app 适配层一样按实测形状铸型——测的是行为，不是为了绕过类型。
+ */
+async function fsWrite(
+	client: PiClient,
+	payload: { path: string; content: string; expectedVersion?: string },
+): Promise<FsWriteResult> {
+	return client.request<FsWriteResult>({ type: "fs_write", ...payload } as never);
+}
+
+async function fsRead(client: PiClient, path: string): Promise<FsReadResult> {
+	return client.request<FsReadResult>({ type: "fs_read", path } as never);
+}
+
+/** 取服务端原始错误文本（与 web-app conflictDetailOf 读的是同一个字段）。 */
+function serverErrorText(err: unknown): string {
+	const raw = (err as { serverError?: unknown }).serverError;
+	if (typeof raw === "string") return raw;
+	return err instanceof Error ? err.message : String(err);
+}
+
+/** 断言这次写被服务端拒绝，返回拒绝理由。 */
+async function fsWriteError(
+	client: PiClient,
+	payload: { path: string; content: string; expectedVersion?: string },
+): Promise<string> {
+	try {
+		await fsWrite(client, payload);
+	} catch (err) {
+		return serverErrorText(err);
+	}
+	throw new Error(`expected fs_write(${payload.path}) to be refused, but it succeeded`);
+}
+
+/** 盘上真实字节（绕过 wire，模拟外部写入者 / 验证拒绝后没落盘）。 */
+async function diskText(rel: string): Promise<string> {
+	return Bun.file(path.join(projectCwd, rel)).text();
+}
+
 describe("fs 写命令面（fs_write / fs_edit / fs_diff）", () => {
 	test("fs_write 整段写 + 磁盘回读", async () => {
 		await withClient(async client => {
@@ -146,4 +192,147 @@ describe("fs 写命令面（fs_write / fs_edit / fs_diff）", () => {
 			expect(res.diff).toContain("two");
 		});
 	});
+});
+
+/**
+ * 乐观并发（CAS）——服务器侧不变量：读到的东西和要写回去的东西必须是同一份，否则拒写。
+ * 冲突承载在 `error` 字符串的 `fs_conflict: ` 前缀上（WireErrorCode 在 pi-wire，本票范围外）。
+ */
+describe("fs_write 乐观并发（expectedVersion ↔ fs_read version）", () => {
+	test("fs_read 带回内容身份 version：同内容同版本，改内容换版本", async () => {
+		await withClient(async client => {
+			await fsWrite(client, { path: "cas-basic.txt", content: "alpha\n" });
+			const first = await fsRead(client, "cas-basic.txt");
+			expect(first.text).toBe("alpha\n");
+			expect(first.truncated).toBe(false);
+			expect(first.version).toMatch(/^[0-9a-f]{64}$/);
+
+			const again = await fsRead(client, "cas-basic.txt");
+			expect(again.version).toBe(first.version);
+
+			await fsWrite(client, { path: "cas-basic.txt", content: "beta\n" });
+			const changed = await fsRead(client, "cas-basic.txt");
+			expect(changed.version).not.toBe(first.version);
+		});
+	});
+
+	test("expectedVersion 命中：写入成功，返回的 version 就是新基线", async () => {
+		await withClient(async client => {
+			await fsWrite(client, { path: "cas-match.txt", content: "v1\n" });
+			const base = await fsRead(client, "cas-match.txt");
+
+			const res = await fsWrite(client, {
+				path: "cas-match.txt",
+				content: "v2\n",
+				expectedVersion: base.version,
+			});
+			expect(res.path).toBe("cas-match.txt");
+			expect(res.bytesWritten).toBe(3);
+			expect(res.version).toMatch(/^[0-9a-f]{64}$/);
+			expect(res.version).not.toBe(base.version);
+			expect(await diskText("cas-match.txt")).toBe("v2\n");
+			// 返回的 version 可直接当新基线，无需重读。
+			expect((await fsRead(client, "cas-match.txt")).version).toBe(res.version);
+		});
+	});
+
+	test("外部写入者抢先落盘：CAS 拒写，磁盘保持外部内容", async () => {
+		await withClient(async client => {
+			await fsWrite(client, { path: "cas-conflict.txt", content: "mine-v1\n" });
+			const base = await fsRead(client, "cas-conflict.txt");
+
+			// 外部写入者（例如 agent 自己跑了 edit 工具）改了盘，客户端手上的 base 就此过期。
+			await Bun.write(path.join(projectCwd, "cas-conflict.txt"), "external\n");
+
+			const refusal = await fsWriteError(client, {
+				path: "cas-conflict.txt",
+				content: "mine-v2\n",
+				expectedVersion: base.version,
+			});
+			expect(refusal.startsWith("fs_conflict: ")).toBe(true);
+			expect(refusal).toContain(base.version);
+			// 拒绝 = 一个字节都不落盘。
+			expect(await diskText("cas-conflict.txt")).toBe("external\n");
+		});
+	});
+
+	test("冲突可恢复：重读拿新 version 重试即成功", async () => {
+		await withClient(async client => {
+			await fsWrite(client, { path: "cas-recover.txt", content: "mine-v1\n" });
+			const stale = await fsRead(client, "cas-recover.txt");
+			await Bun.write(path.join(projectCwd, "cas-recover.txt"), "external\n");
+
+			const refusal = await fsWriteError(client, {
+				path: "cas-recover.txt",
+				content: "mine-v2\n",
+				expectedVersion: stale.version,
+			});
+			expect(refusal.startsWith("fs_conflict: ")).toBe(true);
+
+			const fresh = await fsRead(client, "cas-recover.txt");
+			expect(fresh.text).toBe("external\n");
+			const res = await fsWrite(client, {
+				path: "cas-recover.txt",
+				content: "mine-v2\n",
+				expectedVersion: fresh.version,
+			});
+			expect(res.version).toBe((await fsRead(client, "cas-recover.txt")).version);
+			expect(await diskText("cas-recover.txt")).toBe("mine-v2\n");
+		});
+	});
+
+	test('expectedVersion: "" 在不存在路径上创建（空基线 CAS）', async () => {
+		await withClient(async client => {
+			expect(await Bun.file(path.join(projectCwd, "cas-create.txt")).exists()).toBe(false);
+			const res = await fsWrite(client, { path: "cas-create.txt", content: "created\n", expectedVersion: "" });
+			expect(res.version).toMatch(/^[0-9a-f]{64}$/);
+			expect(await diskText("cas-create.txt")).toBe("created\n");
+		});
+	});
+
+	test('expectedVersion: "" 在已存在路径上冲突（不覆盖已有文件）', async () => {
+		await withClient(async client => {
+			await fsWrite(client, { path: "cas-existing.txt", content: "there\n" });
+			const refusal = await fsWriteError(client, {
+				path: "cas-existing.txt",
+				content: "clobber\n",
+				expectedVersion: "",
+			});
+			expect(refusal.startsWith("fs_conflict: ")).toBe(true);
+			expect(await diskText("cas-existing.txt")).toBe("there\n");
+		});
+	});
+
+	test(">128KB 文件只改尾部：裁剪后的 text 相同，version 仍变（CAS 发现得到）", async () => {
+		await withClient(async client => {
+			const head = "h".repeat(200 * 1024);
+			await fsWrite(client, { path: "cas-big.txt", content: `${head}TAIL-1\n` });
+			const before = await fsRead(client, "cas-big.txt");
+			expect(before.truncated).toBe(true);
+
+			await fsWrite(client, { path: "cas-big.txt", content: `${head}TAIL-2\n` });
+			const after = await fsRead(client, "cas-big.txt");
+			expect(after.text).toBe(before.text);
+			expect(after.version).not.toBe(before.version);
+
+			// 拿旧 version 回写：拒写，而不是把 >128KB 内容当成打开时的那样覆盖。
+			const refusal = await fsWriteError(client, {
+				path: "cas-big.txt",
+				content: "short\n",
+				expectedVersion: before.version,
+			});
+			expect(refusal.startsWith("fs_conflict: ")).toBe(true);
+			expect((await diskText("cas-big.txt")).endsWith("TAIL-2\n")).toBe(true);
+		});
+	});
+
+	test("超过 FS_MAX_WRITE_BYTES 的正文拒绝：一个字节都不落盘", async () => {
+		await withClient(async client => {
+			// 边界恰好在 8 MiB 之后：分配略超上限的正文（不真去写 8MiB 到磁盘）。
+			const body = "x".repeat(FS_MAX_WRITE_BYTES + 1);
+			const refusal = await fsWriteError(client, { path: "cas-oversize.txt", content: body });
+			expect(refusal).toContain(`${FS_MAX_WRITE_BYTES + 1} bytes exceeds limit of ${FS_MAX_WRITE_BYTES} bytes`);
+			expect(await Bun.file(path.join(projectCwd, "cas-oversize.txt")).exists()).toBe(false);
+		});
+	}, 20_000);
 });

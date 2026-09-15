@@ -1811,7 +1811,11 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── fs 写命令面（票 01）：LSP writethrough 续接 ──
 				case "fs_write": {
-					const cmd = command as { path: string; content: string };
+					// 乐观并发（CAS）：客户端带上读到时的 `expectedVersion`，盘上现状不同就拒写，
+					// 而不是默默覆盖外部写入者（比如 agent 自己）的改动。
+					// 冲突报错走现有 `error: string` 通道，以 `fs_conflict: ` 前缀作为客户端契约——
+					// WireErrorCode 定义在 packages/pi-wire（本票范围外），所以不新增错误码。
+					const cmd = command as { path: string; content: string; expectedVersion?: string };
 					if (typeof cmd.content !== "string") {
 						fail("content required (string)");
 						break;
@@ -1822,11 +1826,28 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail(target.error);
 						break;
 					}
+					const bytesWritten = Buffer.byteLength(cmd.content, "utf8");
+					if (bytesWritten > FS_MAX_WRITE_BYTES) {
+						fail(`content too large: ${bytesWritten} bytes exceeds limit of ${FS_MAX_WRITE_BYTES} bytes`);
+						break;
+					}
 					try {
+						if (cmd.expectedVersion !== undefined) {
+							const currentVersion = await contentVersionOfFile(target.path);
+							if (currentVersion !== cmd.expectedVersion) {
+								fail(`fs_conflict: expected ${cmd.expectedVersion}, actual ${currentVersion}`);
+								break;
+							}
+						}
 						const toolSession = toWireToolSession(session, agentDir);
+						const sentVersion = contentVersionOf(new TextEncoder().encode(cmd.content));
 						await createWireWritethrough(toolSession)(target.path, cmd.content);
 						invalidateFsScanAfterWrite(target.path);
-						done({ path: cmd.path, bytesWritten: Buffer.byteLength(cmd.content, "utf8") });
+						// 回读再算版本：writethrough 可能格式化后落盘，`cmd.content` 的哈希未必等于盘上字节。
+						const version = await contentVersionOfFile(target.path);
+						// 落盘内容被改写（lsp.formatOnWrite 等）时必须说出来，不能报成「写的就是你发的那份」：
+						// 客户端据此把编辑器同步成盘上的那一份，否则「已保存」显示的是发出去的样子而不是文件现在的样子。
+						done({ path: cmd.path, bytesWritten, version, normalized: version !== sentVersion });
 					} catch (err) {
 						fail(err instanceof Error ? err.message : String(err));
 					}
@@ -2180,6 +2201,27 @@ async function buildEnvironmentSummary(registry: SessionRegistry): Promise<WireE
 
 const FS_MAX_READ_BYTES = 128 * 1024;
 
+/**
+ * 单次整段写入正文的内存上限（8 MiB）。
+ * 与只读侧的 {@link FS_MAX_READ_BYTES} 无关：读侧按字符裁剪，写侧按 UTF-8 字节整体拒绝，两者互不推导。
+ */
+const FS_MAX_WRITE_BYTES = 8 * 1024 * 1024;
+
+/** 文件内容身份令牌：整体字节的 sha256 十六进制。『读到的东西』与『要写回去的东西』是否同一份，靠它判定。 */
+function contentVersionOf(bytes: Uint8Array): string {
+	return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+/** 盘上文件的当前内容身份令牌。文件不存在 = 空基线（""），客户端据此以 CAS 语义创建新文件。 */
+async function contentVersionOfFile(file: string): Promise<string> {
+	try {
+		return contentVersionOf(await Bun.file(file).bytes());
+	} catch (err) {
+		if (isEnoent(err)) return "";
+		throw err;
+	}
+}
+
 /** 解析 agentDir 内相对路径；拒绝越界（含 .. 逃逸与符号链接逃逸）。 */
 function resolveFsPath(agentDir: string, rel: string): { ok: true; path: string } | { ok: false; error: string } {
 	const resolved = path.resolve(agentDir, rel);
@@ -2215,21 +2257,28 @@ async function listDirEntries(
 	return { items };
 }
 
-/** 读文本文件，> 128KB 截断并标记 truncated。 */
+/**
+ * 读文本文件，> 128KB 截断并标记 truncated。
+ * 字节只读一次：`text` 是裁剪后的内容，`version` 覆盖整份文件的原始字节——
+ * 因此对 > 128KB 文件只改尾部（裁剪区之外）也能被写侧 CAS 发现。
+ */
 async function readTextFileClipped(
 	file: string,
 ): Promise<
-	{ text: string; truncated: boolean; error?: undefined } | { text?: undefined; truncated?: undefined; error: string }
+	| { text: string; truncated: boolean; version: string; error?: undefined }
+	| { text?: undefined; truncated?: undefined; version?: undefined; error: string }
 > {
-	let text: string;
+	let bytes: Uint8Array;
 	try {
-		text = await Bun.file(file).text();
+		bytes = await Bun.file(file).bytes();
 	} catch (err) {
 		if (isEnoent(err)) return { error: `no such file: ${path.basename(file)}` };
 		throw err;
 	}
-	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false };
-	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
+	const version = contentVersionOf(bytes);
+	const text = new TextDecoder().decode(bytes);
+	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false, version };
+	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true, version };
 }
 
 // ── P2-W3-3 回切：已停用技能名单（settings.skills.ignoredSkills + SKILL.md 元数据）──

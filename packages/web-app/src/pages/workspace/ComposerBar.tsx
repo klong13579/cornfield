@@ -4,7 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
 import { ProviderLogo } from "../../components/ProviderLogo";
+import type { ContextItem } from "../../lib/context-items";
+import { composePrompt } from "../../lib/context-items";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
+import { getFileWorkflow, useFileWorkflow } from "../../state/file-workflow-store";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -40,6 +43,13 @@ export function groupModelsByProvider(
 }
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
+
+/** 上下文条目在输入区的展示名（选区带行范围，其它就是路径）。 */
+function contextItemLabel(item: ContextItem): string {
+	if (item.kind !== "selection") return item.path;
+	const range = item.lineStart === item.lineEnd ? `${item.lineStart}` : `${item.lineStart}-${item.lineEnd}`;
+	return `${item.path}:${range}`;
+}
 
 function statusDot(s: string): string {
 	if (s === "online") return "bg-success";
@@ -92,6 +102,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	/** ui.draft 是输入区唯一事实源（含 ?q= 直达种子——由 WorkspaceView 在挂载时写入一次、发送后清空）。
 	 * 不再回退 autoFocusDraft：否则种子成为永久 fallback，用户清空输入后文本立即恢复。 */
 	const value = ui.draft;
+	// 上下文条目（文件/选区）挂在文件工作流上并与会话同归属：换会话即清空（引用会失效）
+	const contextItems = useFileWorkflow().contextItems;
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
 
@@ -234,7 +246,9 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	};
 
 	const send = () => {
-		const text = value.trim();
+		// 带上上下文条目 = 草稿 + 序列化块（@路径 走运行时既有的提及通道，选区额外内联选中文本）。
+		// 只有条目没有文字也允许发送：用户指着一段代码说话，就是一条完整的消息。
+		const text = composePrompt(value.trim(), contextItems);
 		if (!text) return;
 		// 方向 2：停用账号（gateway 侧 enabled:false）禁止从工作台发起会话
 		if (agentId && isAccountStopped(agentId)) {
@@ -247,6 +261,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		setBlockedMsg(null);
 		getUiStore().setDraft("");
 		store.prompt(text, agentId, attachments.length > 0 ? attachments : undefined);
+		// 条目随这条消息一起发走了：留着它会让下一条消息莫名其妙地带上一段旧代码
+		getFileWorkflow().clearContextItems();
 		setAttachments([]);
 	};
 
@@ -309,6 +325,32 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 				)}
 
 				<div className="rounded-xl border border-hairline bg-surface-2 transition-[border-color,box-shadow] duration-150 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
+					{contextItems.length > 0 && (
+						// 可见的「上下文」标题就是这一块的标签，不再叠一个 aria-label（role 与标签重复反而不清楚）
+						<div className="flex flex-wrap items-center gap-1.5 border-b border-hairline px-3 py-1.5">
+							<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+								上下文
+							</span>
+							{contextItems.map(item => (
+								<span key={item.id} className="chip max-w-[260px] gap-1.5">
+									<span className="truncate font-mono" title={contextItemLabel(item)}>
+										{contextItemLabel(item)}
+									</span>
+									<button
+										type="button"
+										className="shrink-0 text-ink-faint hover:text-danger"
+										title={`移除 ${item.path}`}
+										onClick={() => getFileWorkflow().removeContextItem(item.id)}
+									>
+										×
+									</button>
+								</span>
+							))}
+							<button type="button" className="link" onClick={() => getFileWorkflow().clearContextItems()}>
+								清空
+							</button>
+						</div>
+					)}
 					<textarea
 						ref={textRef}
 						rows={1}

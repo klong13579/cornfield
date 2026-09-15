@@ -63,6 +63,55 @@ export interface FsImageResult {
 	truncated: boolean;
 }
 
+/**
+ * fs_read 结果：正文 + 截断标记 + **磁盘内容身份**。
+ *
+ * `version` 是服务端对磁盘上那一份字节算出的身份（sha256，覆盖整个文件而非被截断的前段）：
+ * 编辑器拿它当 base，保存时原样回传给 fs_write 做 compare-and-swap —— 「我改的是我读到的那一份」
+ * 是唯一能让外部改写不被静默覆盖的判定依据。正文被截断时 version 仍然覆盖全文（尾部的改动
+ * 也必须能被判定出来）。
+ */
+export interface FsReadResult {
+	text: string;
+	truncated: boolean;
+	version: string;
+}
+
+/** fs_write 结果：落盘字节数 + 写入后文件的新身份（客户端直接采纳，免二次读）。 */
+export interface FsWriteResult {
+	path: string;
+	bytesWritten: number;
+	version: string;
+	/**
+	 * 落盘内容与请求正文不同（服务端 writethrough 改写过，如 `lsp.formatOnWrite`）。
+	 * true 时客户端必须回读一次同步编辑器——否则屏幕上留着的是发出去的文本，不是文件现在的样子。
+	 */
+	normalized: boolean;
+}
+
+/** fs_diff 结果（与 coding-agent `generateUnifiedDiffString` 同形的带行号统一 diff）。 */
+export interface FsDiffResult {
+	diff: string;
+	firstChangedLine?: number;
+}
+
+/**
+ * 保存被拒绝：文件在磁盘上已不是编辑器读到的那一份（fs_write 的 compare-and-swap 失败）。
+ *
+ * 这是**可恢复**的判决，不是故障：调用方应当重新读一次磁盘、把差异摆给用户看，
+ * 再让用户决定保留哪一份。服务端在拒绝时一个字节都没写 —— 抛错即「磁盘上仍是别人的版本」。
+ */
+export class FsConflictError extends Error {
+	/** 服务端原始判决文本（`fs_conflict: expected <version>, actual <version>`）。 */
+	readonly detail: string;
+
+	constructor(detail: string) {
+		super("文件已在磁盘上被外部修改，保存已拒绝");
+		this.name = "FsConflictError";
+		this.detail = detail;
+	}
+}
+
 /** 听记历史条目（listen_list：~/.cornfield/listen/ 单条录音的元数据 + 转写全文）。 */
 export interface ListenRecordingDto {
 	name: string;
@@ -374,8 +423,21 @@ export interface PiClient {
 	// ── 文件系统（Agent 详情页只读浏览）──
 	/** 列出 agent workspace 目录（fs_list，相对 agentDir；省略 path = 根）。 */
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
-	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated）。 */
-	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
+	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated；version = 磁盘内容身份）。 */
+	fsRead(sessionId: string, path: string): Promise<FsReadResult>;
+	/**
+	 * 整段写文件（fs_write）。
+	 *
+	 * `expectedVersion` **必填**（新建文件传空串）：服务端核对磁盘现状后才会写，不一致就拒绝，
+	 * 一个字节都不落盘。让它必填而不是可选，是因为「可选 = 忘传就能静默覆盖外部修改」。
+	 * 拒绝时抛 {@link FsConflictError}。
+	 */
+	fsWrite(sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult>;
+	/**
+	 * 两段纯文本的统一 diff（fs_diff 的 before/after 分支，不落地）。
+	 * 保存预览与外部冲突对比共用它 —— 前端不再实现第二套 diff 生成。
+	 */
+	fsDiff(before: string, after: string): Promise<FsDiffResult>;
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限，MIME 按扩展名）。 */
 	fsReadImage(sessionId: string, path: string): Promise<FsImageResult>;
 	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。 */

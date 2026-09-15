@@ -5,11 +5,15 @@ import "./index.css";
 import { NotificationCronWatcher } from "./notifications/CronWatcher";
 import { router } from "./router";
 import { createClient } from "./state/client";
+import { getFileWorkflow } from "./state/file-workflow-store";
 import { useSessionStore } from "./state/session-store";
 
 // 会话权威 store 初始化：接真 pi-client（PiClientAdapter，见 state/client.ts）。
 const store = useSessionStore();
-store.init(createClient());
+const client = createClient();
+store.init(client);
+// 文件工作流（编辑/上下文项/Diff）接同一条客户端与会话身份：归属与作废都挂在会话 store 上。
+getFileWorkflow().init({ client, sessions: store });
 void store.connect();
 
 createRoot(document.getElementById("root")!).render(
