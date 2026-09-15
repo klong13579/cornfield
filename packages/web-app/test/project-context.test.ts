@@ -365,6 +365,40 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 		void inFlight;
 	});
 
+	it("新会话：旧响应在新会话快照到达前也落不了地", async () => {
+		const { store } = await createConnectedStore();
+
+		pushSnapshot("hr", "/sessions/hr-live.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("cornfield");
+
+		// 在途请求
+		const inFlight = store.refreshProjects("hr");
+		await Bun.sleep(0);
+		const staleRequest = lastProjectRequestId();
+
+		// 开新会话：身份必然变（新文件还不知道），旧响应必须作废
+		store.newSession();
+		await Bun.sleep(0);
+		respondTo(staleRequest, { projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+
+		const during = store.getSnapshot();
+		expect(during.currentProjectId).toBeUndefined();
+		expect(during.projectsPending).toBe(true);
+		expect(during.projectsError).toBeUndefined();
+
+		// 新会话的快照到达后才重算
+		pushSnapshot("hr", "/sessions/hr-new.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "dtc" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("dtc");
+		void inFlight;
+	});
+
 	it("A 的迟到**错误**也不会把 B 打成错误态", async () => {
 		const { store } = await createConnectedStore();
 

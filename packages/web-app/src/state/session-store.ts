@@ -347,6 +347,9 @@ export class SessionStore {
 		const view = cloneView(this.getSnapshot());
 		view.sessionTree = undefined;
 		view.sessionTreeError = undefined;
+		// 新会话就是一个新会话，与当前身份必然不同 —— 不看目标是什么，直接作废：
+		// 少了这一步，上一会话的在途 list_projects 会在新会话的快照到达前落进新视图。
+		this.#invalidateProjectAttribution(view);
 		this.#view = view;
 		this.#notify();
 		void this.#run(() => this.#client.newSession());
@@ -617,23 +620,29 @@ export class SessionStore {
 		// （switchSession / newSession）按空串算 —— 未知就是与已知不同：宁可让紧随其后的快照
 		// 重算一次，也不要让上一会话的归属（和它在途请求）继续落在屏幕上。
 		const identity = this.#projectIdentityOf(agentId, targetSessionFile);
-		if (identity !== this.#projectAttributionKey) {
-			// 代际必须在这里同步递增：只清显示值不动代际，旧会话的在途响应在新快照到达前
-			// 仍持有当前代际，会把它的 projects / currentProjectId / error 提交进已经切走的视图。
-			this.#projectGeneration += 1;
-			// 下一次 sync 无条件重算（身份对不上，但到底对到哪个快照要等它自己说）。
-			this.#projectAttributionKey = undefined;
-			this.#currentProjectId = undefined;
-			this.#projectsPending = true;
-			view.currentProjectId = undefined;
-			view.projectsPending = true;
-		}
+		if (identity !== this.#projectAttributionKey) this.#invalidateProjectAttribution(view);
 		view.activeAgentId = agentId;
 		view.activeWorkspace = workspace;
 		view.sessionTree = undefined;
 		view.sessionTreeError = undefined;
 		this.#view = view;
 		this.#notify();
+	}
+
+	/**
+	 * 把归属作废到「还不知道」：代际同步递增（在途响应从此落不了地）、显示值清空、
+	 * `#projectAttributionKey` 置回 undefined（下一次 sync 无条件重算）。
+	 *
+	 * **每一个改变会话身份的入口都必须走这里**（切换、打开历史会话、新会话）——
+	 * 漏掉一个入口就是漏掉一个「上一会话的答案写进新会话」的窗口。
+	 */
+	#invalidateProjectAttribution(view: SessionView): void {
+		this.#projectGeneration += 1;
+		this.#projectAttributionKey = undefined;
+		this.#currentProjectId = undefined;
+		this.#projectsPending = true;
+		view.currentProjectId = undefined;
+		view.projectsPending = true;
 	}
 
 	/** 归属对应的会话身份：焦点 agent + 会话文件（未知用空串）。一个概念一处定义。 */
