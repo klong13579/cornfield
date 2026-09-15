@@ -64,12 +64,34 @@ cornfield 会话 A(进程内)           cornfield 会话 B(进程内)      gatew
 | `pending` | 列出未回复的 inbound ask |
 | `status` | 连接状态 |
 | `cancel` | 撤销已发消息(实时会话发控制帧,mailbox 直接删) |
+| `history` | 回放最近的收/发消息(读 broker journal,默认 `direction:"in"`、20 条)——**唯一**能查「我忙的时候错过了什么」的入口,覆盖范围见下 |
 | presence | 模型/思考中/空闲/工具执行中/tool:xxx,上下文占比随心跳刷新 |
 | mailbox | 目标离线时队列暂存(256 条/24h),按 id 或「显式名字+同 cwd」补投;驱逐(超容量)与过期(24h)时向发送方回 `delivery_failed`,不静默丢件 |
 | 父子边 | 子注册时声明 `parentId`(父的目标名/sessionId),broker 全量广播保留该字段;父侧子表随 presence 事件增量维护 |
 
 协议与隐性行为:replyTo 必须匹配 pending ask(非 ask 的回复会被 broker 拒绝);
 互斥 ask(双方互相等)拒绝;supersede 只能顶替同 sender→receiver 的旧消息。
+
+### 4.1 `pending` 与 `history` 的覆盖范围
+
+这两个 action 最容易被当成同一件事,实际分工是「谁在等我回话」vs「我错过了什么」:
+
+- **`pending` 只列等你回复的 ask**:入表条件是消息带 `expectsReply` —— 只有 `ask` 会置位
+  (`contact_supervisor` 的 need_decision / interview_request 走同一条通路),所以普通
+  `send`(通知、FYI、完成报告)和 `reply` **永远不会出现**在 `pending` 里。它回答的是
+  「还有谁在等我回话」,不是「我收到了什么」;条目按到达时间正序,带 sender、message id、
+  已等待秒数与 80 字预览。未回复的 ask 超过 ask 超时(`CORNFIELD_INTERCOM_ASK_TIMEOUT_MS`,
+  默认 10min)会被剪除,因此 **`pending` 为空 ≠ 从来没有 ask 来过**。
+- **`history` 是唯一能回放「我忙的时候错过了什么」的 action**:broker 在**接受**每条消息时
+  就把它写进 `~/.cornfield/intercom/journal.jsonl`(在线投递与离线暂存都写,暂存条目回放时
+  标 `(queued)`),与接收方当时忙不忙、有没有被触发过 turn 无关,broker 重启后 journal 仍在。
+  会话重连换了 sessionId 后,仍按「显式名字 + 同 cwd」匹配回自己的记录;`direction` 默认
+  `"in"`(发给我的),`"out"`(我发出的)/`"both"` 可切换,`since`/`limit` 可再收窄(默认 20 条)。
+  **空结果的含义是「还没有东西投递到你这儿」**(消息还没到 broker、或被你自己传的
+  `direction`/`since` 排掉、或已超出 journal 保留期),它**不是「没人给你发过」的证明**——
+  别据此断定对方没开口。
+- 其余 action 都不覆盖这两个语义:`status` 只看连接,`children` 只看子会话;没有「列出全部
+  已收消息」的独立动作,收件箱回放只走 `history`。
 
 ## 5. 使用方式
 
