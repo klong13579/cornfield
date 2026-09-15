@@ -18,8 +18,9 @@ export function projectLabelOf(view: SessionView): { label: string; title: strin
 	if (view.projectsError) {
 		return { label: "读取失败", title: `Project registry 读不出来：${view.projectsError}` };
 	}
-	if (view.projects === undefined) {
-		return { label: "…", title: "Project registry 读取中" };
+	// 归属还没算出来（切会话后的窗口期 / 还没读过）：不能拿「未归属」代替一个尚未计算的结果。
+	if (view.projectsPending || view.projects === undefined) {
+		return { label: "…", title: "Project 归属读取中" };
 	}
 	const current = view.currentProjectId
 		? view.projects.find(project => project.projectId === view.currentProjectId)
@@ -45,11 +46,16 @@ export function ProjectCell({ view }: { view: SessionView }): React.JSX.Element 
 	);
 }
 
-/** 一个已声明 Project 的一行（名称 + 默认 Agent + root）。 */
-function ProjectRow({ project }: { project: ProjectRecordDto }): React.JSX.Element {
+/** 一个已声明 Project 的一行（名称 + 当前标记 + 默认 Agent + root）。 */
+function ProjectRow({ project, current }: { project: ProjectRecordDto; current: boolean }): React.JSX.Element {
 	return (
 		<div className="flex items-baseline gap-2 border-b border-hairline px-1 py-1.5 last:border-b-0">
 			<span className="shrink-0 text-[12.5px] text-ink">{project.name}</span>
+			{current && (
+				<span className="badge done shrink-0" title="当前会话所在的 Project">
+					当前
+				</span>
+			)}
 			{project.defaultAgentId && (
 				<span className="badge shrink-0" title="该 Project 的默认 Agent（§10 解析链第 2 级）">
 					{project.defaultAgentId}
@@ -113,7 +119,11 @@ export function ProjectSection({ view, onRefresh }: { view: SessionView; onRefre
 			{view.connected && !view.projectsError && view.projects && view.projects.length > 0 && (
 				<div className="rounded-lg border border-hairline bg-surface-2 px-2 py-1">
 					{view.projects.map(project => (
-						<ProjectRow key={project.projectId} project={project} />
+						<ProjectRow
+							key={project.projectId}
+							project={project}
+							current={project.projectId === view.currentProjectId}
+						/>
 					))}
 				</div>
 			)}

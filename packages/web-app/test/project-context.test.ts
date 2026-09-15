@@ -77,6 +77,42 @@ async function createConnectedStore(): Promise<{ store: SessionStore; adapter: P
 	return { store, adapter };
 }
 
+/** 推一份权威快照（切 Agent / 开新会话后 serve 必推一份）。 */
+function pushSnapshot(agentId: string, sessionFile: string): void {
+	lastCreated?.receive(
+		JSON.stringify({
+			type: "push",
+			event: {
+				type: "session_snapshot",
+				sessionId: agentId,
+				snapshot: {
+					seq: 1,
+					phase: "idle",
+					retryAttempt: 0,
+					isCompacting: false,
+					isStreaming: false,
+					sessionId: agentId,
+					sessionFile,
+					messages: [],
+					messageEntryIds: {},
+					todoPhases: [],
+					activeToolNames: [],
+					queuedMessageCount: 0,
+					autoCompactionEnabled: false,
+					autoRetryEnabled: false,
+				},
+			},
+		}),
+	);
+}
+
+/** 已发出的 list_projects 请求。 */
+function projectRequests(): Array<Record<string, unknown>> {
+	return sentRequests()
+		.map(r => r.command)
+		.filter(c => c.type === "list_projects");
+}
+
 const PROJECTS = [
 	{ projectId: "cornfield", root: "/Users/me/cornfield", name: "CornField" },
 	{ projectId: "dtc", root: "/Users/me/dtc", name: "米克原子 DTC", defaultAgentId: "hr" },
@@ -131,6 +167,82 @@ describe("store.refreshProjects", () => {
 		const view = store.getSnapshot();
 		expect(view.currentProjectId).toBeUndefined();
 		expect(view.projects?.map(p => p.projectId)).toEqual(["cornfield", "dtc"]);
+	});
+});
+
+describe("会话切换后的归属重算（P1 回归）", () => {
+	it("切到已绑定 Project 的会话：归属自动跟上，不需要手动刷新", async () => {
+		const { store } = await createConnectedStore();
+
+		// 初始会话（serve 焦点的 default）
+		pushSnapshot("default", "/sessions/default.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("cornfield");
+
+		// 切到 hr：serve 会推 hr 的权威快照，归属必须重算
+		store.switchSession("hr");
+		const before = projectRequests().length;
+		pushSnapshot("hr", "/sessions/hr.jsonl");
+		await Bun.sleep(0);
+
+		// 窗口期：上一个会话的归属已作废，但现在还不知道新的 —— 必须是「未算出」，不是「未归属」
+		const during = store.getSnapshot();
+		expect(during.currentProjectId).toBeUndefined();
+		expect(during.projectsPending).toBe(true);
+		// 列表本身不随会话变，仍然缓存着（只重算归属，不重读 registry 的形状）
+		expect(during.projects?.map(p => p.projectId)).toEqual(["cornfield", "dtc"]);
+		// 换会话必须自己发起重算，且指名新的 Agent —— 这正是 P1：只清不请求会停在「未归属」
+		expect(projectRequests().length).toBe(before + 1);
+		expect(projectRequests().at(-1)).toMatchObject({ type: "list_projects", sessionId: "hr" });
+
+		respond({ projects: PROJECTS, currentProjectId: "dtc" });
+		await Bun.sleep(0);
+
+		const after = store.getSnapshot();
+		expect(after.currentProjectId).toBe("dtc");
+		expect(after.projectsPending).toBe(false);
+	});
+
+	it("切到未绑定 Project 的会话：归属为空，且不残留上一个会话的项目", async () => {
+		const { store } = await createConnectedStore();
+
+		pushSnapshot("default", "/sessions/default.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("cornfield");
+
+		store.switchSession("sw");
+		pushSnapshot("sw", "/sessions/sw.jsonl");
+		await Bun.sleep(0);
+		// serve 没算出归属（会话不在任何已声明 Project 里）
+		respond({ projects: PROJECTS });
+		await Bun.sleep(0);
+
+		const view = store.getSnapshot();
+		expect(view.currentProjectId).toBeUndefined();
+		expect(view.projectsPending).toBe(false);
+		expect(view.projects?.map(p => p.projectId)).toEqual(["cornfield", "dtc"]);
+	});
+
+	it("同一会话的重复快照不重复请求 registry", async () => {
+		const { store } = await createConnectedStore();
+
+		pushSnapshot("default", "/sessions/default.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+
+		pushSnapshot("default", "/sessions/default.jsonl");
+		const before = projectRequests().length;
+		pushSnapshot("default", "/sessions/default.jsonl");
+		pushSnapshot("default", "/sessions/default.jsonl");
+		await Bun.sleep(0);
+
+		expect(projectRequests().length).toBe(before);
+		expect(store.getSnapshot().currentProjectId).toBe("cornfield");
 	});
 });
 

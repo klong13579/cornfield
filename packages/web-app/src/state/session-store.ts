@@ -127,11 +127,18 @@ export interface SessionView {
 	/** 会话树查不到的原因（读失败 ≠ 没有子会话，面板必须分开显示）。 */
 	sessionTreeError?: string;
 	/**
-	 * 已声明的 Project（list_projects）。`undefined` = 还没查过；`[]` = 查了，确实没声明过。
+	 * 已声明的 Project（list_projects）。`undefined` = 还没读到；`[]` = 读到了，确实没声明过。
 	 */
 	projects?: ProjectRecordDto[];
 	/** 被查询会话落在哪个 Project（serve 按 WP4 的 root 规则算）；缺省 = 没有归属。 */
 	currentProjectId?: string;
+	/**
+	 * 当前会话的 Project 归属还没算出来（切会话后的窗口期，或还没读过）。
+	 *
+	 * 与「未归属」必须分开：切会话时归属会被作废，在重算结果回来之前我们**不知道**它属于谁；
+	 * 把它渲染成「未归属」就是替一个尚未计算的答案发言。
+	 */
+	projectsPending: boolean;
 	/** Project 读不到的原因（存储损坏）。读失败 ≠ 没声明过。 */
 	projectsError?: string;
 }
@@ -185,12 +192,20 @@ export class SessionStore {
 	#sessionTreeLoading = false;
 	#sessionTreeError: string | undefined;
 	/**
-	 * 已声明的 Project。**不随会话变**（客户端 scope 的 registry，跨 Agent 共享），所以不在
-	 * 切会话时清空；只有归属 `#currentProjectId` 是会话级的。
+	 * 已声明的 Project。**不随会话变**（客户端 scope 的 registry，跨 Agent 共享），
+	 * 所以切会话不清空、不重读；只有归属 `#currentProjectId` 是会话级的。
 	 */
 	#projects: ProjectRecordDto[] | undefined;
 	#currentProjectId: string | undefined;
+	#projectsPending = true;
 	#projectsError: string | undefined;
+	/**
+	 * 最近一次算过归属的「会话身份」（焦点 agent + 会话文件）。
+	 *
+	 * 它是「归属要不要重算」的唯一判据：同一会话的重复快照不重读 registry（列表可缓存），
+	 * 身份一变（切 Agent / 开新会话）就重新请求 —— 只清缓存不重请求会让归属停在上一次的「未归属」。
+	 */
+	#projectAttributionKey: string | undefined;
 
 	init(client: PiClient): void {
 		this.#client = client;
@@ -206,6 +221,9 @@ export class SessionStore {
 				this.#view.wsUrl = conn.wsUrl;
 				this.#view.env = this.#client.getEnvironment();
 				this.#notify();
+				// 连接（重）建立时对齐一次归属。不走「先作废 key」：连接通知在 env 刷新等场合会重复
+				// 到达，每次重置 key 就是每次重读 registry —— 而 registry 不随会话变。
+				if (conn.connected) this.#syncProjectAttribution();
 				void unsubConn;
 			});
 		}
@@ -574,8 +592,11 @@ export class SessionStore {
 		// 挂在当前会话下）；等下一次 refreshSessionTree 给出真实答案。
 		this.#sessionTree = undefined;
 		this.#sessionTreeError = undefined;
-		// Project 归属同样是会话级的（列表本身不是）。
+		// Project 归属是会话级的：焦点一换就作废，否则新会话会顶着上一个会话的项目。
+		// 重算交给紧随其后的权威快照触发（见 #syncProjectAttribution）—— 那里才有新会话的身份；
+		// 在这里发请求会拿到一个还没 attach 完的会话（归属为空），而且会与快照那次撞车。
 		this.#currentProjectId = undefined;
+		this.#projectsPending = true;
 		const view = cloneView(this.getSnapshot());
 		// view.sessionId 是 serve 推来的焦点（agent 注册名）：它与目标不同，说明手上这批消息
 		// 属于**另一个 Agent**。留着它就是让 A 的工作显示在 B 的上下文里，等新快照到达再
@@ -594,6 +615,7 @@ export class SessionStore {
 		view.sessionTree = undefined;
 		view.sessionTreeError = undefined;
 		view.currentProjectId = undefined;
+		view.projectsPending = true;
 		this.#view = view;
 		this.#notify();
 	}
@@ -758,6 +780,8 @@ export class SessionStore {
 	 *
 	 * 失败不降级为空列表：存储损坏是错误，与「没声明过任何 Project」必须分开显示，
 	 * 否则用户会以为自己的项目消失。
+	 *
+	 * 这是「手动重算」入口；会话换人时的自动重算见 {@link #syncProjectAttribution}。
 	 */
 	async refreshProjects(agentId?: string): Promise<void> {
 		try {
@@ -766,17 +790,43 @@ export class SessionStore {
 			this.#currentProjectId = result.currentProjectId;
 			this.#projectsError = undefined;
 		} catch (err) {
+			// 读不到就不知道归属，不是「没有归属」：列表与归属一起作废，错误挡住阅读。
 			this.#projects = undefined;
 			this.#currentProjectId = undefined;
 			this.#projectsError = errorMessageOf(err);
 		} finally {
+			this.#projectsPending = false;
 			const view = cloneView(this.getSnapshot());
 			view.projects = this.#projects;
 			view.currentProjectId = this.#currentProjectId;
+			view.projectsPending = false;
 			view.projectsError = this.#projectsError;
 			this.#view = view;
 			this.#notify();
 		}
+	}
+
+	/**
+	 * 会话身份（焦点 agent + 会话文件）变了就重算归属，没变就不动。
+	 *
+	 * 这是「切 Agent / 开新会话后归属必须自己跟上」的唯一入口。只在切的时候清缓存而不重新
+	 * 请求，会让新会话的归属停在上一次的答案（典型表现：一直显示「未归属」，要手动刷新才对）；
+	 * 反过来每次快照都重读，又会让 registry 白白重读 —— 而它并不随会话变。
+	 *
+	 * 作废是**同步**的：在重算结果回来之前，界面上必须是「还不知道」，而不是上一个会话的归属。
+	 */
+	#syncProjectAttribution(): void {
+		const key = `${this.#activeAgentId ?? ""}|${this.#view?.sessionFile ?? ""}`;
+		if (key === this.#projectAttributionKey) return;
+		this.#projectAttributionKey = key;
+		this.#currentProjectId = undefined;
+		this.#projectsPending = true;
+		const view = cloneView(this.getSnapshot());
+		view.currentProjectId = undefined;
+		view.projectsPending = true;
+		this.#view = view;
+		this.#notify();
+		void this.refreshProjects(this.#activeAgentId ?? undefined);
 	}
 
 	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */
@@ -979,6 +1029,8 @@ export class SessionStore {
 		}
 		this.#view = view;
 		this.#notify();
+		// 快照是「会话身份」唯一的权威来源（切 Agent / 开新会话后 serve 必推一份）：归属在这儿对齐。
+		this.#syncProjectAttribution();
 	}
 
 	#applyProgress(event: ProgressEventDto): void {
@@ -1154,6 +1206,7 @@ export class SessionStore {
 				sessionTreeError: this.#sessionTreeError,
 				projects: this.#projects,
 				currentProjectId: this.#currentProjectId,
+				projectsPending: this.#projectsPending,
 				projectsError: this.#projectsError,
 			};
 		}
@@ -1193,6 +1246,7 @@ export class SessionStore {
 			sessionTreeError: this.#sessionTreeError,
 			projects: this.#projects,
 			currentProjectId: this.#currentProjectId,
+			projectsPending: this.#projectsPending,
 			projectsError: this.#projectsError,
 		};
 	}

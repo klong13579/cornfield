@@ -100,13 +100,6 @@ export function HomeView(): React.JSX.Element {
 		return () => clearTimeout(t);
 	}, []);
 
-	// Project registry：连上后读一次（读到就不重复读；失败留给刷新钮重试）。
-	useEffect(() => {
-		if (!view.connected) return;
-		if (view.projects !== undefined || view.projectsError !== undefined) return;
-		void store.refreshProjects(agentId);
-	}, [store, view.connected, view.projects, view.projectsError, agentId]);
-
 	const exchange = useMemo(() => lastExchange(view), [view]);
 	const project = useMemo(() => projectLabelOf(view), [view]);
 	const canSend = view.connected && !view.isStreaming && query.trim().length > 0;
