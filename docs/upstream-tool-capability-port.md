@@ -30,7 +30,7 @@
 | 8 | `run_watch` 健壮性（429 退避、fast/slow 轮询、no-runs-give-up、completed jobs 缓存）+ `pr_checkout` worktree 冲突后缀 + `view` 的 stateReason 回退 | `gh-run-watch.ts:44-46,192-200,1015-1026`、`gh-pr-checkout.ts:96-117`、`gh-view.ts:81-114` | 部分 | S（每项） | 2 |
 | 9 | GitHub 视图 SQLite 缓存层（soft/hard TTL、后台刷新、auth-key 隔离） | `github-cache.ts` | 缺 | M | 3 |
 | 10 | edit `sloppy` 模式 + inline-edit-recovery（模型把 edit 写成纯文本时捞回） | `session/inline-edit-recovery.ts`、`edit/schemas.ts` | 缺 | M | 2 |
-| 11 | 输出 schema 校验统一（yield 与 executor 共用）+ 增量 yield 的 section 校验 | `tools/output-schema-validator.ts:1-307` | 部分：`yield.ts:82-100` 自 compile AJV `[复核]`，executor 另有一套；yield 当前无测试 | M | 2 |
+| 11 | 输出 schema 校验统一（yield 与 executor 共用）+ 增量 yield 的 section 校验【2026-09-16 执行中拆分：section 半依赖「增量 yield」能力，而本地 yield 是单次提交（`result:{data|error}`、`YieldItem` 无 type、`shouldTerminate` 收到即终止、executor 只取最后一次 yield），零消费者 → 本波只发「校验统一」，section 半拆为候选新票「增量 yield（分段提交）」】 | `tools/output-schema-validator.ts:1-307` | 部分：`yield.ts:82-100` 自 compile AJV `[复核]`，executor 另有一套；yield 当前无测试 | M | 2 |
 | 12 | 终端屏幕读取（把虚拟终端行导出为可重放样式） | `tools/terminal-output.ts` | 缺；**本地已有 `@xterm/headless` + `bash-interactive.ts:215` 读屏** `[复核]`，零新依赖 | S | 3 |
 | 13 | memory `reflect`（对长期记忆做 LLM 综合回答） | `tools/memory-reflect.ts:1-90` | 缺；本地有 `write_memory` + `query_episodic_memory`（`self-evolution/src/tools.ts:23-38` `[复核]`），只返回列表 | M | 3（受前作「记忆后端」决策阻塞） |
 
