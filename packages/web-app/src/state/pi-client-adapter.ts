@@ -13,6 +13,7 @@ import type {
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	MemoryProjectionDto,
 	ModelCatalogDto,
 	ModelSelectionDto,
 	ModelTestResultDto,
@@ -24,6 +25,7 @@ import type {
 	ProviderStatusDto,
 	SessionSnapshotDto,
 	SessionTreeDto,
+	SkillsResultDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
@@ -43,10 +45,8 @@ import type {
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
-	MemoryScopeProjectionDto,
 	PiClient,
 	RemoteSkillItemDto,
-	SkillsResultDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 
@@ -679,12 +679,10 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * 记忆投影（get_memory；按 Agent/Project/Session/User scope 分区，只读）。
-	 * sessionId 定向 agent；pi-wire 的 get_memory 命令形状还没有 sessionId 字段
-	 * （与 fs_read / get_config 等处同一 cast 约定），后端已按此字段定向。
+	 * sessionId 定向 agent（命令已带该字段，不需要 cast）。
 	 */
-	async getMemory(sessionId?: string): Promise<MemoryScopeProjectionDto> {
-		const command = { type: "get_memory", ...(sessionId ? { sessionId } : {}) } as never;
-		return this.#req<MemoryScopeProjectionDto>(command);
+	async getMemory(sessionId?: string): Promise<MemoryProjectionDto> {
+		return this.#req<MemoryProjectionDto>({ type: "get_memory", ...(sessionId ? { sessionId } : {}) });
 	}
 
 	/** 技能工作台数据（get_skills；已加载 + 停用 + 被挡住 + 发现错误，失败抛错由调用方空态）。 */
@@ -692,7 +690,7 @@ export class PiClientAdapter implements PiClient {
 		const result = await this.#req<Partial<SkillsResultDto>>({
 			type: "get_skills",
 			...(sessionId ? { sessionId } : {}),
-		} as never);
+		});
 		return {
 			skills: result.skills ?? [],
 			disabled: result.disabled ?? [],
@@ -719,7 +717,7 @@ export class PiClientAdapter implements PiClient {
 			name,
 			enabled,
 			...(sessionId ? { sessionId } : {}),
-		} as never);
+		});
 	}
 
 	/** 远程技能市场（list_remote_skills；契约命令名，WireCommand union 暂缺故最小局部 cast）。 */

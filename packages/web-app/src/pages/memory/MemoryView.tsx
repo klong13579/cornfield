@@ -2,10 +2,10 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type {
 	MemoryFileZoneDto,
+	MemoryProjectionDto,
 	MemoryScope,
-	MemoryScopeProjectionDto,
 	MemorySessionZoneDto,
-	MemoryTextFileViewDto,
+	MemoryTextFileDto,
 } from "../../lib/pi-client-api";
 import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
@@ -56,7 +56,7 @@ export function MemoryView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const agentId = activeAgentIdOf(view);
-	const [memory, setMemory] = useState<MemoryScopeProjectionDto | null>(null);
+	const [memory, setMemory] = useState<MemoryProjectionDto | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [reloading, setReloading] = useState(false);
 
@@ -125,7 +125,7 @@ export function MemoryView(): React.JSX.Element {
 }
 
 /** 投影锚点 + 说明（某个区为什么不可计算）。 */
-function ResolutionCard({ memory }: { memory: MemoryScopeProjectionDto }): React.JSX.Element {
+function ResolutionCard({ memory }: { memory: MemoryProjectionDto }): React.JSX.Element {
 	const { resolution } = memory;
 	return (
 		<div className="rounded-lg border border-hairline bg-surface px-5 py-3">
@@ -188,7 +188,7 @@ function ZoneError({ error }: { error: string }): React.JSX.Element {
 	);
 }
 
-function FileBlock({ label, file }: { label: string; file: MemoryTextFileViewDto }): React.JSX.Element {
+function FileBlock({ label, file }: { label: string; file: MemoryTextFileDto }): React.JSX.Element {
 	const updated = fmtUpdatedAt(file.updatedAt);
 	return (
 		<div className="px-5 pb-4">
@@ -231,7 +231,7 @@ function FileZoneCard({
 		{ label: "MEMORY.md", file: zone.memoryMd },
 		{ label: "memory_summary.md", file: zone.summaryMd },
 		{ label: "raw_memories.md", file: zone.rawMd },
-	].filter((entry): entry is { label: string; file: MemoryTextFileViewDto } => entry.file !== null);
+	].filter((entry): entry is { label: string; file: MemoryTextFileDto } => entry.file !== null);
 	return (
 		<SectionCard
 			title={title}
@@ -259,7 +259,7 @@ function FileZoneCard({
 }
 
 /** 用户记忆：单文件（user.md），读失败与没建过分开。 */
-function UserZoneCard({ file, error }: { file: MemoryTextFileViewDto | null; error?: string }): React.JSX.Element {
+function UserZoneCard({ file, error }: { file: MemoryTextFileDto | null; error?: string }): React.JSX.Element {
 	return (
 		<SectionCard title={SCOPE_LABELS.user} subtitle={file ? "user.md" : undefined} tone={error ? "error" : undefined}>
 			{error ? (
@@ -325,7 +325,7 @@ function SessionZoneCard({ zone }: { zone: MemorySessionZoneDto | null }): React
 }
 
 /** 记忆库（全局 self-evolution 库，跨 Project）。 */
-function MemoryStoreCard({ memory }: { memory: MemoryScopeProjectionDto }): React.JSX.Element {
+function MemoryStoreCard({ memory }: { memory: MemoryProjectionDto }): React.JSX.Element {
 	const store = memory.memoryStore;
 	return (
 		<SectionCard

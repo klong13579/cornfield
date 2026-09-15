@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { encodeProjectPathForGlobalMemory } from "@cornfield/self-evolution/paths";
 import { setConfigRootDir } from "@cornfield/utils";
 import { getMemoryDb, openMemoryDb, releaseMemoryDb, resolveMemoryDbPath } from "../memories/storage";
-import { buildMemoryScopeProjection, type MemoryScopeFacts } from "./memory-scope";
+import { buildMemoryScopeProjection, type MemoryScopeAnchor } from "./memory-scope";
 
 const encodeProjectPath = encodeProjectPathForGlobalMemory;
 const cleanups: string[] = [];
@@ -39,8 +39,8 @@ async function writeFile(filePath: string, content: string): Promise<string> {
 }
 
 function baseFacts(
-	overrides: Partial<MemoryScopeFacts> & Pick<MemoryScopeFacts, "agentDir" | "sessionCwd">,
-): MemoryScopeFacts {
+	overrides: Partial<MemoryScopeAnchor> & Pick<MemoryScopeAnchor, "agentDir" | "sessionCwd">,
+): MemoryScopeAnchor {
 	return { agentId: "hr", attached: true, ...overrides };
 }
 

@@ -15,7 +15,7 @@ import {
 	projectDisabledSkills,
 	projectLoadedSkills,
 	readSkillFileFacts,
-	type SkillScopeFacts,
+	type SkillScopeAnchor,
 	splitSkillWarnings,
 } from "./skill-scope";
 
@@ -37,8 +37,8 @@ async function writeSkill(dir: string, name: string, frontmatter: string): Promi
 }
 
 function facts(
-	overrides: Partial<SkillScopeFacts> & Pick<SkillScopeFacts, "agentDir" | "sessionCwd">,
-): SkillScopeFacts {
+	overrides: Partial<SkillScopeAnchor> & Pick<SkillScopeAnchor, "agentDir" | "sessionCwd">,
+): SkillScopeAnchor {
 	return { agentId: "hr", ...overrides };
 }
 

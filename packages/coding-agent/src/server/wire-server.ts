@@ -95,7 +95,7 @@ import {
 	collectDisabledInputs,
 	projectDisabledSkills,
 	projectLoadedSkills,
-	type SkillScopeFacts,
+	type SkillScopeAnchor,
 	splitSkillWarnings,
 } from "./skill-scope";
 import { clearStatsCache, getCachedStats, setCachedStats } from "./stats-cache";
@@ -607,7 +607,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "fs_read_image": {
 					// R-IMG-SERVE（备用卡）：二进制图片读取——FileExplorer 预览数据源。
 					// 返回 dataUrl（上限 2MB，超出截断标记），MIME 按扩展名。路径约束与 fs_read 同（resolveFsPath）。
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -805,9 +805,8 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "get_memory": {
 					// W3 D3 + T10B：只读记忆投影，按 Agent/Project/Session/User scope 分区。
 					// sessionId（= agent id）缺省 = 本连接焦点 agent；未 attach 的 agent 只按 agentDir 推算。
-					// pi-wire 的 get_memory 命令形状还没有 sessionId（客户端按同库既有的 cast 约定传入），
-					// 读法与 fs_read/git_* 处的 `(command as { sessionId?: string })` 一致。
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					// T10B：sessionId（= agent id）缺省 = 本连接焦点 agent；pi-wire 的 get_memory 命令已带 sessionId。
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					// 未注册的 agent 不能回退到「default 的目录 + 别人的名字」：那会把一个不存在的
 					// Agent 的记忆显示成它自己的。注册表说了算（与 fs_read / list_projects 同一判决）。
 					if (!registry.getMeta(agentId)) {
@@ -922,7 +921,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── git 最小集（票 02）──
 				case "git_status": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -949,7 +948,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_diff": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -972,7 +971,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_log": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -993,7 +992,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_show": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1013,7 +1012,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_branches": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1050,7 +1049,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				// registry agent 的配置根 <agentDir>/config.yml（与 serve sessionFactory 的
 				// Settings.create({ agentDir }) 同源）。
 				case "get_config": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1067,7 +1066,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "set_config": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1095,7 +1094,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── 配置作用域（#05）：与 get_config/set_config 同源 per-agent 文件读解 ──
 				case "get_config_scope": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1134,7 +1133,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "restore_config_inheritance": {
-					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					const agentId = command.sessionId ?? ctx.activeAgentId;
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1388,7 +1387,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// 停用名单读的是**这个 agent 自己的** settings（registry agent 各有一份；旧实现读全局实例，
 					// 会把 default agent 的名单当成人家的）。
 					const anchor = await resolveAgentScope({ agentId, meta: attached.meta, attached });
-					const facts: SkillScopeFacts = {
+					const facts: SkillScopeAnchor = {
 						agentId: anchor.agentId,
 						agentDir: anchor.agentDir,
 						sessionCwd: anchor.sessionCwd,

@@ -1,5 +1,21 @@
 import { describe, expect, it } from "bun:test";
 import type { WireCommand, WireCommandOfType } from "../src/commands";
+import type {
+	MemoryFileZoneDto,
+	MemoryProjectionDto,
+	MemoryResolutionDto,
+	MemorySessionZoneDto,
+	MemoryStoreDto,
+	MemoryTextFileDto,
+	SkillActivation,
+	SkillBlockedDto,
+	SkillLoadErrorDto,
+	SkillScope,
+	SkillScopeFactsDto,
+	SkillScopeRowDto,
+	SkillStatus,
+	SkillsResultDto,
+} from "../src/results";
 
 /**
  * 协议形状锁定（P0，参照 codex schema_fixtures）：
@@ -111,6 +127,70 @@ const _bringBackChildResultShape: _AssertBringBackChildResult = true;
 type _ListProjects = WireCommandOfType<"list_projects">;
 type _AssertListProjects = _ListProjects extends { type: "list_projects"; sessionId?: string } ? true : never;
 const _listProjectsShape: _AssertListProjects = true;
+
+// ── T10B：Skills / Memory 工作台的 scope 契约 ──
+// agent 定向读命令必须自带 sessionId（不能再靠调用方 cast 塞进去），
+// 结果形状也必须能表达「范围/来源/版本/激活/错误」——两端（serve 生产 / web-app 消费）都从这些类型出发。
+
+type _GetMemory = WireCommandOfType<"get_memory">;
+type _AssertGetMemory = _GetMemory extends { type: "get_memory"; sessionId?: string } ? true : never;
+const _getMemoryShape: _AssertGetMemory = true;
+
+type _GetSkills = WireCommandOfType<"get_skills">;
+type _AssertGetSkills = _GetSkills extends { type: "get_skills"; sessionId?: string } ? true : never;
+const _getSkillsShape: _AssertGetSkills = true;
+
+type _SetSkillEnabled = WireCommandOfType<"set_skill_enabled">;
+type _AssertSetSkillEnabled = _SetSkillEnabled extends {
+	type: "set_skill_enabled";
+	sessionId?: string;
+	name: string;
+	enabled: boolean;
+}
+	? true
+	: never;
+const _setSkillEnabledShape: _AssertSetSkillEnabled = true;
+
+type _SkillRow = SkillScopeRowDto;
+type _AssertSkillRow = _SkillRow extends {
+	name: string;
+	source: string;
+	level: "user" | "project" | "native";
+	provider: string;
+	path: string;
+	scope: SkillScope;
+	activation: SkillActivation;
+	status: SkillStatus;
+}
+	? true
+	: never;
+const _skillRowShape: _AssertSkillRow = true;
+
+type _SkillsResult = SkillsResultDto;
+type _AssertSkillsResult = _SkillsResult extends {
+	skills: SkillScopeRowDto[];
+	disabled: SkillScopeRowDto[];
+	blocked: SkillBlockedDto[];
+	errors: SkillLoadErrorDto[];
+	scope: SkillScopeFactsDto;
+}
+	? true
+	: never;
+const _skillsResultShape: _AssertSkillsResult = true;
+
+type _MemoryProjection = MemoryProjectionDto;
+type _AssertMemoryProjection = _MemoryProjection extends {
+	user: MemoryTextFileDto | null;
+	userError?: string;
+	agent: MemoryFileZoneDto | null;
+	project: MemoryFileZoneDto | null;
+	session: MemorySessionZoneDto | null;
+	memoryStore: MemoryStoreDto;
+	resolution: MemoryResolutionDto;
+}
+	? true
+	: never;
+const _memoryProjectionShape: _AssertMemoryProjection = true;
 
 // ── 运行时命令清单快照 ──
 

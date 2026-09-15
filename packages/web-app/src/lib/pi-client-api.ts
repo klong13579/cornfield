@@ -11,6 +11,7 @@ import type {
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	MemoryProjectionDto,
 	MessageDto,
 	ModelCatalogDto,
 	ModelSelectionDto,
@@ -22,7 +23,7 @@ import type {
 	ProviderStatusDto,
 	SessionSnapshotDto,
 	SessionTreeDto,
-	SkillDto,
+	SkillsResultDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
@@ -91,147 +92,30 @@ export interface RemoteSkillItemDto {
 }
 
 /**
- * 技能 scope（T10B）—— 五个事实一次说清，与 serve 端 `server/skill-scope.ts` 一一对应：
- * 范围 scope / 来源 source / 版本 version+fingerprint / 激活 activation / 错误（blocked + errors）。
+ * Skills / Memory 工作台的 scope 契约（T10B）。
  *
- * pi-wire 的 `SkillDto` 只描述「是谁」（name/description/source/level/provider），本工作台
- * 要多回答「在哪个范围、从哪个文件来、哪个版本、进没进这次会话、怎么坏的」—— 后四项在
- * pi-wire 补登记前先在这里声明，与本文件既有的 RemoteSkillItemDto / GatewayStatusDto
- * 同一处理方式（契约先落地，形状随后端确认）。
+ * 形状的权威在 `@cornfield/wire`（serve 生产、web-app 消费同一份）——
+ * 这里只做转发，不再自己声明一份同形接口（否则两端漂移不会被编译期抓住）。
  */
-export type SkillScope = "agent" | "project" | "global";
-
-/** 激活态：进没进这次会话。 */
-export type SkillActivation = "loaded" | "discoverable" | "blocked";
-
-/** 状态：可用 / 被 settings 停用 / 已废弃 / 文件读不到。 */
-export type SkillStatus = "enabled" | "disabled" | "deprecated" | "unavailable";
-
-/** 一行技能（已加载或已停用，同一形状）。 */
-export interface SkillScopeRowDto extends SkillDto {
-	scope: SkillScope;
-	activation: SkillActivation;
-	status: SkillStatus;
-	/** SKILL.md 绝对路径（来源；未知为空串）。 */
-	path: string;
-	providerName?: string;
-	/** frontmatter 声明的版本（没声明就没有）。 */
-	version?: string;
-	/** 内容 sha256 前 8 位（文件系统真相）。 */
-	fingerprint?: string;
-	/** mtime（毫秒）。 */
-	updatedAt?: number;
-	/** 为什么是这个激活/状态（停用来源、冲突、读取失败…）。 */
-	reason?: string;
-}
-
-/** 被挡住、进不了会话的技能（同名冲突落选者等）。 */
-export interface SkillBlockedDto {
-	name: string;
-	path: string;
-	reason: string;
-}
-
-/** 发现阶段的错误（扫描失败、SKILL.md 解析失败）。 */
-export interface SkillLoadErrorDto {
-	path: string;
-	message: string;
-}
-
-/** 这份技能列表锚在谁身上（范围判定的三个根）。 */
-export interface SkillScopeFactsDto {
-	agentId: string;
-	agentDir: string;
-	sessionCwd: string;
-	projectRoot: string | null;
-	/** Project registry 读不出来的原因（有值 = 归属未知，不是未归属）。 */
-	projectError: string | null;
-}
-
-/** `get_skills` 响应。 */
-export interface SkillsResultDto {
-	skills: SkillScopeRowDto[];
-	disabled: SkillScopeRowDto[];
-	blocked: SkillBlockedDto[];
-	errors: SkillLoadErrorDto[];
-	scope: SkillScopeFactsDto;
-}
-
-/** 记忆分区范围（与 serve 端 `server/memory-scope.ts` 同词表）。 */
-export type MemoryScope = "user" | "agent" | "project" | "session" | "global";
-
-/** 记忆文本文件（>128KB 截断标记；updatedAt = mtime）。 */
-export interface MemoryTextFileViewDto {
-	path: string;
-	content: string;
-	truncated: boolean;
-	updatedAt?: number;
-}
-
-/** 一个 scope 的记忆目录投影。 */
-export interface MemoryFileZoneDto {
-	scope: MemoryScope;
-	memoryRoot: string | null;
-	/** 采用的根是哪条解析规则给的（declared / canonical / legacy）。 */
-	rootKind?: string;
-	searchedRoots: string[];
-	memoryMd: MemoryTextFileViewDto | null;
-	summaryMd: MemoryTextFileViewDto | null;
-	rawMd: MemoryTextFileViewDto | null;
-	/** 读失败的原因（读失败 ≠ 没内容）。 */
-	error?: string;
-	unavailableReason?: string;
-}
-
-/** 会话记忆：本会话在记忆管线里的 stage-1 输出。 */
-export interface MemorySessionZoneDto {
-	scope: "session";
-	rolloutPath: string;
-	threadId?: string;
-	rawMemory?: string;
-	summary?: string;
-	generatedAt?: number;
-	sourceUpdatedAt?: number;
-	/** 记忆管线还没处理过这个会话（不是错误）。 */
-	pending: boolean;
-	error?: string;
-}
-
-/** 全局记忆库（self-evolution vector_embeddings，跨 Project）。 */
-export interface MemoryStoreDto {
-	scope: MemoryScope;
-	dbPath: string;
-	sections: Array<{
-		namespace: string;
-		entries: Array<{ id: string; content: string; importance: number; lastAccessedAt: number }>;
-	}>;
-	totalEntries: number;
-	error?: string;
-}
-
-/** 投影锚点（同屏多个 Agent 时，没这块分不清看的是谁的记忆）。 */
-export interface MemoryResolutionDto {
-	agentId: string;
-	agentDir: string;
-	sessionCwd: string;
-	projectRoot: string | null;
-	sessionFile: string | null;
-	attached: boolean;
-	storeScope: "global" | "project";
-	notes: string[];
-}
-
-/** `get_memory` 响应（按 scope 分区）。 */
-export interface MemoryScopeProjectionDto {
-	user: MemoryTextFileViewDto | null;
-	/** user.md 读取失败的原因（读不到 ≠ 没建过）。 */
-	userError?: string;
-	agent: MemoryFileZoneDto | null;
-	project: MemoryFileZoneDto | null;
-	session: MemorySessionZoneDto | null;
-	memoryStore: MemoryStoreDto;
-	resolution: MemoryResolutionDto;
-}
+export type {
+	MemoryEntryDto,
+	MemoryFileZoneDto,
+	MemoryProjectionDto,
+	MemoryResolutionDto,
+	MemoryScope,
+	MemorySectionDto,
+	MemorySessionZoneDto,
+	MemoryStoreDto,
+	MemoryTextFileDto,
+	SkillActivation,
+	SkillBlockedDto,
+	SkillLoadErrorDto,
+	SkillScope,
+	SkillScopeFactsDto,
+	SkillScopeRowDto,
+	SkillStatus,
+	SkillsResultDto,
+} from "@cornfield/wire";
 
 export interface GatewayGroupInfo {
 	channelId: string;
@@ -549,7 +433,7 @@ export interface PiClient {
 	 * project（会话所在 Project）/ session（本会话 stage-1 记忆）/ memoryStore（全局库）。
 	 * sessionId 定向 agent（缺省 = 本连接焦点 agent）；失败/未连接抛错，由调用方渲染错误态。
 	 */
-	getMemory(sessionId?: string): Promise<MemoryScopeProjectionDto>;
+	getMemory(sessionId?: string): Promise<MemoryProjectionDto>;
 
 	// ── 技能（W3 D5 SkillsPanel；T10B 补 scope/来源/版本/激活/错误）──
 	/**

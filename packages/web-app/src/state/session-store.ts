@@ -10,6 +10,7 @@ import type {
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
+	MemoryProjectionDto,
 	MessageContentDto,
 	MessageDto,
 	ModelCatalogDto,
@@ -25,6 +26,7 @@ import type {
 	SessionPhaseDto,
 	SessionSnapshotDto,
 	SessionTreeDto,
+	SkillsResultDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
@@ -39,10 +41,8 @@ import type {
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
-	MemoryScopeProjectionDto,
 	PiClient,
 	RemoteSkillItemDto,
-	SkillsResultDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import { createClient } from "./client";
@@ -926,7 +926,7 @@ export class SessionStore {
 	}
 
 	/** 记忆投影（get_memory，代理到 pi-client；sessionId 定向 agent，展示层自行持有状态）。 */
-	fetchMemory(sessionId?: string): Promise<MemoryScopeProjectionDto> {
+	fetchMemory(sessionId?: string): Promise<MemoryProjectionDto> {
 		return this.#client.getMemory(sessionId);
 	}
 

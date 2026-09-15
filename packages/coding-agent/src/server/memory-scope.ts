@@ -14,11 +14,22 @@
  * 失败模型（这是本模块存在的另一半理由）：读不到 ≠ 空。旧实现把 zone 的读失败吞成 `null`
  * （「这个 zone 没内容」）并只写 logger.debug，页面于是把「读坏了」显示成「还没生成」。
  * 现在每个 zone 带 `error`，每一份文件缺失与读取失败分开，UI 必须分别渲染。
+ *
+ * 输出形状由 `@cornfield/wire` 拥有（`results/memory.ts`）：本模块是唯一生产者，不另立一份同形接口。
  */
 
 import * as path from "node:path";
 import { getMemoryRoot, resolveGlobalMemoryRootCandidates } from "@cornfield/self-evolution/paths";
 import { getConfigRootDir, isEnoent } from "@cornfield/utils";
+import type {
+	MemoryEntryDto,
+	MemoryFileZoneDto,
+	MemoryProjectionDto,
+	MemoryScope,
+	MemorySectionDto,
+	MemorySessionZoneDto,
+	MemoryTextFileDto,
+} from "@cornfield/wire";
 // 读窄子路径而不是 `../memories` 桶：桶会把 self-evolution 的会话/模型依赖一并拉进来，
 // 与 coding-agent 的 settings 形成初始化环（TDZ）。这里只需要 DB 访问 + 分区投影。
 import { loadSectionsFromDb } from "../memories/projection";
@@ -27,55 +38,8 @@ import { getMemoryDb, readSessionMemory, releaseMemoryDb, resolveMemoryDbPath } 
 /** 记忆文件投影上限（与 fs_read 同口径：>128KB 截断并标记）。 */
 const MEMORY_FILE_MAX_BYTES = 128 * 1024;
 
-/** 分区范围：用户 / Agent / Project / Session / 全局库。 */
-export type MemoryScope = "user" | "agent" | "project" | "session" | "global";
-
-/** 文本文件投影（>128KB 截断并标记 truncated）。 */
-export interface MemoryTextFileProjection {
-	path: string;
-	content: string;
-	truncated: boolean;
-	/** mtimeMs；读到内容但 stat 失败时为 undefined（内容有效，只是没有时间）。 */
-	updatedAt?: number;
-}
-
-/** 一个 scope 的记忆目录投影（MEMORY.md / memory_summary.md / raw_memories.md）。 */
-export interface MemoryFileZone {
-	scope: MemoryScope;
-	/** 采用的那个根；空态为 null（本投影里两种模式都会有根）。 */
-	memoryRoot: string | null;
-	/** 采用的根是哪种解析规则的产物（页面要能说清「这个路径怎么来的」）。 */
-	rootKind?: string;
-	/** 按优先级搜过的候选根 —— 空态时告诉用户「去哪儿找」，而不是只说「没有」。 */
-	searchedRoots: string[];
-	memoryMd: MemoryTextFileProjection | null;
-	summaryMd: MemoryTextFileProjection | null;
-	rawMd: MemoryTextFileProjection | null;
-	/** 本区任一文件读取失败的原因（读失败与「文件不存在」是两件事）。 */
-	error?: string;
-	/** 本区在当前上下文不适用/不可计算的原因。 */
-	unavailableReason?: string;
-}
-
-/** 会话记忆：本会话在记忆管线里的 stage-1 输出。 */
-export interface MemorySessionZone {
-	scope: "session";
-	/** 会话 JSONL 文件（threads.rollout_path 的匹配键）。 */
-	rolloutPath: string;
-	threadId?: string;
-	rawMemory?: string;
-	summary?: string;
-	/** stage-1 生成时间（秒）。 */
-	generatedAt?: number;
-	/** 该输出对应的会话文件更新时间（秒）。 */
-	sourceUpdatedAt?: number;
-	/** 记忆管线还没处理过这个会话（不是错误）。 */
-	pending: boolean;
-	error?: string;
-}
-
 /** 投影用的定位事实（调用方按焦点 Agent / 会话解析后传入，本模块不再自己猜）。 */
-export interface MemoryScopeFacts {
+export interface MemoryScopeAnchor {
 	agentId: string;
 	/** Agent 的物理 home；default agent 用 getAgentDir()（它的 meta.agentDir 是 cwd）。 */
 	agentDir: string;
@@ -91,45 +55,13 @@ export interface MemoryScopeFacts {
 	attached: boolean;
 }
 
-export interface MemoryScopeProjection {
-	user: MemoryTextFileProjection | null;
-	/** user.md 读取失败的原因（读不到 ≠ 没建过 user.md）。 */
-	userError?: string;
-	agent: MemoryFileZone | null;
-	project: MemoryFileZone | null;
-	session: MemorySessionZone | null;
-	memoryStore: {
-		scope: MemoryScope;
-		dbPath: string;
-		sections: Array<{
-			namespace: string;
-			entries: Array<{ id: string; content: string; importance: number; lastAccessedAt: number }>;
-		}>;
-		totalEntries: number;
-		/** 库读失败的原因（旧实现吞成空列表 → 页面把「读坏了」显示成「没有记忆」）。 */
-		error?: string;
-	};
-	/** 这份投影锚在谁身上 —— 同屏显示多个 Agent 时，没有这块就无法判断看的是谁的记忆。 */
-	resolution: {
-		agentId: string;
-		agentDir: string;
-		sessionCwd: string;
-		projectRoot: string | null;
-		sessionFile: string | null;
-		attached: boolean;
-		storeScope: "global" | "project";
-		/** 人读说明：某个 zone 为什么是 null / 为什么读不出来。 */
-		notes: string[];
-	};
-}
-
 /** 读一份投影文件：文件不存在与读取失败分开返回（null ≠ error）。 */
-async function readMemoryFile(filePath: string): Promise<{ file: MemoryTextFileProjection | null; error?: string }> {
+async function readMemoryFile(filePath: string): Promise<{ file: MemoryTextFileDto | null; error?: string }> {
 	try {
 		// 单 handle 读内容 + mtime（同一个 fd，不重复打开同一路径）。
 		const handle = Bun.file(filePath);
 		const content = await handle.text();
-		const file: MemoryTextFileProjection = {
+		const file: MemoryTextFileDto = {
 			path: filePath,
 			content: content.length > MEMORY_FILE_MAX_BYTES ? content.slice(0, MEMORY_FILE_MAX_BYTES) : content,
 			truncated: content.length > MEMORY_FILE_MAX_BYTES,
@@ -157,7 +89,10 @@ interface MemoryZoneCandidate {
  * 读一个 scope 的目录投影：按候选根优先级取第一个有文件的根（全空则采用首个候选根并如实置空）。
  * 与既有 project 区行为一致，只是多了 rootKind / searchedRoots / error。
  */
-async function readFileZone(scope: MemoryScope, candidates: readonly MemoryZoneCandidate[]): Promise<MemoryFileZone> {
+async function readFileZone(
+	scope: MemoryScope,
+	candidates: readonly MemoryZoneCandidate[],
+): Promise<MemoryFileZoneDto> {
 	const seen = new Set<string>();
 	const unique: MemoryZoneCandidate[] = [];
 	for (const candidate of candidates) {
@@ -166,7 +101,7 @@ async function readFileZone(scope: MemoryScope, candidates: readonly MemoryZoneC
 		unique.push(candidate);
 	}
 	const searchedRoots = unique.map(candidate => candidate.path);
-	let emptyFallback: MemoryFileZone | undefined;
+	let emptyFallback: MemoryFileZoneDto | undefined;
 	for (const candidate of unique) {
 		const [memoryMd, summaryMd, rawMd] = await Promise.all([
 			readMemoryFile(path.join(candidate.path, "MEMORY.md")),
@@ -174,7 +109,7 @@ async function readFileZone(scope: MemoryScope, candidates: readonly MemoryZoneC
 			readMemoryFile(path.join(candidate.path, "raw_memories.md")),
 		]);
 		const errors = [memoryMd.error, summaryMd.error, rawMd.error].filter((e): e is string => e !== undefined);
-		const zone: MemoryFileZone = {
+		const zone: MemoryFileZoneDto = {
 			scope,
 			memoryRoot: candidate.path,
 			rootKind: candidate.kind,
@@ -200,10 +135,10 @@ async function readFileZone(scope: MemoryScope, candidates: readonly MemoryZoneC
 }
 
 /** 读会话记忆：自己吞下失败（返回带 error 的 zone，不抛），refcount 无论如何都归还。 */
-function readSessionZone(facts: MemoryScopeFacts, cwd: string): MemorySessionZone | null {
-	if (!facts.sessionFile) return null;
-	const sessionFile = facts.sessionFile;
-	const zone: MemorySessionZone = { scope: "session", rolloutPath: sessionFile, pending: false };
+function readSessionZone(anchor: MemoryScopeAnchor, cwd: string): MemorySessionZoneDto | null {
+	if (!anchor.sessionFile) return null;
+	const sessionFile = anchor.sessionFile;
+	const zone: MemorySessionZoneDto = { scope: "session", rolloutPath: sessionFile, pending: false };
 	let db: ReturnType<typeof getMemoryDb> | undefined;
 	try {
 		db = getMemoryDb(cwd);
@@ -234,7 +169,7 @@ function readSessionZone(facts: MemoryScopeFacts, cwd: string): MemorySessionZon
  * `deriveWorkspaceContext`）取，本函数不重新推导它们 —— 两处推导不一致时，页面会读一个
  * Agent、显示另一个的路径。
  */
-export async function buildMemoryScopeProjection(facts: MemoryScopeFacts): Promise<MemoryScopeProjection> {
+export async function buildMemoryScopeProjection(anchor: MemoryScopeAnchor): Promise<MemoryProjectionDto> {
 	const notes: string[] = [];
 
 	// user：身份画像（跨 Project 的用户记忆；与 identity 工具同路径）
@@ -242,9 +177,9 @@ export async function buildMemoryScopeProjection(facts: MemoryScopeFacts): Promi
 
 	// agent：Agent 自己的记忆 home（声明目录优先，旧版 agentDir/memories 列布局回落）
 	const agentCandidates: MemoryZoneCandidate[] = [];
-	if (facts.declaredMemoryDir) agentCandidates.push({ path: facts.declaredMemoryDir, kind: "declared" });
+	if (anchor.declaredMemoryDir) agentCandidates.push({ path: anchor.declaredMemoryDir, kind: "declared" });
 	try {
-		for (const legacy of resolveGlobalMemoryRootCandidates(facts.agentDir, facts.sessionCwd)) {
+		for (const legacy of resolveGlobalMemoryRootCandidates(anchor.agentDir, anchor.sessionCwd)) {
 			agentCandidates.push({ path: legacy, kind: "legacy" });
 		}
 	} catch (err) {
@@ -257,10 +192,10 @@ export async function buildMemoryScopeProjection(facts: MemoryScopeFacts): Promi
 	// 系统路径下 `getMemoryRoot` 会把根指向 project-store 目录（`<cwd>/.cornfield/memory`）而不是
 	// canonical 全局库路径 —— 这是解析器自己的规则，这里原样反映，不另外发明一条「不适用」。
 	const projectCandidates: MemoryZoneCandidate[] = [];
-	const canonicalProjectRoot = getMemoryRoot(facts.agentDir, facts.sessionCwd);
+	const canonicalProjectRoot = getMemoryRoot(anchor.agentDir, anchor.sessionCwd);
 	if (canonicalProjectRoot) projectCandidates.push({ path: canonicalProjectRoot, kind: "canonical" });
 	try {
-		for (const legacy of resolveGlobalMemoryRootCandidates(facts.agentDir, facts.sessionCwd)) {
+		for (const legacy of resolveGlobalMemoryRootCandidates(anchor.agentDir, anchor.sessionCwd)) {
 			projectCandidates.push({ path: legacy, kind: "legacy" });
 		}
 	} catch {
@@ -269,42 +204,46 @@ export async function buildMemoryScopeProjection(facts: MemoryScopeFacts): Promi
 	const project = projectCandidates.length > 0 ? await readFileZone("project", projectCandidates) : null;
 
 	// session：本会话在记忆管线里的 stage-1 输出（唯一按会话键取的记忆）
-	const session = readSessionZone(facts, facts.sessionCwd);
-	if (!facts.sessionFile) {
+	const session = readSessionZone(anchor, anchor.sessionCwd);
+	if (!anchor.sessionFile) {
 		notes.push("会话未 attach —— 会话记忆要等会话事实（session 文件）才可读");
 	}
 
 	// memoryStore：全局 self-evolution 库（跨 Project；行按 MEMORY.md 分区名分组）
-	let sections: MemoryScopeProjection["memoryStore"]["sections"] = [];
+	let sections: MemorySectionDto[] = [];
 	let storeError: string | undefined;
 	let dbPath = "";
 	try {
-		dbPath = resolveMemoryDbPath(facts.sessionCwd);
+		dbPath = resolveMemoryDbPath(anchor.sessionCwd);
 	} catch {
 		// 路径是纯计算，理论上不抛；真抛了也不阻止其它 zone 渲染
 	}
 	let db: ReturnType<typeof getMemoryDb> | undefined;
 	try {
-		db = getMemoryDb(facts.sessionCwd);
-		sections = loadSectionsFromDb(db).map(section => ({
-			namespace: section.namespace,
-			entries: section.entries.map(entry => ({
-				id: entry.id,
-				content: entry.content,
-				importance: entry.importance,
-				lastAccessedAt: entry.lastAccessedAt,
-			})),
-		}));
+		db = getMemoryDb(anchor.sessionCwd);
+		sections = loadSectionsFromDb(db).map(
+			(section): MemorySectionDto => ({
+				namespace: section.namespace,
+				entries: section.entries.map(
+					(entry): MemoryEntryDto => ({
+						id: entry.id,
+						content: entry.content,
+						importance: entry.importance,
+						lastAccessedAt: entry.lastAccessedAt,
+					}),
+				),
+			}),
+		);
 	} catch (err) {
 		// 旧实现把它吞成空列表：页面于是显示「暂无记忆条目」。读失败必须可见，
 		// 且不能连坐其它 zone —— 库坏了不代表 user/agent/project 也读不出来。
 		storeError = `记忆库读取失败：${err instanceof Error ? err.message : String(err)}`;
 		notes.push(storeError);
 	} finally {
-		if (db) releaseMemoryDb(facts.sessionCwd);
+		if (db) releaseMemoryDb(anchor.sessionCwd);
 	}
 	const totalEntries = sections.reduce((sum, s) => sum + s.entries.length, 0);
-	if (!facts.attached) {
+	if (!anchor.attached) {
 		notes.push("Agent 未 attach：项目/会话记忆按 Agent home 作为会话根推算，不是会话事实");
 	}
 
@@ -322,12 +261,12 @@ export async function buildMemoryScopeProjection(facts: MemoryScopeFacts): Promi
 			...(storeError ? { error: storeError } : {}),
 		},
 		resolution: {
-			agentId: facts.agentId,
-			agentDir: facts.agentDir,
-			sessionCwd: facts.sessionCwd,
-			projectRoot: facts.projectRoot ?? null,
-			sessionFile: facts.sessionFile ?? null,
-			attached: facts.attached,
+			agentId: anchor.agentId,
+			agentDir: anchor.agentDir,
+			sessionCwd: anchor.sessionCwd,
+			projectRoot: anchor.projectRoot ?? null,
+			sessionFile: anchor.sessionFile ?? null,
+			attached: anchor.attached,
 			storeScope: "global",
 			notes,
 		},

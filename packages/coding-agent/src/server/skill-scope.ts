@@ -16,23 +16,22 @@
  *
  * 失败模型：SKILL.md 读不到 ≠ 「这个技能没有版本」。读失败 → status "unavailable" 且原因
  * 进 errors —— 不能让页面把「读坏了」显示成「没标版本」。
+ *
+ * 输出形状由 `@cornfield/wire` 拥有（`results/skills.ts`）：本模块是唯一生产者，不另立一份同形接口 ——
+ * 两端（serve / web-app）都从 wire 引入，接口漂移在编译期就暴露。
  */
 
 import * as path from "node:path";
 import { isEnoent, parseFrontmatter, pathIsWithin } from "@cornfield/utils";
+import type { SkillBlockedDto, SkillLoadErrorDto, SkillScope, SkillScopeRowDto } from "@cornfield/wire";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 
-/** 技能范围：Agent 自己的家 / 会话所在的 Project / 两者之外（全局用户库等发现源）。 */
-export type SkillScope = "agent" | "project" | "global";
-
-/** 激活态：本次会话加载了 / 磁盘上有但没进会话 / 被挡住（冲突或读不到）。 */
-export type SkillActivation = "loaded" | "discoverable" | "blocked";
-
-/** 状态：可用 / 被 settings 停用 / 已标记废弃 / 文件读不到。 */
-export type SkillStatus = "enabled" | "disabled" | "deprecated" | "unavailable";
-
-/** 范围判定的依据（全部是绝对路径；两个根都由调用方按 Agent/Project 解析后传入）。 */
-export interface SkillScopeFacts {
+/**
+ * 范围判定的依据（全部是绝对路径；两个根都由调用方按 Agent/Project 解析后传入）。
+ * 与 wire 的 `SkillScopeFactsDto` 不同：那个是**响应里**回给客户端的锚点（带 projectError），
+ * 这个是判定**输入**。
+ */
+export interface SkillScopeAnchor {
 	/** 被查询的 Agent（default = 进程自身的会话）。 */
 	agentId: string;
 	/** Agent 的物理 home；default agent 用 getAgentDir()（meta.agentDir 在 default 上是 cwd，不是家）。 */
@@ -56,49 +55,15 @@ export interface SkillFileFacts {
 	updatedAt: number;
 }
 
-/** 工作台的一行技能（= wire 投影形状）。 */
-export interface SkillScopeRow {
-	name: string;
-	description: string;
-	/** discovery 来源标识 `provider:level`（既有字段，不改语义）。 */
-	source: string;
-	level: "user" | "project" | "native";
-	provider: string;
-	providerName?: string;
-	/** SKILL.md 绝对路径（来源）。 */
-	path: string;
-	scope: SkillScope;
-	activation: SkillActivation;
-	status: SkillStatus;
-	version?: string;
-	fingerprint?: string;
-	updatedAt?: number;
-	/** 为什么是当前 activation/status（停用来源 / 冲突原因 / 读取失败原因）。 */
-	reason?: string;
-}
-
-/** 被挡住、进不了会话的技能（同名冲突的落选者等），来源是 discovery 警告。 */
-export interface BlockedSkill {
-	name: string;
-	path: string;
-	reason: string;
-}
-
-/** 不带技能路径的发现失败（扫描失败等）—— 没有行可挂，只能进错误清单。 */
-export interface SkillLoadError {
-	path: string;
-	message: string;
-}
-
 /**
  * 范围判定。顺序即优先级：agentDir 在项目里时（registry agent 的会话 cwd = agentDir）
  * 「属于这个 Agent」比「落在某个项目路径下」更具体，所以先判 agentDir。
  * 包含判定用 utils 的 `pathIsWithin`（symlink 归一 + 分隔符边界），不另写一份比字符串的。
  */
-export function classifySkillScope(filePath: string, facts: SkillScopeFacts): SkillScope {
-	if (pathIsWithin(facts.agentDir, filePath)) return "agent";
-	if (facts.projectRoot && pathIsWithin(facts.projectRoot, filePath)) return "project";
-	if (pathIsWithin(facts.sessionCwd, filePath)) return "project";
+export function classifySkillScope(filePath: string, anchor: SkillScopeAnchor): SkillScope {
+	if (pathIsWithin(anchor.agentDir, filePath)) return "agent";
+	if (anchor.projectRoot && pathIsWithin(anchor.projectRoot, filePath)) return "project";
+	if (pathIsWithin(anchor.sessionCwd, filePath)) return "project";
 	return "global";
 }
 
@@ -131,21 +96,21 @@ export async function readSkillFileFacts(filePath: string): Promise<SkillFileFac
 
 /** 已加载技能 → 行（activation 恒为 loaded：它就是 session.skills 的同源投影）。 */
 export async function projectLoadedSkills(
-	facts: SkillScopeFacts,
+	anchor: SkillScopeAnchor,
 	skills: readonly Skill[],
-): Promise<{ rows: SkillScopeRow[]; errors: SkillLoadError[] }> {
-	const rows: SkillScopeRow[] = [];
-	const errors: SkillLoadError[] = [];
+): Promise<{ rows: SkillScopeRowDto[]; errors: SkillLoadErrorDto[] }> {
+	const rows: SkillScopeRowDto[] = [];
+	const errors: SkillLoadErrorDto[] = [];
 	for (const skill of skills) {
 		const filePath = skill.filePath;
-		const row: SkillScopeRow = {
+		const row: SkillScopeRowDto = {
 			name: skill.name,
 			description: skill.description,
 			source: skill.source,
 			level: skill._source?.level ?? "native",
 			provider: skill._source?.provider ?? "native",
 			path: filePath,
-			scope: classifySkillScope(filePath, facts),
+			scope: classifySkillScope(filePath, anchor),
 			activation: "loaded",
 			status: "enabled",
 		};
@@ -174,12 +139,12 @@ export async function projectLoadedSkills(
  */
 export function skillPathCandidates(
 	name: string,
-	facts: SkillScopeFacts,
+	anchor: SkillScopeAnchor,
 ): Array<{ path: string; level: "user" | "project" }> {
 	return [
-		{ path: path.join(facts.agentDir, "skills", name, "SKILL.md"), level: "user" },
-		{ path: path.join(facts.agentDir, ".cornfield", "skills", name, "SKILL.md"), level: "project" },
-		{ path: path.join(facts.sessionCwd, ".cornfield", "skills", name, "SKILL.md"), level: "project" },
+		{ path: path.join(anchor.agentDir, "skills", name, "SKILL.md"), level: "user" },
+		{ path: path.join(anchor.agentDir, ".cornfield", "skills", name, "SKILL.md"), level: "project" },
+		{ path: path.join(anchor.sessionCwd, ".cornfield", "skills", name, "SKILL.md"), level: "project" },
 	];
 }
 
@@ -196,12 +161,12 @@ export interface DisabledSkillInput {
  * 不是 disabled —— 「停用」是它对设置的服从，「不存在」是它的事实，两者不能合并成一个词。
  */
 export async function projectDisabledSkills(
-	facts: SkillScopeFacts,
+	anchor: SkillScopeAnchor,
 	disabled: readonly DisabledSkillInput[],
-): Promise<SkillScopeRow[]> {
-	const rows: SkillScopeRow[] = [];
+): Promise<SkillScopeRowDto[]> {
+	const rows: SkillScopeRowDto[] = [];
 	for (const item of disabled) {
-		const candidates = skillPathCandidates(item.name, facts);
+		const candidates = skillPathCandidates(item.name, anchor);
 		let fileFacts: SkillFileFacts | undefined;
 		let resolved: { path: string; level: "user" | "project" } | undefined;
 		for (const candidate of candidates) {
@@ -213,14 +178,14 @@ export async function projectDisabledSkills(
 			}
 		}
 		const target = resolved ?? candidates[0];
-		const row: SkillScopeRow = {
+		const row: SkillScopeRowDto = {
 			name: item.name,
 			description: fileFacts?.description ?? "",
 			source: `native:${target.level}`,
 			level: target.level,
 			provider: "native",
 			path: target.path,
-			scope: classifySkillScope(target.path, facts),
+			scope: classifySkillScope(target.path, anchor),
 			activation: "discoverable",
 			status: "disabled",
 			reason: item.reason,
@@ -242,11 +207,11 @@ export async function projectDisabledSkills(
 
 /** 发现警告分流：带技能路径的 = 某个具体技能被挡住；不带的 = 扫描级失败。 */
 export function splitSkillWarnings(warnings: readonly SkillWarning[]): {
-	blocked: BlockedSkill[];
-	errors: SkillLoadError[];
+	blocked: SkillBlockedDto[];
+	errors: SkillLoadErrorDto[];
 } {
-	const blocked: BlockedSkill[] = [];
-	const errors: SkillLoadError[] = [];
+	const blocked: SkillBlockedDto[] = [];
+	const errors: SkillLoadErrorDto[] = [];
 	for (const warning of warnings) {
 		if (warning.skillPath.length === 0) {
 			errors.push({ path: "", message: warning.message });

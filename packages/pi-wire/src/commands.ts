@@ -293,21 +293,29 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_stats"; period?: "1d" | "7d" | "30d" | "90d" | "all" }
 	/**
-	 * W3 D3：只读拉取记忆投影（三分区：memory/user/project）。
-	 * - memory：self-evolution 记忆库（vector_embeddings 分区，按 importance 排序）
-	 * - user：~/.cornfield/user.md 内容（身份画像；缺失 → null）
-	 * - project：当前项目记忆目录的 MEMORY.md / memory_summary.md / raw_memories.md
-	 *   （canonical evolution 目录优先，旧版扁平目录 agentDir/memories 回落）
-	 * 不依赖任何 attached session（不定向，锚定 serve 进程 cwd 的 default agent）。
-	 * 文件内容 > 128KB 截断并标记 truncated；取不到的区返回 null，UI 渲染空态。
+	 * W3 D3 + T10B：只读拉取记忆投影，按**真实 scope** 分区：
+	 * - user：`~/.cornfield/user.md`（身份画像，跨 Project；缺失 → null）
+	 * - agent：Agent 自己的记忆 home（WP1 WorkspaceContext.memoryDir + 旧版 agentDir/memories 列布局）
+	 * - project：会话所在 Project 的记忆投影（canonical evolution 目录优先，旧版扁平目录回落）
+	 * - session：本会话在记忆管线里的 stage-1 输出（按会话文件取；未沉淀 → pending）
+	 * - memoryStore：self-evolution 记忆库（vector_embeddings 分区，按 importance 排序）
+	 *
+	 * 每个区带自己的 `error`：**读不到 ≠ 空**（旧实现把读失败吞成 null，页面显示成「未生成」）。
+	 * 文件内容 > 128KB 截断并标记 truncated；声明的版本/内容指纹/mtime 由 get_skills 侧提供。
+	 *
+	 * - `sessionId` 定向 agent；缺省 = 本连接焦点 agent。定向未注册的 agent → ok:false。
 	 */
-	| { id?: string; type: "get_memory" }
+	| { id?: string; type: "get_memory"; sessionId?: string }
 	/**
-	 * W3 D5 + P2-W3-3：只读列出已加载技能 + 已停用名单。
-	 * skills = session.skills（discovery 按 settings 过滤后的「已启用」集）：name/description/
-	 * source/level（user|project|native）/provider。
-	 * disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据（name/description?）
-	 * ——回切入口数据源（SkillsView「显示已停用」）。
+	 * W3 D5 + P2-W3-3 + T10B：只读列出技能工作台数据（五个事实，形状见 results/skills.ts）：
+	 * - skills：本次会话真的加载了的技能（= session.skills）+ 范围/来源/版本/激活/状态
+	 * - disabled：被 settings 停用的技能（`skills.ignoredSkills` + `disabledExtensions` 的 `skill:` 项，
+	 *   各自带 reason）；磁盘上没有的标 unavailable ——「停用」与「不存在」是两件事
+	 * - blocked：被挡住的技能（同名冲突落选者等，来自 discovery 警告）
+	 * - errors：发现阶段错误（扫描失败、SKILL.md 解析/读取失败）
+	 * - scope：这份列表锚在哪（agentId / agentDir / 会话根 / Project root）
+	 *
+	 * 范围判定与版本事实都由 serve 按该 agent 的 agentDir 与会话根算，客户端不自己猜。
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
 	| { id?: string; type: "get_skills"; sessionId?: string }
