@@ -1,6 +1,7 @@
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
+	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
 	ConfigScopeDto,
 	CronLogEntryDto,
@@ -24,6 +25,7 @@ import type {
 	ProviderStatusDto,
 	SessionPhaseDto,
 	SessionSnapshotDto,
+	SessionTreeDto,
 	SkillDto,
 	StatsPeriodDto,
 	TaskRowDto,
@@ -114,6 +116,15 @@ export interface SessionView {
 	historyLoading: boolean;
 	/** 历史会话回放：失败错误文本（非空 = 加载失败，UI 可见）。 */
 	historyError?: string;
+	/**
+	 * 当前会话直接委派出去的子会话（get_session_tree）。
+	 * `undefined` = 还没查过；`[]` = 查了，确实没有委派 —— 两者不能当成同一件事。
+	 */
+	sessionTree?: SessionTreeDto;
+	/** 会话树查询中。 */
+	sessionTreeLoading: boolean;
+	/** 会话树查不到的原因（读失败 ≠ 没有子会话，面板必须分开显示）。 */
+	sessionTreeError?: string;
 }
 
 /** B7-1：回合收尾通知——有错误消息走出错告警（errors 开关），否则走完成（agentDone 开关）。 */
@@ -160,6 +171,10 @@ export class SessionStore {
 	#activeAgentId: string | null = null;
 	/** 当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录，agent 会话 = agentDir）。 */
 	#activeWorkspace: string | undefined;
+	/** 会话树属于一个会话：换会话就地作废，绝不让上一个会话的子树留在视图里。 */
+	#sessionTree: SessionTreeDto | undefined;
+	#sessionTreeLoading = false;
+	#sessionTreeError: string | undefined;
 
 	init(client: PiClient): void {
 		this.#client = client;
@@ -284,6 +299,15 @@ export class SessionStore {
 	}
 
 	newSession(): void {
+		// 新会话没有账本：上一会话的子会话树不得跟过来（私有字段与 view 要一起改，
+		// 否则要等下一个快照才会消失）。
+		this.#sessionTree = undefined;
+		this.#sessionTreeError = undefined;
+		const view = cloneView(this.getSnapshot());
+		view.sessionTree = undefined;
+		view.sessionTreeError = undefined;
+		this.#view = view;
+		this.#notify();
 		void this.#run(() => this.#client.newSession());
 	}
 
@@ -530,9 +554,27 @@ export class SessionStore {
 	#setActiveAgent(agentId: string, workspace?: string): void {
 		this.#activeAgentId = agentId;
 		this.#activeWorkspace = workspace;
+		// 会话树是上一个会话的账本视图，换会话后不能继续展示（否则把另一个 Agent 的子会话
+		// 挂在当前会话下）；等下一次 refreshSessionTree 给出真实答案。
+		this.#sessionTree = undefined;
+		this.#sessionTreeError = undefined;
 		const view = cloneView(this.getSnapshot());
+		// view.sessionId 是 serve 推来的焦点（agent 注册名）：它与目标不同，说明手上这批消息
+		// 属于**另一个 Agent**。留着它就是让 A 的工作显示在 B 的上下文里，等新快照到达再
+		// 自动填回。同一个会话上的重复切换不算切换，不动转录。
+		const sameSession = view.sessionId === agentId;
+		if (!sameSession) {
+			view.messages = [];
+			view.live = undefined;
+			view.sessionName = undefined;
+			view.sessionFile = undefined;
+			view.isStreaming = false;
+			view.queued = 0;
+		}
 		view.activeAgentId = agentId;
 		view.activeWorkspace = workspace;
+		view.sessionTree = undefined;
+		view.sessionTreeError = undefined;
 		this.#view = view;
 		this.#notify();
 	}
@@ -648,6 +690,48 @@ export class SessionStore {
 		next.historyError = undefined;
 		this.#view = next;
 		this.#notify();
+	}
+
+	/**
+	 * 读当前会话直接委派出去的子会话（get_session_tree）。
+	 *
+	 * 失败不降级为空树：读不到（未附着 / 账本条目损坏）与「确实没有子会话」是两件事，
+	 * 后者是本命令的正常答案（children: []），前者必须让面板显示错误。
+	 */
+	async refreshSessionTree(agentId?: string): Promise<void> {
+		this.#sessionTreeLoading = true;
+		const pending = cloneView(this.getSnapshot());
+		pending.sessionTreeLoading = true;
+		this.#view = pending;
+		this.#notify();
+		try {
+			const tree = await this.#client.getSessionTree(agentId);
+			this.#sessionTree = tree;
+			this.#sessionTreeError = undefined;
+		} catch (err) {
+			this.#sessionTree = undefined;
+			this.#sessionTreeError = errorMessageOf(err);
+		} finally {
+			this.#sessionTreeLoading = false;
+			const settled = cloneView(this.getSnapshot());
+			settled.sessionTree = this.#sessionTree;
+			settled.sessionTreeLoading = false;
+			settled.sessionTreeError = this.#sessionTreeError;
+			this.#view = settled;
+			this.#notify();
+		}
+	}
+
+	/**
+	 * 把子会话结果带回父会话（bring_back_child_result），并刷新会话树。
+	 *
+	 * 返回 serve 的原始结果（不只是布尔）：调用方要用 `firstTime` 区分「这次才带回」与
+	 * 「早就带回过」，用 `content` 展示带回来的东西；重复带回不报错，但不得重复注入。
+	 */
+	async bringBackChild(childSessionId: string, agentId?: string): Promise<BroughtBackChildResultDto> {
+		const result = await this.#client.bringBackChildResult(childSessionId, agentId);
+		await this.refreshSessionTree(agentId);
+		return result;
 	}
 
 	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */
@@ -1020,6 +1104,9 @@ export class SessionStore {
 				activeAgentId: this.#activeAgentId ?? undefined,
 				activeWorkspace: this.#activeWorkspace,
 				historyLoading: false,
+				sessionTree: this.#sessionTree,
+				sessionTreeLoading: this.#sessionTreeLoading,
+				sessionTreeError: this.#sessionTreeError,
 			};
 		}
 		return {
@@ -1053,6 +1140,9 @@ export class SessionStore {
 			activeAgentId: this.#activeAgentId ?? undefined,
 			activeWorkspace: this.#activeWorkspace,
 			historyLoading: false,
+			sessionTree: this.#sessionTree,
+			sessionTreeLoading: this.#sessionTreeLoading,
+			sessionTreeError: this.#sessionTreeError,
 		};
 	}
 

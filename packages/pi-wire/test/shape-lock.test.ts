@@ -94,6 +94,20 @@ type _RefreshCatalog = WireCommandOfType<"refresh_catalog">;
 type _AssertRefreshCatalog = _RefreshCatalog extends { type: "refresh_catalog" } ? true : never;
 const _refreshCatalogShape: _AssertRefreshCatalog = true;
 
+type _GetSessionTree = WireCommandOfType<"get_session_tree">;
+type _AssertGetSessionTree = _GetSessionTree extends { type: "get_session_tree"; sessionId?: string } ? true : never;
+const _getSessionTreeShape: _AssertGetSessionTree = true;
+
+type _BringBackChildResult = WireCommandOfType<"bring_back_child_result">;
+type _AssertBringBackChildResult = _BringBackChildResult extends {
+	type: "bring_back_child_result";
+	sessionId?: string;
+	childSessionId: string;
+}
+	? true
+	: never;
+const _bringBackChildResultShape: _AssertBringBackChildResult = true;
+
 // ── 运行时命令清单快照 ──
 
 const COMMAND_TYPES = [
@@ -227,6 +241,9 @@ const COMMAND_TYPES = [
 	"get_config_scope",
 	"restore_config_inheritance",
 	"get_model_selection",
+	// Session Tree（T8）：父会话对被委派子会话的账本读取与结果带回
+	"get_session_tree",
+	"bring_back_child_result",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */

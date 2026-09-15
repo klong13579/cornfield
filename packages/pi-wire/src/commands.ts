@@ -197,7 +197,26 @@ export type MultiplexCommand =
 	| { id?: string; type: "get_async_job_snapshot"; sessionId?: string; recentLimit?: number }
 	| { id?: string; type: "format_session_as_text"; sessionId?: string }
 	| { id?: string; type: "get_display_context"; sessionId?: string }
-	| { id?: string; type: "resolve_role_model"; sessionId?: string; role: string };
+	| { id?: string; type: "resolve_role_model"; sessionId?: string; role: string }
+	// Session Tree（T8）：父会话对被委派子会话的账本读取与结果带回
+	/**
+	 * 读一个会话的直接子会话账本（SessionTreeDto）。
+	 *
+	 * 账本归属父会话，存在它自己的会话 JSONL 里（`session_tree_manager` 的 custom entry），
+	 * 所以查询对象是「一个会话」，不是「一个 agent」。`sessionId` 定向注册表里的 agent
+	 * （lazy attach），缺省 = 本连接当前焦点会话。
+	 *
+	 * 只回答这一层：子会话的子孙在子会话自己的日志里，要展开就拿它的 sessionId 再查一次。
+	 * 未知 agent / 无附着会话 → ok:false（不返回空树冒充「没有子会话」）。
+	 */
+	| { id?: string; type: "get_session_tree"; sessionId?: string }
+	/**
+	 * 把某个子会话的结果带回父会话（BroughtBackChildResultDto）。
+	 *
+	 * 幂等：重复带回不报错，但 `firstTime:false`，且**不再**注入 —— 同一条结果注入两次
+	 * 就是把同一次工作算两遍。读取失败（结果指针不可读）整条命令 ok:false，不返回半份内容。
+	 */
+	| { id?: string; type: "bring_back_child_result"; sessionId?: string; childSessionId: string };
 
 /** 多端专属命令（rpc-types 没有，wire 层新增）。 */
 export type WireExtensionCommand =

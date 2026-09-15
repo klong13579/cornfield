@@ -90,6 +90,7 @@ import {
 	type SessionFactory,
 	SessionRegistry,
 } from "./session-registry";
+import { bringBackChildResult, readSessionTree } from "./session-tree-wire";
 import { clearStatsCache, getCachedStats, setCachedStats } from "./stats-cache";
 
 export interface WireServerOptions {
@@ -1158,6 +1159,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				"branch",
 				"fork_from",
 				"undo_exchange",
+				// 带回的结果以 custom message 直接落进会话状态（`sendCustomMessage` 不发事件），
+				// 不显式推快照的话客户端要等下一次无关的变更才看得到它。
+				"bring_back_child_result",
 			]);
 			const sessionDone = (result?: unknown): void => {
 				done(result);
@@ -1742,6 +1746,24 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "get_messages": {
 					done({ messages: session.messages });
+					break;
+				}
+
+				// ── Session Tree（T8）：父会话对被委派子会话的账本读取与结果带回 ──
+				case "get_session_tree": {
+					try {
+						done(await readSessionTree(session, attached.meta));
+					} catch (err) {
+						fail(`get_session_tree failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				case "bring_back_child_result": {
+					try {
+						done(await bringBackChildResult(session, attached.meta, command.childSessionId));
+					} catch (err) {
+						fail(`bring_back_child_result failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
 					break;
 				}
 

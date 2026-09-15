@@ -1,5 +1,6 @@
 import { FolderOpen, Image } from "lucide-react";
 import { useState } from "react";
+import { activeAgentIdOf } from "../../state/agent-context";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ArtifactsPanel } from "./ArtifactsPanel";
@@ -24,12 +25,8 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 	const view = useSession();
 	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
-	// 跟随本连接当前焦点 agent（switchSession 记录）；未切过/未挂载时回落第一 attached / 首个 agent
-	const agentId =
-		view.activeAgentId ??
-		view.agents.find(a => a.active)?.id ??
-		view.agents.find(a => a.attached)?.id ??
-		view.agents[0]?.id;
+	// 跟随本连接当前焦点 agent（与左栏会话树同一处解析，避免两栏读不同 Agent）
+	const agentId = activeAgentIdOf(view);
 
 	return (
 		<>

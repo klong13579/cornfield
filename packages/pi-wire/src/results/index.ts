@@ -12,5 +12,6 @@ export * from "./memory";
 export * from "./models";
 export * from "./providers";
 export * from "./session";
+export * from "./session-tree";
 export * from "./skills";
 export * from "./stats";

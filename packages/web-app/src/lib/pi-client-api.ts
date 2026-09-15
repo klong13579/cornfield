@@ -2,6 +2,7 @@ import type {
 	AgentInfoDto,
 	ArtifactDto,
 	AvailableModelsDto,
+	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
 	ConfigScopeDto,
 	ConnectionInfoDto,
@@ -21,6 +22,7 @@ import type {
 	ProviderOAuthStartDto,
 	ProviderStatusDto,
 	SessionSnapshotDto,
+	SessionTreeDto,
 	SkillDto,
 	StatsPeriodDto,
 	TaskRowDto,
@@ -30,7 +32,16 @@ import type {
 } from "@cornfield/wire";
 
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
-export type { ArtifactDto } from "@cornfield/wire";
+// Session Tree DTO（T8）同样由 pi-wire 定义：消费方（会话树面板等）从本层引入，
+// 保证「一个概念一种表示」—— 前端不再自己拼一份子会话形状。
+export type {
+	ArtifactDto,
+	BroughtBackChildResultDto,
+	ChildSessionEscalationDto,
+	ChildSessionNodeDto,
+	ChildSessionStatusDto,
+	SessionTreeDto,
+} from "@cornfield/wire";
 
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 
@@ -326,6 +337,19 @@ export interface PiClient {
 	getBranchMessages(): Promise<BranchPoint[]>;
 	/** 历史会话索引（list_sessions；be-dev 就绪后返回真数据，未实现时返回基础查询）。 */
 	listSessions(): Promise<SessionRecordSummary[]>;
+
+	// ── Session Tree（T8：父会话的委派账本 + 结果带回）──
+	/**
+	 * 读一个会话直接委派出去的子会话（get_session_tree）。
+	 * 只回答这一层：孙会话在子会话自己的日志里，要展开拿它的 sessionId 再查一次。
+	 * sessionId 定向注册表 agent，缺省 = 本连接当前焦点会话；无附着会话/未知 agent 招错。
+	 */
+	getSessionTree(sessionId?: string): Promise<SessionTreeDto>;
+	/**
+	 * 把子会话的结果带回父会话（bring_back_child_result）。
+	 * 幂等：`firstTime:false` 表示此前已带回 —— 调用方不得重复注入同一份结果。
+	 */
+	bringBackChildResult(childSessionId: string, sessionId?: string): Promise<BroughtBackChildResultDto>;
 
 	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
 	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }>;

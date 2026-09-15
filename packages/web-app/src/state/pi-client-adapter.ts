@@ -3,6 +3,7 @@ import { PiClient as WirePiClient } from "@cornfield/client";
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
+	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
 	ConfigScopeDto,
 	ConnectionInfoDto,
@@ -23,6 +24,7 @@ import type {
 	ProviderOAuthStartDto,
 	ProviderStatusDto,
 	SessionSnapshotDto,
+	SessionTreeDto,
 	SkillDto,
 	StatsPeriodDto,
 	TaskRowDto,
@@ -457,8 +459,10 @@ export class PiClientAdapter implements PiClient {
 	/** 拉取注册表 agent 元数据（list_agents），不触发 attach。 */
 	async listAgents(): Promise<AgentInfoDto[]> {
 		try {
-			const result = await this.#req<unknown>({ type: "list_agents" });
-			const list = result as SessionEntryLike[] | null;
+			// serve 回的是 { agents: [...] }（和 server_snapshot 的 sessions 同形）。当成裸数组读
+			// 会让每次调用都静默回落到上一次的缓存值 —— 拉取结果永远不生效。
+			const result = await this.#req<{ agents?: SessionEntryLike[] | null }>({ type: "list_agents" });
+			const list = result.agents;
 			if (Array.isArray(list)) {
 				this.#agents = list.map(mapAgentEntry);
 				return this.#agents;
@@ -532,6 +536,20 @@ export class PiClientAdapter implements PiClient {
 			console.warn("[web-app] list_sessions unavailable", err);
 			return [];
 		}
+	}
+
+	/** 读当前会话的委派账本（get_session_tree）。 */
+	getSessionTree(sessionId?: string): Promise<SessionTreeDto> {
+		return this.#req<SessionTreeDto>({ type: "get_session_tree", ...(sessionId ? { sessionId } : {}) });
+	}
+
+	/** 把子会话结果带回父会话（bring_back_child_result）；幂等门闩是结果里的 firstTime。 */
+	bringBackChildResult(childSessionId: string, sessionId?: string): Promise<BroughtBackChildResultDto> {
+		return this.#req<BroughtBackChildResultDto>({
+			type: "bring_back_child_result",
+			childSessionId,
+			...(sessionId ? { sessionId } : {}),
+		});
 	}
 
 	async diagnoseSession(
@@ -940,12 +958,15 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * serve 重启 / WS 重连后旧快照可能残留（如上传送中相位）导致发送按钮锁死在「停止」。
-	 * 重新 attach 已知会话，强制 serve 广播权威 session_snapshot 覆盖缓存。幂等：已附着则无副作用。
+	 *
+	 * 走 `switch_session` 而不是 `attach`：重连是一条**新连接**，serve 侧焦点回到 default，
+	 * 只 attach 不会把焦点拉回来，于是本连接会开始收 default 的快照 —— 另一个 Agent 的
+	 * 会话就出现在当前转录里。switch_session 同时含 attach，并把焦点与权威快照一起恢复。
 	 */
 	async #resyncAttached(): Promise<void> {
 		if (!this.#sessionId) return;
 		try {
-			await this.#req({ type: "attach", sessionId: this.#sessionId } as never);
+			await this.#req({ type: "switch_session", sessionId: this.#sessionId });
 		} catch {
 			// 会话已不存在（serve 数据重置）等场景：忽略，等下一个 server_snapshot
 		}

@@ -1,9 +1,10 @@
-import { Folder, Menu, PanelRight, Smartphone } from "lucide-react";
+import { Bot, Folder, Menu, MessagesSquare, PanelRight, Smartphone } from "lucide-react";
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
 import { DevicePreview } from "../../layout/DevicePreview";
 import { FloatingCardHost } from "../../render/FloatingCardHost";
+import { activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -25,7 +26,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 
 	// 顶栏工作区：跟随当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录；agent = agentDir）；
 	// 未点击/未识别时回落进程仓库（env.repos）
-	const activeAgent = view.activeAgentId ? view.agents.find(a => a.id === view.activeAgentId) : undefined;
+	const activeAgent = activeAgentOf(view);
 	const workspaceLabel =
 		view.activeWorkspace ??
 		(activeAgent?.agentDir
@@ -84,11 +85,23 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 						{view.reconnecting ? `重连中${view.connectionId ? ` · ${view.connectionId}` : ""}` : "已连接"}
 					</span>
 					<span className="h-[18px] w-px bg-hairline" />
-					<button type="button" className="chip">
+					{/* 上下文条：Agent / 工作区 / 会话 —— 三者的权威各不同（Agent 是服务这个会话的人，
+				    工作区是它落的目录，会话是正在做的事），拼成一个字符串就丢掉了来源。 */}
+					<span className="chip" title="服务当前会话的 Agent">
+						<Bot size={13} strokeWidth={1.5} />
+						<b>{activeAgent?.name ?? view.activeAgentId ?? "未选择 Agent"}</b>
+					</span>
+					<span className="text-[12px] text-ink-faint">/</span>
+					<span className="chip" title={activeAgent?.agentDir ?? view.env?.repos ?? undefined}>
 						<Folder size={13} strokeWidth={1.5} />
 						<b>{workspaceLabel}</b>
 						{view.env ? ` · ${view.env.branch}` : ""}
-					</button>
+					</span>
+					<span className="text-[12px] text-ink-faint">/</span>
+					<span className="chip" title={view.sessionFile ?? undefined}>
+						<MessagesSquare size={13} strokeWidth={1.5} />
+						<b>{view.sessionName ?? view.sessionId ?? "未命名会话"}</b>
+					</span>
 					<span className="flex-1" />
 					{!compact && (
 						<>
