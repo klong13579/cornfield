@@ -3,7 +3,7 @@
 - 日期：2026-09-16
 - 上游：`can1357/oh-my-pi` @ `c5a8e0e`（快照 `/tmp/omp-upstream`）
 - 本地基线：`main` @ `3d9ddde0`
-- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；**第 2 波（第 5/8/10/11 条能力）四票已交付并合并到 `main` @ `c229b2df2f`**；第 11 条的 section 半（增量 yield）随后单独补做并交付（见该行注）。剩余为第 3 波（第 9/12/13 条）
+- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；**第 2 波（第 5/8/10/11 条能力）四票已交付并合并到 `main` @ `c229b2df2f`**；第 11 条的 section 半（增量 yield）随后单独补做并交付。**第 3 波：第 9 条已交付（集成分支 `squad-20260916-upstream-tool-port-w3`，待用户确认合并）+ 一张 13 条之外的清扫票同批交付；第 12 条取证后扣下（无本地消费方）；第 13 条按用户决策留待「记忆后端」架构决策**
 - 范围：**两棵树都有的 Tool，其能力差**（含行为、TUI 渲染、prompt）
 
 与另两篇的分工（禁止分叉）：
@@ -28,10 +28,10 @@
 | 6 | 未解决 git 合并冲突浮出 + `conflict://N` 读写解决 | `tools/conflict-detect.ts:1-500` | 缺 | M | 2 |
 | 7 | PDF 读取（Chromium 渲染单页） | `read-pdf.ts` | 缺（本地 PDF 走文本抽取） | M | 2 |
 | 8 | `run_watch` 健壮性（429 退避、fast/slow 轮询、no-runs-give-up、completed jobs 缓存）+ `pr_checkout` worktree 冲突后缀 + `view` 的 stateReason 回退 | `gh-run-watch.ts:44-46,192-200,1015-1026`、`gh-pr-checkout.ts:96-117`、`gh-view.ts:81-114` | 部分 | S（每项） | 2 已交付 |
-| 9 | GitHub 视图 SQLite 缓存层（soft/hard TTL、后台刷新、auth-key 隔离） | `github-cache.ts` | 缺 | M | 3 |
+| 9 | GitHub 视图 SQLite 缓存层（soft/hard TTL、后台刷新、auth-key 隔离） | `github-cache.ts` | 缺 | M | 3 已交付 |
 | 10 | edit `sloppy` 模式 + inline-edit-recovery（模型把 edit 写成纯文本时捞回） | `session/inline-edit-recovery.ts`、`edit/schemas.ts` | 缺 | M | 2 已交付 |
 | 11 | 输出 schema 校验统一（yield 与 executor 共用）+ 增量 yield 的 section 校验 | `tools/output-schema-validator.ts:1-307` | 部分：`yield.ts:82-100` 自 compile AJV `[复核]`，executor 另有一套；yield 当前无测试 | M | 2 已交付（2026-09-16：校验统一 R1 交付；section 半随后单独补做并交付——`yield` 的 `type` 分段提交 + `sectionMetadata`/`validateSection` + `task/yield-assembly.ts` + 终止判定两路对齐） |
-| 12 | 终端屏幕读取（把虚拟终端行导出为可重放样式） | `tools/terminal-output.ts` | 缺；**本地已有 `@xterm/headless` + `bash-interactive.ts:215` 读屏** `[复核]`，零新依赖 | S | 3 |
+| 12 | 终端屏幕读取（把虚拟终端行导出为可重放样式） | `tools/terminal-output.ts` | 缺；**本地已有 `@xterm/headless` + `bash-interactive.ts:215` 读屏** `[复核]`，零新依赖 | S | 3【2026-09-16 取证推翻前提：上游那两个助手（`readTerminalRows` / `styleTerminalRow`，含 SGR 白名单）的消费方是 `launch/terminal-output.ts`（启动器 broker + worker 的**外部终端视图通道**），本地**没有 `src/launch/`**、唯一持有 xterm 的只有 `bash-interactive.ts`（TUI 覆盖层，样式由主题自出）——照搬就是没人调的 API。扣下等取向：A 不发并钉结论 / B 先定义消费方（如 `xd://` 设备读当前屏幕、终端帧进会话导出、编辑器扩展的终端视图）/ C 照搬 helper 带单测】 |
 | 13 | memory `reflect`（对长期记忆做 LLM 综合回答） | `tools/memory-reflect.ts:1-90` | 缺；本地有 `write_memory` + `query_episodic_memory`（`self-evolution/src/tools.ts:23-38` `[复核]`），只返回列表 | M | 3（受前作「记忆后端」决策阻塞） |
 
 「1 已交付」= 已并入 `main`。第 1 波的落地形状与第 2 波的拆票依据见 `docs/upstream-tool-capability-port.md` 本节与 `.scratch/upstream-tool-port/issues/`（`.scratch` 不入库）。
