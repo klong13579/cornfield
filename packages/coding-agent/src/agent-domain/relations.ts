@@ -90,8 +90,14 @@ function isAbsolutePath(value: string): boolean {
 	return /^[A-Za-z]:[\\/]/.test(value);
 }
 
-/** Compare path identity: one separator flavour, no duplicate or trailing separators. */
-function normalizePath(value: string): string {
+/**
+ * Compare path identity: one separator flavour, no duplicate or trailing separators.
+ *
+ * Exported because the profile registry (WP2) needs the same identity for its reverse
+ * lookup (`agentDir` → Agent). A second normalization would let `agent.dir-shared` pass
+ * on data the registry then resolves to the wrong Agent.
+ */
+export function normalizePath(value: string): string {
 	const unified = value.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 	return unified.length > 1 ? unified.replace(/\/+$/, "") : unified;
 }

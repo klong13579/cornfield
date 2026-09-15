@@ -12,15 +12,11 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	buildAgentSessionPath,
-	ensureAgentDir,
-	registerAgent,
-	resolveAgentDir,
-} from "@cornfield/coding-agent/skeleton";
+import { buildAgentSessionPath, ensureAgentDir, registerAgent } from "@cornfield/coding-agent/skeleton";
 import { isEnoent, logger } from "@cornfield/utils";
 import { ActionRegistry } from "./action-registry";
 import { AgentBridge, type AgentBridgeOptions } from "./agent-bridge";
+import { type AccountAgentBinding, resolveAccountAgentBinding } from "./agent-profile";
 import { createBridgeStatusToolDefinitions } from "./bridge-status-tool";
 import { DingTalkChannel } from "./channels/dingtalk";
 import { ChannelRegistry } from "./channels/registry";
@@ -80,12 +76,28 @@ export function buildChannelKey(channelId: string, accountId?: string): string {
  * gateway with `CORNFIELD_GATEWAY_TEST_MODE=1` and temp agentDirs; without this
  * guard their registerAgent() writes clobbered real account paths, which
  * `omp serve` later reads → agents pointing at vanished temp dirs.
+ *
+ * The resolved agentDir is written under the account key **unless the directory
+ * already belongs to a different registered Agent** (an account that declares
+ * `agentId` whose registry name differs from the account key, e.g. account
+ * `omp-atomix` → Agent `algorithm`). Registering it again under the account key would
+ * mint a second Agent for one directory, which is the domain's `agent.dir-shared`
+ * violation — the account is a second face of that Agent, not a new one.
  */
-async function registerAccountAgent(accountId: string, agentDir: string, log: typeof logger): Promise<void> {
+async function registerAccountAgent(binding: AccountAgentBinding, log: typeof logger): Promise<void> {
+	const { accountId, agentId, agentDir } = binding;
 	const isTestMode = process.env.CORNFIELD_GATEWAY_TEST_MODE === "1";
 	const isTempDir = agentDir.startsWith(os.tmpdir());
 	if (isTestMode && isTempDir) {
 		log.debug("Skipping registerAgent for test-mode temp agentDir", { accountId, agentDir });
+		return;
+	}
+	if (binding.profile !== null && agentId !== accountId) {
+		log.debug("agentDir already registered under another Agent; skipping duplicate registry entry", {
+			accountId,
+			agentId,
+			agentDir,
+		});
 		return;
 	}
 	await registerAgent(accountId, agentDir);
@@ -630,7 +642,8 @@ export class Gateway {
 				const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 				channel.setAccountId(accountId);
 
-				const agentDir = resolveAgentDir(accountId, account.agentDir);
+				const binding = await resolveAccountAgentBinding(accountId, account);
+				const agentDir = binding.agentDir;
 				this.#accountAgentDirs.set(accountId, agentDir);
 				try {
 					await ensureAgentDir(agentDir);
@@ -642,7 +655,7 @@ export class Gateway {
 				// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
 				// affects list visibility, not gateway operation.
 				try {
-					await registerAccountAgent(accountId, agentDir, logger);
+					await registerAccountAgent(binding, logger);
 				} catch (err) {
 					logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 				}
@@ -700,7 +713,8 @@ export class Gateway {
 		const channel = this.#channelFactory?.(accountId) ?? new DingTalkChannel();
 		channel.setAccountId(accountId);
 
-		const agentDir = resolveAgentDir(accountId, account.agentDir);
+		const binding = await resolveAccountAgentBinding(accountId, account);
+		const agentDir = binding.agentDir;
 		this.#accountAgentDirs.set(accountId, agentDir);
 		// New account → drop any stale disabledExt + skill caches for it.
 		this.#disabledExtCache.delete(accountId);
@@ -715,7 +729,7 @@ export class Gateway {
 		// agentDirs (mirrors `omp agent init`). Non-fatal: a failure here only
 		// affects list visibility, not gateway operation.
 		try {
-			await registerAccountAgent(accountId, agentDir, logger);
+			await registerAccountAgent(binding, logger);
 		} catch (err) {
 			logger.warn("Failed to register agentDir", { accountId, agentDir, error: String(err) });
 		}

@@ -713,10 +713,10 @@ export default class Gateway extends Command {
 		const store = new SQLiteSessionStore(`${dataDir}/sessions.db`);
 		try {
 			const agentDirs = new Map<string, string>();
-			const { resolveAgentDir } = await import("@cornfield/coding-agent/skeleton");
+			const { resolveAccountAgentBinding } = await import("../agent-profile");
 			const robotMeta = new Map<string, { robotCode?: string; robotName?: string }>();
 			for (const [id, acc] of Object.entries(dt.accounts)) {
-				agentDirs.set(id, resolveAgentDir(id, acc.agentDir));
+				agentDirs.set(id, (await resolveAccountAgentBinding(id, acc)).agentDir);
 				robotMeta.set(id, { robotCode: acc.robotCode, robotName: acc.robotName });
 			}
 			const writer = new RobotContextWriter({ store, agentDirs, robotMeta });

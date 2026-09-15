@@ -540,10 +540,22 @@ describe("validateDomain", () => {
 });
 
 describe("public surface", () => {
+	// The guard is an exact symbol list on purpose: annexing the module with a store, a
+	// runtime or a second Session Todo has to fail here rather than ship. WP2 added the
+	// three read-only projections over the existing authorities (`listAgentProfiles`,
+	// `findAgentProfile`, `findAgentProfileByDir`) plus the binding resolver and the
+	// shared path identity they need — none of them owns state, writes a file, or runs
+	// anything; see `src/agent-domain/profile-registry.ts`.
 	test("stays contract-only: no store, no runtime, no second Session Todo", () => {
 		expect(Object.keys(domain).sort()).toEqual([
 			"DOMAIN_AUTHORITY",
+			"findAgentProfile",
+			"findAgentProfileByDir",
 			"isSessionExecutionPolicy",
+			"listAgentProfiles",
+			"normalizePath",
+			"resolveAgentBinding",
+			"toAgentProfile",
 			"validateAgentTodoTransition",
 			"validateAgentTodos",
 			"validateAgents",

@@ -431,7 +431,17 @@ export interface DingtalkAccountConfig {
 	robotCode?: string;
 	/** Display name of the DingTalk robot for this account (as shown to users). */
 	robotName?: string;
-	/** Optional agent workspace directory for this specific account */
+	/**
+	 * Registered Agent this account speaks for (`~/.cornfield/agent/registry.json` key).
+	 *
+	 * Optional. When omitted the account resolves through its own key: a declared
+	 * `agentDir` when there is one (legacy accounts — no migration needed), otherwise the
+	 * Agent registered under `accountId`, otherwise the conventional default home.
+	 * Set it only when the robot's key and the Agent's registry name differ.
+	 */
+	agentId?: string;
+	/** Optional agent workspace directory for this specific account. Takes precedence
+	 *  over `agentId`: an operator-pinned path is used as written. */
 	agentDir?: string;
 	/** Optional model override for this account */
 	model?: string;
