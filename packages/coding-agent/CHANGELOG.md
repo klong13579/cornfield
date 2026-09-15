@@ -6,6 +6,8 @@
 
 - **bash 命令里内部 URI 解析失败时不报出问题的 token**（`src/tools/bash-skill-urls.ts`、`test/tools/bash-skill-urls.test.ts`）：bash tool 在执行命令前替换命令字符串里的每一处内部 URI（**单引号、双引号里的也替换**），所以失败可能来自与当前操作无关的一段文本，而旧报错不指向它 —— 2026-09-15 实测：`git commit -m "…字面 skill:// 路径以 `...` 结尾…"` 被拦下，命令一条没执行，输出只有一行 `Path traversal (..) is not allowed in skill:// URLs`，既不指向命令里的哪一段触发了解析，也没说明「命令里的字面 URI 会被解析」这一机制（同一个坑此前已让人误判过一次：`grep -c "skill://…"` 返回 0，因为模式本身先被替换了）。现 `resolveSkillUrlToPath` 的失败路径（traversal / 未知 skill）都带上 `token: <原文>` 与一行 `note`；正常解析路径不变，既有断言（子串匹配）继续成立。
 
+- **pi-intercom skill 的四处事实错误**（`src/intercom-extension/skills/pi-intercom/SKILL.md`、`src/intercom-extension/README.md`）：这份 skill 被编进 binary、会话启动时落盘到 `<agentDir>/skills/pi-intercom/`，是 agent 读 intercom 用法的唯一来源，但四处描述与代码不符。① attachment 声称「没有独立的 `path` 字段」并教人把绝对路径塞进 `name` —— `path` 字段与这段文字是同一个 commit（`8e5b3e3d2f`）落地的，实际渲染成 `Attachment: <name> (file: <path>)`；② 「`send` 是 fire-and-forget，接收方忙时消息会丢」—— 那条丢消息路径（busy headless → `reject`）已在 `2886ec02e4`（2026-08-26）改成排队（`followUp`），`resolveInboundDeliveryMode` 不再产生 `reject`，`reject` 分支留在 `index.ts:1225-1241` 但不可达，`inbound-concurrency.test.ts` 有断言；③ 错误处理示例用 `result.delivered` / `result.reason` / `result.isError`，真实契约是 `{ content, details }` —— `if (!result.delivered)` 恒真，照抄的 agent 每次都会打印一次假失败；④ `/name` 不是 cornfield 命令（builtin registry 只有 `/rename`，全仓无 `name` 注册）。README 的同源错误（`name` = path、`/name`、send 会丢、busy 接收方走 steering 队列的描述）一并修正。skill 正文里那个孤立的代码围栏（把一段正文渲成代码块）同时修掉。
+
 ## [1.2.3] - 2026-09-14
 
 ### Added

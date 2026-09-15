@@ -33,11 +33,11 @@ The most common pattern. One session holds the big picture, others do hands-on w
 
 **Setup** (in each session):
 ```
-/name planner    # Terminal 1
-/name worker     # Terminal 2
+/rename planner    # Terminal 1
+/rename worker     # Terminal 2
 ```
 
-**Planner delegates a task** (fire-and-forget):
+**Planner delegates a task** (non-blocking):
 ```typescript
 intercom({
   action: "send",
@@ -164,7 +164,7 @@ intercom({
 ```
 
 Content larger than ~1KB (full files, long diffs, reviews): write it to a file
-first, then send only the absolute path + one-line summary — see
+first, then send only `path` + a one-line `content` summary — see
 长内容传输（Large Payload）. Never inline the full body.
 
 ### Pattern 6: Cross-Codebase Peer Messages
@@ -303,14 +303,15 @@ Ask the user before opening another visible surface manually.
 // case (the target is already waiting on a reply from you): answer the
 // target's pending ask first, then ask again.
 const result = await intercom({ action: "ask", to: "planner", message: "..." });
-if (result.isError && result.content[0].text.includes("Mutual ask refused")) {
+if (result.details?.error === true && result.content[0].text.includes("Mutual ask refused")) {
   // Reply to the planner's open ask, then retry your ask.
 }
 ```
 
 ### `send` Behavior
 
-- **No timeout**: Message is delivered or fails immediately
+- **No blocking**: the sender continues immediately. Delivery is either acknowledged or reported as an explicit failure
+- **Busy recipient queues**: a busy recipient gets the message at the end of its current turn
 - **Sole pending ask inference**: If the destination has exactly one pending inbound ask, `send` attaches its `replyTo` and reports `Reply sent to <target> (inferred from pending ask)`
 - **Ambiguity stays unthreaded**: Zero or multiple matching asks leave the send as an ordinary message
 - **Confirmation dialogs**: If `confirmSend: true` in config, interactive sessions confirm ordinary and inferred sends
@@ -318,7 +319,9 @@ if (result.isError && result.content[0].text.includes("Mutual ask refused")) {
 
 ## 长内容传输（Large Payload）
 
-长内容一律不直接发正文。实测事故：一个 cornfield agent 用 `send` + attachment 全文发送 16KB review，`send` 是 fire-and-forget，主会话当时在等待循环、没有新轮次接收，消息直接丢失。约定：payload 进文件，intercom 只发「文件绝对路径 + 一句话摘要」。
+长内容一律不直接发正文。约定：payload 进文件，intercom 只发「文件绝对路径 + 一句话摘要」。
+
+为什么：`content` 会整段注入接收方上下文，白占双方 token；附件帧还有大小上限，超大正文会被 broker 直接拒投（`delivery_failed`）。这是**成本和上限**问题，不是投递可靠性问题 —— `send` 的投递语义见下一节。
 
 ### 阈值（Threshold）
 
@@ -333,35 +336,44 @@ if (result.isError && result.content[0].text.includes("Mutual ask refused")) {
 
 ### attachment 携带路径，不携带正文
 
-intercom 的 attachment schema 没有独立的 `path` 字段（`Attachment = { type, name, content, language? }`），且 `content` 无论什么 type 都会注入接收方可见正文。所以 `type: "file"` 用 `name` 放绝对路径，`content` 只放一句话摘要——正文留在文件里，接收方按需 `read`：
+`Attachment` 有独立的 `path` 字段（`{ type, name, content, language?, path? }`）。三个字段各管一件事：
+
+- `path` — 接收方按需 `read` 的**绝对路径**；
+- `content` — 一句话摘要（**任何 type 的 `content` 都会注入接收方可见正文**，所以正文不放这里）；
+- `name` — 给人看的标签。
+
+接收方看到的是 `Attachment: <name> (file: <path>)`，正文留在文件里：
 
 ```typescript
-// GOOD: content 只有摘要；正文在文件里，接收方 read 取全文（不注入正文）
+// GOOD: path 指文件，content 只有摘要 —— 正文不注入
 intercom({
   action: "send",
   to: "arch1",
   message: "Review 完成",
   attachments: [{
     type: "file",
-    name: "/tmp/intercom-arch1-20260901-153000.md",   // 绝对路径
+    name: "review-arch1.md",                          // 标签
+    path: "/tmp/intercom-arch1-20260901-153000.md",   // 全文在这里
     content: "16KB review: intercom 长内容传输约定"     // 一句话摘要，不是正文
   }]
 })
 ```
 
 ```typescript
-// BAD: 大段正文塞进 content —— 注入接收方正文，且 send 可能丢消息
+// BAD: 大段正文塞进 content —— 直接注入接收方正文
 attachments: [{ type: "file", name: "review.md", content: "<大段正文>" }]
 ```
 
-### 传结论用 `ask`，`send` 仅限无需回应的通知
+### 传结论用 `ask` 还是 `send`：看要不要阻塞自己的回合
 
-| 目的 | 用 | 原因 |
+| 目的 | 用 | 代价 |
 |------|----|------|
-| 传结论 / 需要确认对方收到 | `ask`（阻塞等回复，默认 10 分钟超时，可配 `PI_INTERCOM_ASK_TIMEOUT_MS`） | `send` 是 fire-and-forget，接收方忙/在等待循环时没有新轮次取件，消息会丢 |
-| 无需回应 / 通知、进度更新 | `send` | 不阻塞发送方 |
+| 需要对方确认收到 / 拿到结论才能继续 | `ask` | **阻塞调用方回合**，直到回复或超时（默认 10 分钟，`PI_INTERCOM_ASK_TIMEOUT_MS` 可调） |
+| 通知、进度更新、不想阻塞 | `send` | 不阻塞发送方；对方忙时消息**排队**（等当前回合结束后投递），不会因为忙而丢 |
 
-review、任务结果、结论这类「送达即完成」的传递一律 `ask`；`send` 只能用于丢了也无妨的通知。
+`ask` 的阻塞按**回合**算：多个 ask 并发时，本回合结束时间 = 最慢那个。一个回不了话的对端就能把回合冻满超时。
+
+**超时 ≠ 未送达。** 超时只说明本轮没等到回复 —— 消息可能早已注入对方并被执行。所以超时后不要盲目补发同一条指令（那只会让队列里多一条语义相反的指令）。要改指令，写清「决策名 + 版本 + 显式作废前一条」。
 
 ### 接收方约定（Receiver Contract）
 
@@ -433,12 +445,12 @@ intercom({
 
 ### Name sessions meaningfully
 
-Use `/name` so others can target you easily:
+Use `/rename` so others can target you easily:
 
 ```
-/name api-worker
-/name frontend-dev
-/name planner
+/rename api-worker
+/rename frontend-dev
+/rename planner
 ```
 
 ## Error Handling
@@ -464,16 +476,16 @@ intercom({ action: "send", to: "planner", message: "..." });
 **"Session not found"**
 ```typescript
 const result = await intercom({ action: "send", to: "worker", message: "..." });
-if (!result.delivered) {
-  console.log("Failed:", result.reason);
+if (result.details?.delivered === false) {
+  console.log("Failed:", result.details.reason);
   // → "Session not found" - check the name and list available sessions
   await intercom({ action: "list" });
 }
 ```
 
 **"Message sent but never received"**
-`send` is fire-and-forget; if the recipient was busy (in a wait loop, no new turn), the message may be lost. Check `intercom({ action: "history" })` to see queued or delivered-but-unprocessed messages. If the entry exists with `queued: false`, it was delivered to the recipient's runtime — the recipient may need to check its incoming queue. If `queued: true`, the recipient was offline and the message will be delivered on reconnect.
-```
+`send` does not block the sender. A busy recipient **queues** the message and gets it when its current turn ends — being busy is not a loss mode. Check `intercom({ action: "history" })` first: `queued: false` means the message reached the recipient's runtime; `queued: true` means the recipient was offline and the message sits in its mailbox until reconnect. If neither side shows it, read the delivery failure reason — an unlisted target, duplicate session names, and oversized frames all come back as explicit failures, never silently.
+
 Replies to recently disconnected explicitly named senders can be queued by the broker and delivered if that sender reconnects with the same name and directory. Runtime-only `subagent-chat-...` aliases are not reconnect identities. New `send` calls may target a known live or recently disconnected session; blocking `ask` calls require a live target.
 
 **Ask timeout**
@@ -496,8 +508,8 @@ Replies to recently disconnected explicitly named senders can be queued by the b
 
 ```typescript
 const result = await intercom({ action: "send", to: "worker", message: "..." });
-if (!result.delivered) {
-  console.log("Failed:", result.reason);
+if (result.details?.delivered === false) {
+  console.log("Failed:", result.details.reason);
   // → "Session not found" or delivery failure reason
 }
 ```

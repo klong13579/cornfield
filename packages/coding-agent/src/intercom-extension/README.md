@@ -113,7 +113,7 @@ intercom({
   }]
 })
 
-// Large content: send file path + one-line summary, not the full body
+// Large content: send the file path + a one-line summary, not the full body
 // (see 长内容传输（Large Payload） convention in the pi-intercom skill)
 intercom({
   action: "send",
@@ -121,7 +121,8 @@ intercom({
   message: "Review complete",
   attachments: [{
     type: "file",
-    name: "/tmp/intercom-arch1-20260901-153000.md",
+    name: "review-arch1.md",
+    path: "/tmp/intercom-arch1-20260901-153000.md",
     content: "Review summary"
   }]
 })
@@ -144,22 +145,23 @@ Found the issue — UserService.validate() doesn't check for null input.
 See auth.ts:142-156.
 ```
 
-The reply hint (enabled by default) points to `intercom({ action: "reply", ... })`, so recipients do not need raw sender or `replyTo` IDs. Idle recipients get a new turn immediately; busy interactive recipients receive the message through Pi's steering queue at the next safe model boundary without aborting the active turn. Attachment content is included in the agent-visible body, and messages are rendered inline and stored in Pi session history.
+The reply hint (enabled by default) points to `intercom({ action: "reply", ... })`, so recipients do not need raw sender or `replyTo` IDs. Idle recipients get a new turn immediately; busy recipients queue the message and receive it when the current turn ends (headless sessions queue too). With `inboundMode: "interrupt"` the message steers at the next safe model boundary instead, without aborting the active turn. Attachment content is included in the agent-visible body, and messages are rendered inline and stored in Pi session history.
 
 ### Large Payload Convention
 
 Content over ~1KB (full files, long diffs, reviews) **MUST NOT** be sent inline.
-Instead: write the content to a file with `Bun.write`, then send only the absolute
-path + one-line summary (`type: "file"` attachment with `name` = path, `content` =
-summary). The receiver reads the file on demand. See the `长内容传输（Large Payload）`
-section in the pi-intercom skill for full details.
+instead: write the content to a file with `Bun.write`, then send only the absolute
+path + one-line summary (`type: "file"` attachment with `path` = the file, `content` =
+the summary, `name` = a human label). The receiver reads the file on demand. See the
+`长内容传输（Large Payload）` section in the pi-intercom skill for full details.
 
 ### History (Async Recovery)
 
 The broker persists all accepted messages to `~/.cornfield/intercom/journal.jsonl`.
 Use `intercom({ action: "history" })` to query recently received/sent messages.
-This is the primary recovery mechanism for `send` messages that were lost while
-the recipient was busy (in a wait loop, no new turn).
+This is the recovery mechanism for messages you missed while busy — `send` does not
+drop messages for a busy recipient (they queue until its current turn ends), but you
+still need a way to see what arrived while your turn was running.
 
 ## Workflow: Planner-Worker Coordination
 
@@ -171,7 +173,7 @@ Open two terminals and start pi in each. Name them so they can find each other:
 
 ```
 # Terminal 1                    # Terminal 2
-/name planner                   /name worker
+/rename planner                   /rename worker
 ```
 
 Verify they see each other from either session:
@@ -183,7 +185,7 @@ intercom({ action: "list" })
 
 ### The Conversation
 
-Here's how a typical exchange looks. The planner delegates with `send` (fire-and-forget). The worker uses `ask` for anything that needs a response — questions, discoveries, completion reports. `ask` sends the message and blocks until the planner replies, so the worker gets the answer as a tool result and continues in the same turn.
+Here's how a typical exchange looks. The planner delegates with `send` (non-blocking). The worker uses `ask` for anything that needs a response — questions, discoveries, completion reports. `ask` sends the message and blocks until the planner replies, so the worker gets the answer as a tool result and continues in the same turn.
 
 **Planner sends a task:**
 ```typescript
@@ -250,7 +252,7 @@ This matters because the agent receiving the message doesn't need to reconstruct
 
 ### `send` vs `ask`
 
-`send` is fire-and-forget — the tool returns immediately after delivery. When the destination has exactly one pending inbound ask, `send` infers that it is the answer, attaches the ask's `replyTo`, and reports `Reply sent to <target> (inferred from pending ask)`. With zero or multiple matching asks, it remains an ordinary unthreaded send. An inferred answer still uses the `confirmSend` dialog when configured; only a caller-supplied `replyTo` skips confirmation.
+`send` does not block — the tool returns immediately after delivery. When the destination has exactly one pending inbound ask, `send` infers that it is the answer, attaches the ask's `replyTo`, and reports `Reply sent to <target> (inferred from pending ask)`. With zero or multiple matching asks, it remains an ordinary unthreaded send. An inferred answer still uses the `confirmSend` dialog when configured; only a caller-supplied `replyTo` skips confirmation.
 
 `ask` requires a currently connected recipient, then blocks until it responds (10-minute timeout by default; set `PI_INTERCOM_ASK_TIMEOUT_MS` to a positive millisecond value to change it). If the target is disconnected, `ask` fails immediately; use `send` when queued, non-blocking mailbox delivery is appropriate. The reply comes back as the tool result, so the agent continues in the same turn with full context. No confirmation dialog — if you're asking and waiting, the intent is clear.
 
