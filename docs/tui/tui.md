@@ -97,6 +97,18 @@ The rules the helper exists to enforce, and why:
 
 Renderers on the baseline today: `test/tools/python-renderer.test.ts`. New renderer tests start here; existing ones move over as they are touched.
 
+### Comparing against upstream
+
+Most of these renderers are ports of upstream `oh-my-pi` components, so "matches upstream" must be checkable rather than asserted. Two ways to record it, in order of preference:
+
+1. **Baseline from upstream output.** When upstream's renderer can be run here, render it with the same (input, options, width) and keep its stripped text as the expectation, naming the upstream commit in a comment. Parity then fails loudly instead of drifting quietly.
+2. **A declared difference list.** When upstream cannot be run here (different component library, different data shape), state the differences at the top of the renderer's test file as an `Upstream differences:` comment block — one line per difference, naming what upstream shows and what this renderer shows instead. Check every line against upstream's source before writing it: a difference list is evidence, not a disclaimer.
+
+A renderer that has neither is *uncompared*, not equivalent. Recorded so far:
+
+- `read` — upstream's renderer shows conflict and elided-span badges that this one does not; the capabilities behind them are unported (see [`../upstream-tool-capability-port.md`](../upstream-tool-capability-port.md), items 5–7). This is a capability gap, not a text-only difference.
+- `bash-interceptor`, `gh`, `edit`, `todo` — none records an upstream baseline yet; each declares its differences the next time it is touched.
+
 ## Input handling and keybindings
 
 ### Raw key matching
