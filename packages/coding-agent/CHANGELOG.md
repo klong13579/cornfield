@@ -12,13 +12,19 @@
 
 - **pi-intercom SKILL.md 的覆盖缺口（batch 2）**（`src/intercom-extension/skills/pi-intercom/SKILL.md`）：补上此前一个字都没写的三块 —— ① `list-cwd` / `children` / `cancel` 三个 action（Key Differences 表原来只列 7 个）；② 全部参数（`attachments` / `replyTo` / `messageId` / `supersedes` / `retryOf` / `cwd` / `openProjectPaneIfMissing` / `focus` / `limit` / `since` / `direction`）与 `config.json` 的 7 个键（`inboundMode` / `inboundTrigger` / `confirmSend` / `stableId` / `replyHint` / `status` / `enabled`）；③ 「取代 / 重试 / 取消」一节 —— 三个能力都已上线，但语义**弱于字面**：`supersedes` 只清待回的 ask、回一条 `superseded` 回执，**不撤回已注入的消息**，所以取代必须在文本里写清「决策名 + 版本 + 显式作废前一条」。另补：单帧 **1 MiB 硬上限**（`MAX_FRAME_BYTES`，超限回 `delivery_failed` 而不是静默丢）、`send` 的启动窗口期 `Session not found`（注册传播未就绪，别循环重试）、history 的作用域（按 sessionId 匹配，重连换了 id 后按 name + cwd 匹配）。
 
+- **`report_tool_issue` 恒回「Noted, thanks!」——报告没落库也照说不误**（`src/tools/report-tool-issue.ts`、`test/tools/report-tool-issue.test.ts`）：`execute()` 里 `openDb()` 失败返回 `null`、继而 `db?.prepare(...).run(...)` 整条静默跳过（可选链吞掉「没有库」），catch 只写 logger，返回文本恒定 —— 调用方（模型和用户）分不清「记下了」和「丢了」，而这个工具的**唯一**用途就是留证据。2026-09-15 查它时本地库已积压 486 行、其中 395 行是同一个 `yield` 缺工具的历史告警（全在 v14.5.12，无人处置也无人看见），正说明这条静默路径的代价。现写入失败回 `details: { error: true, reason, dbPath }` 且正文改成 `Not recorded (<原因>). This report was NOT saved.`；成功回 `details: { recorded: true }`。仍不抛异常（QA 侧信道不该打断回合），但不再说谎。回归覆盖：正常落库、无 session、旧库迁移、库打不开、表存在但缺列（打开成功而插入失败）五条路径。
+
 ### Added
 
 - **`test/intercom-extension/skill-drift.test.ts`：把 pi-intercom 的 prose 契约钉到代码上**（新文件、`src/intercom-extension/index.ts`）：`skills/pi-intercom/SKILL.md` 编进 binary、会话启动时落盘，是 agent 读 intercom 用法的唯一来源，而它此前零测试 —— 2026-09-15 一次复核查出四处与代码不符（attachment 声称没有 `path` 字段、`send` 的「忙时会丢」前提、错误处理示例的 `result.delivered`、`/name` 不是 cornfield 命令），没有一处会自报。断言三件事：Key Differences 表的 action 集合 == `INTERCOM_ACTION_NAMES`（不多不少；负向对照验过，删掉一行即红）；schema 的 action 说明由名称表生成、不得手写第二份；已知会写错的事实（裸字段名 / 把路径塞进 `name` / `/name`）不得回潮。
 
+- **`cornfield grievances --since <窗口> --markdown`：auto-QA 报告终于有出口**（`src/cli/grievances-cli.ts`、`src/commands/grievances.ts`、`test/grievances-cli.test.ts`）：`grievances` 表此前只有一个只读人工入口（`cornfield grievances`，全仓无第二个读取方，scripts/CI/gateway 均不引用），攒下的 486 行没有任何机制送到该看见的人手里。新增 `--since`（时长 `7d`/`36h`/`90m`/`2w`，或日期 `2026-09-01`）做时间窗口，`--markdown` 出摘要（按工具计数表 + 逐条「时间 / 模型 / 会话 / 原文」，**按时间正序**——摘要是给人读的叙事，不是信息流）。`--json` 与 `--markdown` 互斥；无法解析的 `--since` 直接报错并 `exit 1`（静默忽略会让旧行看起来像「最近很安静」）。文本输出同步带上时间与 session，无时间的旧行显式写成 `no timestamp`，时间窗口查询会把被排除的旧行条数一并打出来。回归：窗口过滤、旧库无列、缺库、JSON 新增字段、摘要渲染与空窗口 8 条用例；并对真实库（486 行、尚无时间列）实跑 `--since 7d -m` —— 输出 `No reports in range.` + `_486 report(s) carry no timestamp and are excluded…_`，不崩、不假装。
+
 ### Changed
 
 - **intercom 的 action 词表收成一份**（`src/intercom-extension/index.ts`）：名称此前列在三处 —— 工具参数 enum 数组、斜杠补全表 `INTERCOM_ACTIONS`、schema description 字符串。2026-09-15 发现 `children` 漏在补全表里（`/intercom chi` 补不出来，但调用是通的，因为它本来就在 enum 里）。现 `INTERCOM_ACTION_NAMES` 是唯一真源：enum 直接用、description 由它生成、补全表由它 + `Record<IntercomActionName, string>` 说明表派生（新增动作时 TS 会逼着补说明）。
+
+- **`grievances` 表补 `createdAt` / `sessionId`，连接改为按库路径缓存**（`src/tools/report-tool-issue.ts`）：每行原先只有 `model` / `version` / `tool` / `report` 四列 —— 事后既不知道什么时候报的，也不知道哪个会话报的，等于拿到一句「有个工具不对劲」却没有现场。新增两列（都可空：SQLite 加 NOT NULL 列需要默认值，且旧行的真实状态就是「无时间」），旧库在打开时按 `PRAGMA table_info` 判定后 `ALTER TABLE` 就地加宽，读侧（CLI）在缺列时按 `NULL` 读出而不是整个命令失败。同时把进程级单例连接改成 **按路径缓存**：`setAgentDir` 在 gateway/serve 路径上会运行时改 agentDir，旧实现会让报告继续写进上一个 agent 的库。
 
 ## [1.2.3] - 2026-09-14
 
