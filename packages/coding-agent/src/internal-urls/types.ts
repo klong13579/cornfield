@@ -19,6 +19,12 @@ export interface InternalResource {
 	size?: number;
 	/** Underlying filesystem path (for debugging, not exposed to agent) */
 	sourcePath?: string;
+	/**
+	 * True when the resource is a directory listing rather than file content.
+	 * `content` is empty in that case; callers that need the entries render them
+	 * from `sourcePath` (see the read tool's dirent listing).
+	 */
+	isDirectory?: boolean;
 	/** Additional notes about resolution */
 	notes?: string[];
 }

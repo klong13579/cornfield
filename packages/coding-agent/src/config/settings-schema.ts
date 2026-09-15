@@ -361,6 +361,16 @@ export const SETTINGS_SCHEMA = {
 			submenu: true,
 		},
 	},
+	"tools.artifactHeadBytes": {
+		type: "number",
+		default: 20,
+		ui: {
+			tab: "tools",
+			label: "Artifact head size (KB)",
+			description: "Head content kept inline alongside the tail when output spills to artifact; 0 = tail only",
+			submenu: true,
+		},
+	},
 
 	"statusLine.showHookStatus": {
 		type: "boolean",

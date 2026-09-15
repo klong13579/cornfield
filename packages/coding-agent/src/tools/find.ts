@@ -25,6 +25,7 @@ import { applyListLimit } from "./list-limit";
 import { formatFullOutputReference, type OutputMeta, persistToolOutputArtifact } from "./output-meta";
 import {
 	formatPathRelativeToCwd,
+	hasGlobPathChars,
 	normalizePathLikeInput,
 	parseFindPattern,
 	resolveMultiFindPattern,
@@ -199,8 +200,24 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 				throw new ToolError("Pattern must not be empty");
 			}
 
-			const multiPattern = await resolveMultiFindPattern(normalizedPattern, this.session.cwd);
-			const parsedPattern = multiPattern ? null : parseFindPattern(normalizedPattern);
+			// Internal URLs are resolved to their backing filesystem path first; glob
+			// characters have no meaning inside one, so exact paths only (the same
+			// contract grep applies to its `path`).
+			let searchPattern = normalizedPattern;
+			const internalRouter = this.session.internalRouter;
+			if (internalRouter?.canHandle(normalizedPattern)) {
+				if (hasGlobPathChars(normalizedPattern)) {
+					throw new ToolError(`Glob patterns are not supported for internal URLs: ${normalizedPattern}`);
+				}
+				const resource = await internalRouter.resolve(normalizedPattern);
+				if (!resource.sourcePath) {
+					throw new ToolError(`Cannot find internal URL without a backing file: ${normalizedPattern}`);
+				}
+				searchPattern = resource.sourcePath;
+			}
+
+			const multiPattern = await resolveMultiFindPattern(searchPattern, this.session.cwd);
+			const parsedPattern = multiPattern ? null : parseFindPattern(searchPattern);
 			const hasGlob = multiPattern ? true : (parsedPattern?.hasGlob ?? false);
 			const globPattern = multiPattern?.globPattern ?? parsedPattern?.globPattern ?? "**/*";
 			const searchPath = resolveToCwd(multiPattern?.basePath ?? parsedPattern?.basePath ?? ".", this.session.cwd);

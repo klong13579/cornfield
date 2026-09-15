@@ -5,9 +5,13 @@
  *
  * URL forms:
  * - skill://<name> - Reads SKILL.md
+ * - skill://<name>/ - Reads the skill directory as a dirent listing
  * - skill://<name>/<path> - Reads relative path within skill's baseDir
  */
+import type { Stats } from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { isEnoent } from "@cornfield/utils";
 import type { Skill } from "../extensibility/skills";
 import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
@@ -85,18 +89,41 @@ export class SkillProtocolHandler implements ProtocolHandler {
 			if (!resolvedPath.startsWith(resolvedBaseDir + path.sep) && resolvedPath !== resolvedBaseDir) {
 				throw new Error("Path traversal is not allowed");
 			}
+		} else if (urlPath === "/") {
+			// A trailing slash addresses the skill root itself, so the caller can
+			// discover the skill's files instead of only its SKILL.md.
+			targetPath = skill.baseDir;
 		} else {
 			// Read SKILL.md
 			targetPath = skill.filePath;
 		}
 
-		// Read the file
-		const file = Bun.file(targetPath);
-		if (!(await file.exists())) {
-			throw new Error(`File not found: ${targetPath}`);
+		// Stat first: a directory has no text body, and Bun.file(dir).text() throws EISDIR.
+		let stats: Stats;
+		try {
+			stats = await fs.stat(targetPath);
+		} catch (error) {
+			if (isEnoent(error)) {
+				throw new Error(`File not found: ${targetPath}`);
+			}
+			throw error;
 		}
 
-		const content = await file.text();
+		if (stats.isDirectory()) {
+			return {
+				url: url.href,
+				content: "",
+				contentType: "text/plain",
+				sourcePath: targetPath,
+				isDirectory: true,
+				notes: [],
+			};
+		}
+		if (!stats.isFile()) {
+			throw new Error(`skill:// URL must resolve to a file or directory: ${url.href}`);
+		}
+
+		const content = await Bun.file(targetPath).text();
 		const contentType = getContentType(targetPath);
 
 		return {

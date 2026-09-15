@@ -730,10 +730,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				.done();
 		}
 
-		const endLine =
-			limit !== undefined && !ignoreResultLimits ? Math.min(startLine + limit, allLines.length) : allLines.length;
+		// The user's line window is an explicit request, not a "result limit": it is
+		// honored even when ignoreResultLimits is set (skill://). Only the byte
+		// truncation below is skipped in that case. Gating the window on
+		// ignoreResultLimits silently turned `sel="1-80"` into a whole-file read.
+		const endLine = limit !== undefined ? Math.min(startLine + limit, allLines.length) : allLines.length;
 		const selectedContent = allLines.slice(startLine, endLine).join("\n");
-		const userLimitedLines = limit !== undefined && !ignoreResultLimits ? endLine - startLine : undefined;
+		const userLimitedLines = limit !== undefined ? endLine - startLine : undefined;
 		const truncation = ignoreResultLimits ? noTruncResult(selectedContent) : truncateHead(selectedContent);
 
 		const shouldAddHashLines = displayMode.hashLines;
@@ -1459,6 +1462,12 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		// Resolve the internal URL
 		const resource = await internalRouter.resolve(url);
 		const details: ReadToolDetails = { resolvedPath: resource.sourcePath };
+
+		// A directory resource has no text body of its own: render it with the same
+		// dirent listing used for filesystem directories so there is one format.
+		if (resource.isDirectory && resource.sourcePath) {
+			return this.#readDirectory(resource.sourcePath, limit);
+		}
 
 		// If extraction was used, return directly (no pagination)
 		if (hasExtraction) {

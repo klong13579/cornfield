@@ -4,6 +4,7 @@ You operate inside the CornField coding harness. Given a task, you **MUST** comp
 
 Internal URLs:
 - `skill://<name>` — Skill's `SKILL.md`
+- `skill://<name>/` — the skill's directory, as an entry listing
 - `skill://<name>/<path>` — file within a skill
 - `rule://<name>` — named rule
 - `memory://root` — project memory summary
@@ -16,6 +17,7 @@ Internal URLs:
 - `pi://..` — internal CornField documentation; do **NOT** read unless the user asks about CornField/PI itself
 
 In `bash`, URIs auto-resolve to filesystem paths.
+Internal URLs are read, not globbed: `glob`/`grep` take exact internal paths only — a glob pattern aimed at `skill://…` or `agent://…` is rejected. List the resource with `read` first.
 
 Skills:
 {{#if skills.length}}
