@@ -2274,12 +2274,39 @@ export class SessionManager {
 			header.titleSource = source;
 		}
 
-		// Update the session file header with the title (if already flushed)
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Record the resolved Agent on an existing header (WP4).
+	 *
+	 * Used when a session was not created through a resolving path — resumed from disk, or
+	 * created by a caller that had no resolution to pass (`--session-dir`). Writing it back
+	 * makes the resolution stick: the session and its forks stop depending on a re-resolution,
+	 * and a later process reads the recorded Agent instead of guessing (§10).
+	 *
+	 * A header that already records an Agent is left untouched: a session's Agent is history,
+	 * not a value to be re-decided. Returns true when the header changed.
+	 */
+	async setResolvedAgent(ref: ResolvedAgentRef): Promise<boolean> {
+		const header = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		if (!header || header.agentId) return false;
+		header.agentId = ref.agentId;
+		header.agentSource = ref.source;
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Rewrite the session file so the in-memory header reaches disk. No-op when the file was
+	 * never written (lazy persistence): the updated header then ships with the first flush.
+	 */
+	async #flushHeaderIfOnDisk(): Promise<void> {
 		const sessionFile = this.#sessionFile;
 		if (this.persist && sessionFile && this.storage.existsSync(sessionFile)) {
 			await this.#rewriteFile();
 		}
-		return true;
 	}
 
 	_persist(entry: SessionEntry): void {

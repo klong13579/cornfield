@@ -115,3 +115,77 @@ describe("createAgentSession agent resolution", () => {
 		});
 	});
 });
+
+describe("createAgentSession write-back on sessions it did not create (P1)", () => {
+	async function workDir(): Promise<{ cwd: string; sessionDir: string; agentDir: string }> {
+		const cwd = path.join(home, "work");
+		const sessionDir = path.join(home, "sessions");
+		const agentDir = path.join(home, ".cornfield", "agent");
+		await fs.mkdir(cwd, { recursive: true });
+		return { cwd, sessionDir, agentDir };
+	}
+
+	test("a resumed pre-agent session records the Agent on disk, and its fork inherits it", async () => {
+		const { cwd, sessionDir, agentDir } = await workDir();
+		// A session written before agent pinning existed: header + one entry, no agentId.
+		const legacy = SessionManager.create(cwd, sessionDir);
+		legacy.appendMessage({ role: "user", content: "legacy turn", timestamp: 1 });
+		await legacy.ensureOnDisk();
+		const legacyFile = legacy.getSessionFile();
+		if (!legacyFile) throw new Error("expected a session file");
+		expect(JSON.parse((await Bun.file(legacyFile).text()).split("\n")[0]).agentId).toBeUndefined();
+
+		const resumed = await SessionManager.open(legacyFile, sessionDir);
+		const { session } = await createAgentSession({ ...sessionOptions(agentDir, cwd), sessionManager: resumed });
+		try {
+			expect(session.sessionManager.getHeader()?.agentId).toBe("default");
+			expect(session.sessionManager.getHeader()?.agentSource).toBe("bootstrap");
+
+			const lines = (await Bun.file(legacyFile).text())
+				.trim()
+				.split("\n")
+				.map(line => JSON.parse(line) as { type?: string; agentId?: string; agentSource?: string });
+			expect(lines[0]).toMatchObject({ agentId: "default", agentSource: "bootstrap" });
+			expect(lines.filter(entry => entry.type === "message")).toHaveLength(1);
+
+			const forked = await SessionManager.forkFrom(legacyFile, cwd, sessionDir);
+			expect(forked.getHeader()?.agentId).toBe("default");
+			expect(forked.getHeader()?.agentSource).toBe("bootstrap");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	test("a manager handed in before it is written still records the Agent", async () => {
+		const { cwd, sessionDir, agentDir } = await workDir();
+		// `--session-dir` creates the manager itself, so it arrives with no Agent and no file.
+		const handed = SessionManager.create(cwd, sessionDir);
+
+		const { session } = await createAgentSession({ ...sessionOptions(agentDir, cwd), sessionManager: handed });
+		try {
+			expect(session.sessionManager.getHeader()?.agentId).toBe("default");
+			await session.sessionManager.ensureOnDisk();
+			const file = session.sessionManager.getSessionFile();
+			if (!file) throw new Error("expected a session file");
+			expect(JSON.parse((await Bun.file(file).text()).split("\n")[0]).agentId).toBe("default");
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	test("a session that already records an Agent keeps it, provenance included", async () => {
+		const { cwd, sessionDir } = await workDir();
+		const agentDir = path.join(home, "agents", "hr");
+		await fs.mkdir(agentDir, { recursive: true });
+		await registerAgent("hr", agentDir);
+		const existing = SessionManager.create(cwd, sessionDir, undefined, { agentId: "hr", source: "user" });
+
+		const { session } = await createAgentSession({ ...sessionOptions(agentDir, cwd), sessionManager: existing });
+		try {
+			expect(session.sessionManager.getHeader()?.agentId).toBe("hr");
+			expect(session.sessionManager.getHeader()?.agentSource).toBe("user");
+		} finally {
+			await session.dispose();
+		}
+	});
+});

@@ -54,6 +54,7 @@ agentSource?: DefaultAgentSource;  // 哪个 scope 定的，随 id 一起持久�
 - 读回点：`readPersistedRef(header)`；恢复时**persisted 优先**，只在头部没有记录时才走 §10 链。
 - 不加版本号的理由：字段是可选的，缺省与 v3 头部完全兼容；「缺省」在读取侧一律走显式解析（下面第 5 条），所以没有需要区分的行为分支。WP7/WP8 落 `depth` / `rootSessionId` 时再升版本更合适。
 - 未 pin 的会话（如 `omp --session-dir X` 走 main.ts 建 manager 的路径）头部不带 Agent：这是「没记录」，不是「没有 Agent」，读取侧显式解析。
+- 写回：不是由解析路径创建的会话（恢复自磁盘的旧会话、调用方自建的 manager），由 `createAgentSession` 调 `SessionManager.setResolvedAgent(ref)` 把解析结果记上去——否则该会话与它的 fork 永远丢 agentId。头部**已有** Agent 时不覆盖（会话的 Agent 是历史，不是可改的偏好）；文件已在盘上就重写头部（条目不变），未落盘则随首次 flush 一起写。
 
 ## 5. UI 无关性（§10「不得读取当前 UI 的隐式默认」）
 
@@ -96,11 +97,12 @@ agentSource?: DefaultAgentSource;  // 哪个 scope 定的，随 id 一起持久�
 | Schedule/Gateway/恢复不读 UI | 入参无 UI 通道（结构保证）+ persisted 优先于环境声明的反证用例 |
 | 无可用 Agent 明确报错 | `no-agent-declared` / `agent-unknown` / `agent-disabled` / `agent-process-mismatch` / `agent-session-conflict` |
 | 无 Project / 有 Project / 禁用 Agent / 配置漂移 | 全部有独立用例（漂移＝恢复时 Agent 目录消失 → `agent-disabled`） |
+| 恢复/外部 manager 的 agentId 写回 | `session-agent.test.ts` 的 `setResolvedAgent` 四例（未落盘 / 已在盘上且条目保留 / 不覆盖已有 / in-memory）；`sdk-session-agent.test.ts` 恢复旧会话后磁盘头部含 agentId 且 fork 继承、自建 manager 写回、已记录的 provenance 不被改写 |
 | 派生 WorkspaceContext 合法性 | 生成的 context 直接喂 `validateWorkspaceContexts`（WP1 校验器）返回空 |
 
 ## 10. 后续（交给集成/下一个 WP）
 
-1. `main.ts` 的 `--session-dir` 新建路径（`SessionManager.create` 未带 agent）——不在本 WP scope；接上 `resolveSessionAgent` 即可让这条路径也 pin。
+1. ~~`main.ts` 的 `--session-dir` 新建路径无法 pin~~ —— 已由 SDK 写回覆盖（`options.sessionManager` 存在时调 `setResolvedAgent`），不需要改 main.ts。
 2. `user.globalDefaultAgentId` 需要一个权威（`config.yml` 键或 WP2 profile registry），本 WP 没动 `settings-schema.ts`。
 3. `workspaceContext.defaultAgentId` 需要 `WorkspaceDeclaration` 增加字段（WP3）。
 4. WP2（Agent Profile Registry）应成为 `AgentRecord` 的 owner：本 WP 的 `agent-directory.ts` 是「现有 registry + workspace 声明」的投影，`enabled` / `projectIds` 是推导值，profile 落地后应改为读 profile。

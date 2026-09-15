@@ -838,6 +838,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		logger.time("sessionManager", () =>
 			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir), undefined, sessionAgent.ref),
 		);
+	// A resumed session, or one created by a caller that had no resolution to pass
+	// (`--session-dir`), keeps its own header: record the resolution on it so the session
+	// and its forks stop depending on a re-resolution. No-op when an Agent is already there.
+	if (options.sessionManager) {
+		await sessionManager.setResolvedAgent(sessionAgent.ref);
+	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	const modelApiKeyAvailability = new Map<string, boolean>();
 	const getModelAvailabilityKey = (candidate: Model): string =>

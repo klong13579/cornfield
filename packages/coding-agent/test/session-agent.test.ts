@@ -336,3 +336,68 @@ describe("session header persistence", () => {
 		});
 	});
 });
+
+describe("setResolvedAgent write-back", () => {
+	const ref = { agentId: "hr", source: "project" } as const;
+
+	async function workDir(): Promise<{ cwd: string; sessionDir: string }> {
+		const cwd = path.join(home, "work");
+		const sessionDir = path.join(home, "sessions");
+		await fs.mkdir(cwd, { recursive: true });
+		return { cwd, sessionDir };
+	}
+
+	async function headerOnDisk(file: string): Promise<Record<string, unknown>> {
+		const firstLine = (await Bun.file(file).text()).split("\n")[0];
+		return JSON.parse(firstLine) as Record<string, unknown>;
+	}
+
+	test("records the Agent on a session that has not been written yet", async () => {
+		const { cwd, sessionDir } = await workDir();
+		const manager = SessionManager.create(cwd, sessionDir);
+		expect(manager.getHeader()?.agentId).toBeUndefined();
+
+		expect(await manager.setResolvedAgent(ref)).toBe(true);
+		expect(manager.getHeader()?.agentId).toBe("hr");
+
+		await manager.ensureOnDisk();
+		const file = manager.getSessionFile();
+		if (!file) throw new Error("expected a session file");
+		expect(await headerOnDisk(file)).toMatchObject({ agentId: "hr", agentSource: "project" });
+	});
+
+	test("updates a session already on disk and keeps its entries", async () => {
+		const { cwd, sessionDir } = await workDir();
+		const manager = SessionManager.create(cwd, sessionDir);
+		manager.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		await manager.ensureOnDisk();
+		const file = manager.getSessionFile();
+		if (!file) throw new Error("expected a session file");
+		const before = (await Bun.file(file).text()).trim().split("\n");
+
+		expect(await manager.setResolvedAgent(ref)).toBe(true);
+
+		const after = (await Bun.file(file).text()).trim().split("\n");
+		expect(after).toHaveLength(before.length);
+		const entries = after.map(line => JSON.parse(line) as { type?: string; agentId?: string });
+		expect(entries[0]).toMatchObject({ agentId: "hr", agentSource: "project" });
+		expect(entries.filter(entry => entry.type === "message")).toHaveLength(1);
+	});
+
+	test("never overwrites an Agent that is already recorded", async () => {
+		const { cwd, sessionDir } = await workDir();
+		const manager = SessionManager.create(cwd, sessionDir, undefined, { agentId: "sw", source: "user" });
+
+		expect(await manager.setResolvedAgent(ref)).toBe(false);
+		expect(manager.getHeader()?.agentId).toBe("sw");
+		expect(manager.getHeader()?.agentSource).toBe("user");
+	});
+
+	test("records on an in-memory session without touching disk", async () => {
+		const manager = SessionManager.inMemory();
+
+		expect(await manager.setResolvedAgent(ref)).toBe(true);
+		expect(manager.getHeader()?.agentId).toBe("hr");
+		expect(manager.getSessionFile()).toBeUndefined();
+	});
+});
