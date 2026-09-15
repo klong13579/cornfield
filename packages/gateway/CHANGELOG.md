@@ -12,6 +12,8 @@
 
 - **改绑是“声明式”的：传什么就是什么**（`src/scheduler/agent-binding.ts`, `src/wire-endpoint.ts`, pi-wire `CronUpdateInput.unbind`）：写面用显式联合 `keep | unbind | bind` —— 不给字段=不动、`unbind:true`=清空（与 agentId/agentDir 互斥）、给了字段=整个绑定换成它。**只给 `agentDir` 时旧 `agentId` 被替换**（目录命中注册 Agent → 采用其身份；legacy 目录 → identity 清掉），不再隐式保留旧身份；`agentId` 与 `agentDir` 同时给且指向不同 Agent（或目录不是该 Agent 注册的家）→ `ok:false`，不静默采用目录。registry 读不出来 → 拒绝（不写未校验的绑定）。
 
+- **废弃 `accountId` 的退休路径定下：读仍兼容、写就清掉**（`src/wire-endpoint.ts`, `src/scheduler/agent-binding.ts`）：它还是执行 home 的回退来源，所以未被改写过的 legacy 行仍靠它执行（不做自动迁移）；但**现代改绑与 `unbind` 会一并清空 `accountId`** —— 否则这个回退会在下次 unbind 时“活回来”，即“清空”的行又回到上一个 Agent 的目录里跑。两个存储实现都会真的清（JSON 掉键 / SQLite 写 NULL），重启后依然无绑定。执行面同样作收敛：agent 任务无可用 home（或无绑定/Agent home 不在）时**记失败并不执行**（`src/scheduler/cron-service.ts`，含 run-path 测试）；shell 任务不受影响。
+
 ### Fixed
 
 - **`TaskRowDto.accountId` 不再由 agentDir 顶替**（`src/wire-endpoint.ts`）：旧实现 `task.accountId ?? task.agentDir` 把目录当成账号上报，读的人无法区分两者；现在按原样透出，绑定事实一律走 agent 字段。

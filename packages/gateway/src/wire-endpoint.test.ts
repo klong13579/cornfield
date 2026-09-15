@@ -310,6 +310,51 @@ describe("cron_update：恢复旧行的绑定", () => {
 		expect(storage.getTask(task.id)?.agentDir).toBe(CODING_DIR);
 	});
 
+	test("legacy accountId-only 行：unbind 连废弃 accountId 一起清（落盘 + 重启都没值）", async () => {
+		const task = seedLegacyTask(storage, { name: "account-only", accountId: "/Users/me/legacy-home" });
+		// 旧行靠 accountId 当 home 是可执行的（cron-service 用例锁的那条 compat）——unbind 必须真的让它停下。
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, unbind: true }, deps);
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+		const row = (res.result as { task: Record<string, unknown> }).task;
+		expect(row.agentResolution).toBe("unbound");
+		expect(row.accountId).toBeUndefined();
+		expect(storage.getTask(task.id)?.accountId).toBeUndefined();
+
+		const reopened = new JsonFileStorage(path.join(tmpDir, "jobs.json"));
+		const persisted = reopened.getTask(task.id);
+		expect(persisted?.agentId).toBeUndefined();
+		expect(persisted?.agentDir).toBeUndefined();
+		expect(persisted?.accountId).toBeUndefined();
+		reopened.close();
+	});
+
+	test("legacy accountId-only 行：改绑到注册 Agent 时也清 accountId（不留旧 fallback）", async () => {
+		const task = seedLegacyTask(storage, { name: "account-then-bind", accountId: "/Users/me/legacy-home" });
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, agentId: "hr" }, deps);
+		expect(res.ok).toBe(true);
+		const bound = storage.getTask(task.id);
+		expect(bound?.agentId).toBe("hr");
+		expect(bound?.agentDir).toBe(HR_DIR);
+		expect(bound?.accountId).toBeUndefined();
+
+		// 再 unbind：不得回到旧 accountId 那个 home
+		await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, unbind: true }, deps);
+		const unbound = storage.getTask(task.id);
+		expect(unbound?.agentId).toBeUndefined();
+		expect(unbound?.agentDir).toBeUndefined();
+		expect(unbound?.accountId).toBeUndefined();
+	});
+
+	test("只给 agentDir 改绑也清 accountId", async () => {
+		const task = seedLegacyTask(storage, { name: "dir-rebind-clears-account", accountId: "/Users/me/legacy-home" });
+		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: task.id, agentDir: CODING_DIR }, deps);
+		expect(res.ok).toBe(true);
+		const updated = storage.getTask(task.id);
+		expect(updated?.agentId).toBe("coding");
+		expect(updated?.accountId).toBeUndefined();
+	});
+
 	test("未知 taskId → ok:false", async () => {
 		const res = await handleGatewayWireCommand({ type: "cron_update", taskId: "nope", cron: "0 1 * * *" }, deps);
 		expect(res.ok).toBe(false);

@@ -67,6 +67,9 @@ export interface TaskRowDto {
 	 * @deprecated 旧字段。它**不**等于 Agent 身份：历史任务是「accountId 或 agentDir 二者择一」
 	 * 存的，旧实现把 agentDir 冒充成 accountId 是本工作台要消灭的假数据。读绑定请用
 	 * `agentId` / `agentDir` / `agentResolution`。
+	 *
+	 * 语义（写入侧）：它还是一个**执行 home 的回退来源**，所以未被改写过的 legacy 行仍然靠它执行；
+	 * 一旦行被改写（现代改绑或 `unbind`），写面会把它一并清掉——“清空”在 API 上成立，在存储里也得成立。
 	 */
 	accountId?: string;
 	/** 执行命令（jobs.json command）。 */

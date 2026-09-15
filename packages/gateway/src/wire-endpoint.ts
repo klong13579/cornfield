@@ -374,6 +374,11 @@ export async function handleGatewayWireCommand(
 				// undefined 即“清掉”：两个存储实现都会把它写成 null/删键（JSON 掉 undefined、SQLite 写 NULL）。
 				updates.agentId = resolved.binding.agentId;
 				updates.agentDir = resolved.binding.agentDir;
+				// 废弃字段 `accountId` 是**执行 home 的回退来源**（resolveScheduleAgentBinding 会在
+				// agentDir/agentId 都空时拿它当目录）。绑定被重写时不清它，旧 home 就会在下次
+				// unbind 之后“活回来”：unbind 看似清空了，行实际仍指向旧账号。所以现代改绑与清空
+				// 一并把废弃字段清掉——legacy 行只有在没被改写过时才靠它执行。
+				updates.accountId = undefined;
 			}
 
 			storage.updateTask(taskId, updates);

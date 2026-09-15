@@ -22,6 +22,14 @@
  *   registered    the identity resolved (an `agentId` exists)
  *   unregistered  an execution home exists but names no registered Agent
  *   unbound       no agent reference at all — the task cannot run as anybody
+ *
+ * ## `accountId` (deprecated) — compat on read, cleared on write
+ *
+ * A row whose only reference is a pre-registry `accountId` resolves to `unregistered` with that
+ * value as its home, so those tasks keep running without a migration. The write face is what
+ * retires the field: any modern rebind (or an explicit unbind) clears it, because a leftover
+ * `accountId` is a home fallback that would otherwise come back to life the moment the task is
+ * unbound. “Cleared” in the API has to mean cleared in storage.
  */
 
 import type { AgentDirectoryEntry } from "@cornfield/coding-agent/agent-domain/agent-directory";
@@ -91,6 +99,13 @@ export async function resolveScheduleAgentBinding(
 	// (`attach-to-session.resolveMirrorSessionPath`; `cron-service.resolveAgentDir` is the
 	// registry-blind accessor for callers that must not consult the registry), so it stays
 	// usable as a home — but never as an identity.
+	//
+	// Policy (why the read fallback survives while the write face clears it): a row whose only
+	// reference is a pre-registry `accountId` must keep running — we do not migrate storage on
+	// read. But once a row is **rewritten** (a modern rebind, or an explicit unbind) the write
+	// path clears `accountId` together with `agentId`/`agentDir`; otherwise the deprecated field
+	// would resurrect the old home on the next unbind, i.e. “cleared” rows would keep executing
+	// in the previous Agent's directory. See `wire-endpoint.ts` `cron_update`.
 	const legacyDir = declaredDir ? undefined : trimmed(ref.accountId);
 
 	if (!declaredDir && !declaredId && !legacyDir) {
