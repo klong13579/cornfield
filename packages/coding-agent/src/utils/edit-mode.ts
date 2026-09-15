@@ -1,6 +1,6 @@
 import { $env, $flag } from "@cornfield/utils";
 
-export type EditMode = "replace" | "patch" | "hashline" | "vim" | "apply_patch" | "atom";
+export type EditMode = "replace" | "patch" | "hashline" | "vim" | "apply_patch" | "atom" | "sloppy";
 
 export const DEFAULT_EDIT_MODE: EditMode = "hashline";
 
@@ -10,6 +10,7 @@ const EDIT_MODE_IDS = {
 	hashline: "hashline",
 	patch: "patch",
 	replace: "replace",
+	sloppy: "sloppy",
 	vim: "vim",
 } as const satisfies Record<string, EditMode>;
 

@@ -95,7 +95,14 @@ import {
 } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import type { Settings, SkillsSettings } from "../config/settings";
-import { normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../edit";
+import {
+	normalizeDiff,
+	normalizeToLF,
+	ParseError,
+	previewPatch,
+	recoverInlineSloppyEditFromTools,
+	stripBom,
+} from "../edit";
 import { type BashResult, executeBash as executeBashCommand } from "../exec/bash-executor";
 import { exportSessionToHtml } from "../export/html";
 import type { TtsrManager, TtsrMatchContext } from "../export/ttsr";
@@ -649,6 +656,16 @@ export class AgentSession {
 		// Always subscribe to agent events for internal handling
 		// (session persistence, hooks, auto-compaction, retry logic)
 		this.#unsubscribeAgent = this.agent.subscribe(this.#handleAgentEvent);
+
+		// A sloppy edit payload the model wrote as prose is rewritten into a real edit
+		// tool call by the loop, before it reads this turn's tool calls — so the call is
+		// dispatched, rendered and journalled like any other, through the normal pipeline.
+		this.agent.setTransformAssistantMessage(message => {
+			const recovered = recoverInlineSloppyEditFromTools(this.agent.state.tools, message);
+			if (recovered > 0) {
+				logger.info("recovered inline sloppy edit payload into an edit tool call", { regions: recovered });
+			}
+		});
 	}
 
 	/** Model registry for API key resolution and model discovery */

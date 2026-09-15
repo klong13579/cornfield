@@ -19,6 +19,7 @@ import { type ApplyPatchEntry, expandApplyPatchToEntries, expandApplyPatchToPrev
 import { computeHashlineDiff, type HashlineToolEdit } from "./modes/hashline";
 import { computePatchDiff, type PatchEditEntry } from "./modes/patch";
 import type { ReplaceEditEntry } from "./modes/replace";
+import { extractInlineSloppyRegions, parseSloppyPayload } from "./modes/sloppy";
 
 export interface PerFileDiffPreview {
 	path: string;
@@ -289,6 +290,50 @@ const vimStrategy: EditStreamingStrategy<unknown> = {
 	},
 };
 
+interface SloppyArgs {
+	input?: string;
+	__partialJson?: string;
+}
+
+const sloppyStrategy: EditStreamingStrategy<SloppyArgs> = {
+	extractCompleteEdits(args) {
+		// Sloppy payload is plain text, not an edits array. Nothing to trim.
+		return args;
+	},
+	async computeDiffPreview(args, ctx) {
+		if (typeof args.input !== "string" || args.input.length === 0) return null;
+		// Preview only what the payload has already committed to: the first
+		// complete block. A payload that is still streaming has no closing tag
+		// yet, and a preview of a half-written block shows an edit that was
+		// never sent.
+		const region = extractInlineSloppyRegions(args.input)[0];
+		if (!region) return null;
+		let block: ReturnType<typeof parseSloppyPayload>[number] | undefined;
+		try {
+			block = parseSloppyPayload(region.payload)[0];
+		} catch {
+			return null;
+		}
+		const first = block?.pairs[0];
+		if (!block || !first) return null;
+		ctx.signal.throwIfAborted();
+		const result = await computeEditDiff(
+			block.path,
+			first.old_text,
+			first.new_text,
+			ctx.cwd,
+			ctx.allowFuzzy ?? true,
+			false,
+			ctx.fuzzyThreshold,
+		);
+		ctx.signal.throwIfAborted();
+		return [toPerFilePreview(block.path, result)];
+	},
+	renderStreamingFallback() {
+		return "";
+	},
+};
+
 interface AtomArgs {
 	input?: string;
 	__partialJson?: string;
@@ -315,6 +360,7 @@ export const EDIT_MODE_STRATEGIES: Record<EditMode, EditStreamingStrategy<unknow
 	apply_patch: applyPatchStrategy as EditStreamingStrategy<unknown>,
 	vim: vimStrategy,
 	atom: atomStrategy as EditStreamingStrategy<unknown>,
+	sloppy: sloppyStrategy as EditStreamingStrategy<unknown>,
 };
 
 export { resolveEditMode };

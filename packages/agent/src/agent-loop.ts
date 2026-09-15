@@ -12,6 +12,7 @@ import {
 	validateToolArguments,
 } from "@cornfield/ai";
 import { sanitizeText } from "@cornfield/natives";
+import { logger } from "@cornfield/utils";
 import { type DoomVerdict, detectDoomLoop } from "./streaming/doom-loop-detector";
 import type {
 	AgentContext,
@@ -274,6 +275,19 @@ async function runLoop(
 				stream.push({ type: "agent_end", messages: newMessages });
 				stream.end(newMessages);
 				return;
+			}
+
+			// Let the caller rewrite the finalized assistant message before the loop
+			// decides what to dispatch. Best-effort: the hook is an enhancement, so a
+			// failure is logged and the turn continues with whatever it left behind.
+			if (config.transformAssistantMessage) {
+				try {
+					await config.transformAssistantMessage(message);
+				} catch (err) {
+					logger.warn("transformAssistantMessage hook failed", {
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
 			}
 
 			// Check for tool calls
