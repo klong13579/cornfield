@@ -31,7 +31,9 @@ import type { ImageContent } from "@cornfield/ai";
 /** todo phase shape（与 coding-agent tools/todo-write 同形，作为 wire 数据面单一事实源）。 */
 export interface WireTodoItem {
 	content: string;
-	status: "pending" | "in_progress" | "completed" | "abandoned";
+	status: "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
+	/** status 为 blocked 时任务在等什么；与 TodoItem.blocker 同步，缺省表示未给原因。 */
+	blocker?: string;
 	notes?: string[];
 }
 

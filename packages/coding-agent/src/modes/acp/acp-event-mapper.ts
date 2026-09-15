@@ -233,6 +233,9 @@ const todoStatusMap: Record<TodoStatus, "pending" | "in_progress" | "completed">
 	in_progress: "in_progress",
 	completed: "completed",
 	abandoned: "completed",
+	// ACP's plan entries have no blocked state, and a blocked task is not being
+	// worked on, so it reads as pending — never as in_progress.
+	blocked: "pending",
 };
 
 function mapTodoStatus(status: TodoStatus): "pending" | "in_progress" | "completed" {
