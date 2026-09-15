@@ -297,7 +297,12 @@ function buildRenderedLines(
 	} else if (watch.mode === "commit") {
 		const runs = watch.runs ?? [];
 		if (runs.length === 0) {
-			lines.push(theme.fg("dim", "waiting for workflow runs..."));
+			// A completed commit watch with no runs is the give-up result: the note
+			// above carries its reason, and "waiting" would contradict a watch that
+			// has already ended.
+			if (watch.state !== "completed") {
+				lines.push(theme.fg("dim", "waiting for workflow runs..."));
+			}
 		} else {
 			runs.forEach((run, index) => {
 				if (index > 0) {
