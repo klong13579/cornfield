@@ -46,7 +46,7 @@ import {
 	type OutputMeta,
 	persistToolOutputArtifact,
 } from "./output-meta";
-import { expandPath, formatPathRelativeToCwd, resolveReadPath } from "./path-utils";
+import { expandPath, formatPathRelativeToCwd, type LineRange, parseLineRanges, resolveReadPath } from "./path-utils";
 import { type ReadSummarySettings, summarizeFileContent } from "./read-summary";
 import { formatAge, formatBytes, shortenPath, wrapBrackets } from "./render-utils";
 import {
@@ -379,49 +379,33 @@ export interface ReadToolDetails {
 type ReadParams = ReadToolInput;
 
 /** Parsed representation of the `sel` parameter. */
-type ParsedSelector =
-	| { kind: "none" }
-	| { kind: "raw" }
-	| { kind: "lines"; startLine: number; endLine: number | undefined };
+type ParsedSelector = { kind: "none" } | { kind: "raw" } | { kind: "lines"; ranges: [LineRange, ...LineRange[]] };
 
-const LINE_RANGE_RE = /^L?(\d+)(?:([-+])L?(\d+))?$/i;
-
+/**
+ * Parse `sel`. A selector that is not recognized is an error, never "none":
+ * reading the whole resource after the caller asked for a slice silently widens
+ * the request. Bare `N` is open-ended from N, which is what read.md documents.
+ */
 function parseSel(sel: string | undefined): ParsedSelector {
 	if (!sel || sel.length === 0) return { kind: "none" };
 	if (sel === "raw") return { kind: "raw" };
-	const lineMatch = LINE_RANGE_RE.exec(sel);
-	if (lineMatch) {
-		const rawStart = Number.parseInt(lineMatch[1]!, 10);
-		if (rawStart < 1) {
-			throw new ToolError("sel=0 is invalid; lines are 1-indexed. Use sel=1.");
-		}
-		const sep = lineMatch[2];
-		const rhs = lineMatch[3] ? Number.parseInt(lineMatch[3], 10) : undefined;
-		let rawEnd: number | undefined;
-		if (sep === "+") {
-			if (rhs === undefined || rhs < 1) {
-				throw new ToolError(`Invalid range ${rawStart}+${rhs ?? 0}: count must be >= 1.`);
-			}
-			rawEnd = rawStart + rhs - 1;
-		} else if (sep === "-") {
-			if (rhs === undefined || rhs < rawStart) {
-				throw new ToolError(`Invalid range ${rawStart}-${rhs ?? 0}: end must be >= start.`);
-			}
-			rawEnd = rhs;
-		}
-		return { kind: "lines", startLine: rawStart, endLine: rawEnd };
-	}
-	// Unrecognized selectors fall through; sqlite/archive/url readers consume `sel` themselves.
-	return { kind: "none" };
+	const ranges = parseLineRanges(sel);
+	if (ranges) return { kind: "lines", ranges };
+	throw new ToolError(`Unsupported selector "${sel}". Use N, N-M, N+K (K lines from N), N- (from N onward), or raw.`);
 }
 
 /** Convert a line-range selector to the offset/limit pair used by internal pagination. */
 function selToOffsetLimit(parsed: ParsedSelector): { offset?: number; limit?: number } {
-	if (parsed.kind === "lines") {
-		const limit = parsed.endLine !== undefined ? parsed.endLine - parsed.startLine + 1 : undefined;
-		return { offset: parsed.startLine, limit };
+	if (parsed.kind !== "lines") return {};
+	const [range, ...extra] = parsed.ranges;
+	if (extra.length > 0) {
+		const shown = parsed.ranges.map(r =>
+			r.endLine === undefined ? `${r.startLine}-` : `${r.startLine}-${r.endLine}`,
+		);
+		throw new ToolError(`Multi-range selectors are not supported: ${shown.join(", ")}. Read one range per call.`);
 	}
-	return {};
+	const limit = range.endLine !== undefined ? range.endLine - range.startLine + 1 : undefined;
+	return { offset: range.startLine, limit };
 }
 
 interface ResolvedArchiveReadPath {
@@ -1086,17 +1070,20 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 
 			const localReadPath = readPath;
+
+			// SQLite reads consume `sel` as table/query syntax (e.g. `users?limit=5`),
+			// so they must be dispatched before the line-selector parse rejects it.
+			const sqlitePath = await this.#resolveSqliteReadPath(readPath, signal);
+			if (sqlitePath) {
+				return this.#readSqlite(sel, sqlitePath, signal);
+			}
+
 			const parsed = parseSel(sel);
 
 			const archivePath = await this.#resolveArchiveReadPath(localReadPath, signal);
 			if (archivePath) {
 				const { offset, limit } = selToOffsetLimit(parsed);
 				return this.#readArchive(readPath, offset, limit, archivePath, signal, { raw: parsed.kind === "raw" });
-			}
-
-			const sqlitePath = await this.#resolveSqliteReadPath(readPath, signal);
-			if (sqlitePath) {
-				return this.#readSqlite(sel, sqlitePath, signal);
 			}
 
 			let absolutePath = resolveReadPath(localReadPath, this.session.cwd);

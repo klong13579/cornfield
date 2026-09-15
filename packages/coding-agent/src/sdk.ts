@@ -1140,14 +1140,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				getMemoryRoot: () => getMemoryRoot(agentDir, settings.getCwd()),
 			}),
 		);
-		internalRouter.register(
-			new LocalProtocolHandler(
-				options.localProtocolOptions ?? {
-					getArtifactsDir,
-					getSessionId: () => sessionManager.getSessionId(),
-				},
-			),
-		);
+		// One `local://` root for the whole session: the router resolves reads with
+		// it, and the write path (plan-mode-guard) and bash expansion resolve with
+		// it too — so a subagent handed its parent's root reads and writes the same
+		// scratch space instead of two different directories.
+		const localProtocolOptions = options.localProtocolOptions ?? {
+			getArtifactsDir,
+			getSessionId: () => sessionManager.getSessionId(),
+		};
+		internalRouter.register(new LocalProtocolHandler(localProtocolOptions));
 		internalRouter.register(
 			new SkillProtocolHandler({
 				getSkills: () => skills,
@@ -1164,6 +1165,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		internalRouter.register(new XdevProtocolHandler({ getDevices: () => toolSession.xdevDevices ?? new Map() }));
 		toolSession.internalRouter = internalRouter;
 		toolSession.getArtifactsDir = getArtifactsDir;
+		toolSession.localProtocolOptions = localProtocolOptions;
 		toolSession.agentOutputManager = new AgentOutputManager(
 			getArtifactsDir,
 			options.parentTaskPrefix ? { parentPrefix: options.parentTaskPrefix } : undefined,

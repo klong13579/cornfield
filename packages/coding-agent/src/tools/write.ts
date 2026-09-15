@@ -360,7 +360,13 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		content: string,
 		resolvedArchivePath: ResolvedArchiveWritePath,
 	): Promise<AgentToolResult<WriteToolDetails>> {
-		const isZip = resolvedArchivePath.absolutePath.toLowerCase().endsWith(".zip");
+		const archiveTarget = resolvedArchivePath.absolutePath;
+		const lowerTarget = archiveTarget.toLowerCase();
+		const isZip = lowerTarget.endsWith(".zip");
+		// `.tar.gz` / `.tgz` must be written gzipped: `Bun.Archive.write` does not
+		// infer compression from the file name, so a plain call puts an uncompressed
+		// tar behind a `.gz` name and every external consumer fails to unpack it.
+		const isGzip = lowerTarget.endsWith(".tar.gz") || lowerTarget.endsWith(".tgz");
 
 		const parentDir = path.dirname(resolvedArchivePath.absolutePath);
 		if (parentDir && parentDir !== ".") {
@@ -415,7 +421,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			archiveEntries[resolvedArchivePath.archiveSubPath] = content;
 
 			try {
-				await Bun.Archive.write(resolvedArchivePath.absolutePath, archiveEntries);
+				await Bun.Archive.write(archiveTarget, archiveEntries, isGzip ? { compress: "gzip" } : undefined);
 			} catch (error) {
 				throw new ToolError(error instanceof Error ? error.message : String(error));
 			}

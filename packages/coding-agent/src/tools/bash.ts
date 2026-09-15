@@ -559,7 +559,9 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const internalUrlOptions: InternalUrlExpansionOptions = {
 			skills: this.session.skills ?? [],
 			internalRouter: this.session.internalRouter,
-			localOptions: {
+			// Prefer the session's shared `local://` root so a subagent expands
+			// `local://` to the directory its parent reads and writes.
+			localOptions: this.session.localProtocolOptions ?? {
 				getArtifactsDir: this.session.getArtifactsDir,
 				getSessionId: this.session.getSessionId,
 			},

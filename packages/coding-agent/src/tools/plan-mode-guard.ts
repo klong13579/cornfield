@@ -8,10 +8,15 @@ const LOCAL_SCHEME_PREFIX = "local:";
 export function resolvePlanPath(session: ToolSession, targetPath: string): string {
 	const normalized = normalizeLocalScheme(targetPath);
 	if (normalized.startsWith(LOCAL_SCHEME_PREFIX)) {
-		return resolveLocalUrlToPath(normalized, {
-			getArtifactsDir: session.getArtifactsDir,
-			getSessionId: session.getSessionId,
-		});
+		// The session's shared root wins: a subagent must resolve `local://` to the
+		// same directory its parent reads and writes through the same URL.
+		return resolveLocalUrlToPath(
+			normalized,
+			session.localProtocolOptions ?? {
+				getArtifactsDir: session.getArtifactsDir,
+				getSessionId: session.getSessionId,
+			},
+		);
 	}
 
 	return resolveToCwd(normalized, session.cwd);

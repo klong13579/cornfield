@@ -6,7 +6,7 @@ import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import { EditTool } from "../edit";
 import type { Skill } from "../extensibility/skills";
-import type { InternalUrlRouter } from "../internal-urls";
+import type { InternalUrlRouter, LocalProtocolOptions } from "../internal-urls";
 import { getPreludeDocs, resetPreludeDocsCache, warmPythonEnvironment } from "../ipy/executor";
 import { checkPythonKernelAvailability } from "../ipy/kernel";
 import { LspTool } from "../lsp";
@@ -148,6 +148,13 @@ export interface ToolSession {
 	agentRegistry?: AgentRegistry;
 	/** Get artifacts directory for artifact:// URLs */
 	getArtifactsDir?: () => string | null;
+	/**
+	 * The `local://` root for this session. Present when the session shares
+	 * another session's root (a subagent handed its parent's scratch space).
+	 * Every `local://` resolution — read, write and bash expansion — MUST use
+	 * this object, or the same URL names two different files.
+	 */
+	localProtocolOptions?: LocalProtocolOptions;
 	/** Allocate a new artifact path and ID for session-scoped truncated output. */
 	allocateOutputArtifact?: (toolType: string) => Promise<{ id?: string; path?: string }>;
 	/** Get session spawns */
@@ -288,10 +295,11 @@ function getPythonModeFromEnv(): PythonToolMode | null {
 export async function createTools(session: ToolSession, toolNames?: string[]): Promise<Tool[]> {
 	const includeYield = session.requireYieldTool === true;
 	const enableLsp = session.enableLsp ?? true;
+	// An explicit empty list means "no tools", not "not provided": treating [] as
+	// absent built the whole default set (and mounted the xd:// device catalog)
+	// for a caller that asked for nothing.
 	const requestedTools =
-		toolNames && toolNames.length > 0
-			? [...new Set(toolNames.map(name => normalizeToolName(name).toLowerCase()))]
-			: undefined;
+		toolNames !== undefined ? [...new Set(toolNames.map(name => normalizeToolName(name).toLowerCase()))] : undefined;
 	if (requestedTools && !requestedTools.includes("exit_plan_mode")) {
 		requestedTools.push("exit_plan_mode");
 	}

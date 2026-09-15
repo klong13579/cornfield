@@ -38,15 +38,18 @@ const warnedLegacyToolNames = new Set<string>();
 /**
  * Normalize a tool name to its canonical builtin registry key.
  *
- * Legacy names still resolve to their canonical tool (compat), and each legacy
- * name is warned exactly once per process so the deprecation is never silent.
- * Everything other than a legacy builtin alias (including plugin/MCP/extension
- * names) passes through untouched.
+ * The lookup folds case first: `Search`, `find` and `FIND` all reach `grep`.
+ * Without the fold, a caller that configures `tools: [Search]` got `search`
+ * back — not a registry key — and the name was dropped silently downstream.
+ * Every legacy name is warned exactly once per process so the deprecation is
+ * never silent. Everything other than a legacy builtin alias (including
+ * plugin/MCP/extension names) passes through untouched.
  */
 export function normalizeToolName(name: string): string {
-	const canonical = LEGACY_TOOL_NAME_ALIASES[name];
-	if (canonical !== undefined && !warnedLegacyToolNames.has(name)) {
-		warnedLegacyToolNames.add(name);
+	const lower = name.toLowerCase();
+	const canonical = LEGACY_TOOL_NAME_ALIASES[lower];
+	if (canonical !== undefined && !warnedLegacyToolNames.has(lower)) {
+		warnedLegacyToolNames.add(lower);
 		logger.warn(`Tool name "${name}" is deprecated — use "${canonical}" instead`, {
 			legacyName: name,
 			canonicalName: canonical,
