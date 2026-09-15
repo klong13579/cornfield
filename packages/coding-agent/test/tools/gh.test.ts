@@ -8,15 +8,20 @@ import { SessionManager } from "@cornfield/coding-agent/session/session-manager"
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { GithubTool } from "@cornfield/coding-agent/tools/gh";
 import { githubToolRenderer } from "@cornfield/coding-agent/tools/gh-renderer";
+import { resetGithubCacheForTests } from "@cornfield/coding-agent/tools/github-cache";
 import { wrapToolWithMetaNotice } from "@cornfield/coding-agent/tools/output-meta";
 import { ToolError } from "@cornfield/coding-agent/tools/tool-errors";
 import * as git from "@cornfield/coding-agent/utils/git";
-import { getAgentDir, setAgentDir } from "@cornfield/utils";
+import { getAgentDir, getGithubCacheDbPath, setAgentDir, setConfigRootDir } from "@cornfield/utils";
 import { createRenderSurface } from "../helpers/render-assert";
 
 function createSession(
 	cwd: string = "/tmp/test",
-	settings: Settings = Settings.isolated({ "github.enabled": true }),
+	// These tests assert formatting, run/PR tool behaviour and TUI rendering. The
+	// view cache is exercised in `github-cache.test.ts` and in the wiring block
+	// below; leaving it on here would let one test answer from a row another test
+	// wrote (and write rows into the developer's real cache).
+	settings: Settings = Settings.isolated({ "github.enabled": true, "github.cache.enabled": false }),
 	artifactsDir?: string,
 ): ToolSession {
 	let nextArtifactId = 0;
@@ -470,6 +475,7 @@ describe("github tool", () => {
 
 		const settings = Settings.isolated({
 			"github.enabled": true,
+			"github.cache.enabled": false,
 			"tools.artifactSpillThreshold": 1,
 			"tools.artifactTailBytes": 1,
 			"tools.artifactTailLines": 20,
@@ -506,6 +512,7 @@ describe("github tool", () => {
 
 		const settings = Settings.isolated({
 			"github.enabled": true,
+			"github.cache.enabled": false,
 			"tools.artifactSpillThreshold": 1,
 			"tools.artifactHeadBytes": 0,
 			"tools.artifactTailBytes": 1,
@@ -1320,5 +1327,182 @@ describe("github tool", () => {
 			tool.execute("issue-view", { op: "issue_view", issue: "42", repo: "cli/cli", comments: false }),
 		).rejects.toThrow(/404/);
 		expect(jsonSpy).toHaveBeenCalledTimes(1);
+	});
+});
+
+/**
+ * Point the view cache at a temp root and give it a credential fingerprint, so
+ * a wiring test exercises the real cache without reading or writing the
+ * developer's `~/.cornfield` or their own `gh` login. Throws when the cache
+ * would escape the temp root, so an XDG override can never silently redirect
+ * these rows into a real cache.
+ */
+async function setupCacheIsolation(): Promise<{ root: string; cleanup: () => Promise<void> }> {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "gh-cache-tool-"));
+	const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "gh-cache-tool-gh-"));
+	const savedToken = process.env.GH_TOKEN;
+	const savedGhConfigDir = process.env.GH_CONFIG_DIR;
+	process.env.GH_TOKEN = "wiring-token";
+	process.env.GH_CONFIG_DIR = ghConfigDir;
+	setConfigRootDir(root);
+	resetGithubCacheForTests();
+	if (!getGithubCacheDbPath().startsWith(root)) {
+		throw new Error(`view cache escaped the temp root: ${getGithubCacheDbPath()}`);
+	}
+
+	return {
+		root,
+		cleanup: async () => {
+			resetGithubCacheForTests();
+			setConfigRootDir(undefined);
+			if (savedToken === undefined) delete process.env.GH_TOKEN;
+			else process.env.GH_TOKEN = savedToken;
+			if (savedGhConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+			else process.env.GH_CONFIG_DIR = savedGhConfigDir;
+			await fs.rm(root, { recursive: true, force: true });
+			await fs.rm(ghConfigDir, { recursive: true, force: true });
+		},
+	};
+}
+
+/** `gh issue view --json` payload for an issue. */
+function issuePayload(number: number, title: string): Record<string, unknown> {
+	return {
+		number,
+		title,
+		state: "OPEN",
+		author: { login: "octocat" },
+		body: "Issue body",
+		createdAt: "2026-04-01T09:00:00Z",
+		updatedAt: "2026-04-01T10:00:00Z",
+		url: `https://github.com/cli/cli/issues/${number}`,
+		comments: [],
+	};
+}
+
+describe("github view cache wiring", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("serves a repeated issue view from the cache and marks it as cached", async () => {
+		const isolation = await setupCacheIsolation();
+		try {
+			const jsonSpy = vi.spyOn(git.github, "json").mockResolvedValue(issuePayload(42, "Cached issue") as never);
+			const tool = new GithubTool(createSession("/tmp/test", Settings.isolated({ "github.enabled": true })));
+			const params = { op: "issue_view", issue: "42", repo: "cli/cli", comments: true } as const;
+
+			const first = await tool.execute("issue-view", params);
+			const second = await tool.execute("issue-view", params);
+
+			expect(jsonSpy).toHaveBeenCalledTimes(1);
+			expect(textOf(second)).toContain("# Issue #42: Cached issue");
+			// A cache hit has to announce itself; a copy that reads as live data is
+			// the failure the marker exists to prevent.
+			expect(textOf(first)).not.toContain("[Cached:");
+			expect(textOf(second)).toContain("[Cached: fetched 0s ago]");
+		} finally {
+			await isolation.cleanup();
+		}
+	});
+
+	it("re-fetches an issue view after the credential fingerprint changes", async () => {
+		const isolation = await setupCacheIsolation();
+		try {
+			const jsonSpy = vi.spyOn(git.github, "json").mockResolvedValue(issuePayload(42, "Cached issue") as never);
+			const tool = new GithubTool(createSession("/tmp/test", Settings.isolated({ "github.enabled": true })));
+			const params = { op: "issue_view", issue: "42", repo: "cli/cli", comments: true } as const;
+
+			await tool.execute("issue-view", params);
+			process.env.GH_TOKEN = "rotated-token";
+			const afterRotation = await tool.execute("issue-view", params);
+
+			expect(jsonSpy).toHaveBeenCalledTimes(2);
+			expect(textOf(afterRotation)).not.toContain("[Cached:");
+		} finally {
+			await isolation.cleanup();
+		}
+	});
+
+	it("does not cache a view identified only by a branch name", async () => {
+		const isolation = await setupCacheIsolation();
+		try {
+			const jsonSpy = vi.spyOn(git.github, "json").mockResolvedValue({
+				number: 12,
+				title: "Branch view",
+				state: "OPEN",
+				url: "https://github.com/cli/cli/pull/12",
+				comments: [],
+			} as never);
+			const tool = new GithubTool(createSession("/tmp/test", Settings.isolated({ "github.enabled": true })));
+			const params = { op: "pr_view", pr: "feature/retry-fix", repo: "cli/cli", comments: false } as const;
+
+			await tool.execute("pr-view", params);
+			await tool.execute("pr-view", params);
+
+			expect(jsonSpy).toHaveBeenCalledTimes(2);
+		} finally {
+			await isolation.cleanup();
+		}
+	});
+
+	it("does not cache a failed view", async () => {
+		const isolation = await setupCacheIsolation();
+		try {
+			const jsonSpy = vi
+				.spyOn(git.github, "json")
+				.mockRejectedValueOnce(new ToolError("HTTP 404: Not Found"))
+				.mockResolvedValueOnce(issuePayload(42, "Recovered issue") as never);
+			const tool = new GithubTool(createSession("/tmp/test", Settings.isolated({ "github.enabled": true })));
+			const params = { op: "issue_view", issue: "42", repo: "cli/cli", comments: true } as const;
+
+			await expect(tool.execute("issue-view", params)).rejects.toThrow(/404/);
+			const recovered = await tool.execute("issue-view", params);
+
+			expect(jsonSpy).toHaveBeenCalledTimes(2);
+			expect(textOf(recovered)).toContain("# Issue #42: Recovered issue");
+		} finally {
+			await isolation.cleanup();
+		}
+	});
+
+	it("keeps pr_diff filter variants in separate rows", async () => {
+		const isolation = await setupCacheIsolation();
+		try {
+			const textSpy = vi.spyOn(git.github, "text").mockResolvedValue("diff --git a/x b/x\n");
+			const tool = new GithubTool(createSession("/tmp/test", Settings.isolated({ "github.enabled": true })));
+			const names = { op: "pr_diff", pr: "7", repo: "cli/cli", nameOnly: true } as const;
+			const full = { op: "pr_diff", pr: "7", repo: "cli/cli" } as const;
+
+			const nameList = await tool.execute("pr-diff", names);
+			await tool.execute("pr-diff", full);
+			const repeated = await tool.execute("pr-diff", names);
+
+			expect(textSpy).toHaveBeenCalledTimes(2);
+			expect(textOf(nameList)).toContain("# Pull Request Files");
+			expect(textOf(repeated)).toContain("[Cached: fetched 0s ago]");
+		} finally {
+			await isolation.cleanup();
+		}
+	});
+
+	it("leaves ops other than the view ops uncached", async () => {
+		const isolation = await setupCacheIsolation();
+		try {
+			const jsonSpy = vi
+				.spyOn(git.github, "json")
+				.mockResolvedValue({ nameWithOwner: "cli/cli", url: "https://github.com/cli/cli" } as never);
+			const tool = new GithubTool(createSession("/tmp/test", Settings.isolated({ "github.enabled": true })));
+			const params = { op: "repo_view", repo: "cli/cli" } as const;
+
+			const first = await tool.execute("repo-view", params);
+			const second = await tool.execute("repo-view", params);
+
+			expect(jsonSpy).toHaveBeenCalledTimes(2);
+			expect(textOf(first)).not.toContain("[Cached:");
+			expect(textOf(second)).not.toContain("[Cached:");
+		} finally {
+			await isolation.cleanup();
+		}
 	});
 });
