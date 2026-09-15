@@ -183,7 +183,7 @@ const TOOL_SWITCH_DEFS: Array<{ tool: string; label: string; path: SettingPath }
 ];
 
 /**
- * `omp serve` 的 WS 传输层（P3 多 Agent 版）。
+ * `cornfield serve` 的 WS 传输层（P3 多 Agent 版）。
  *
  * 职责（且仅此）：
  * - 升级 /ws 连接前校验 query token；hello → hello_ack
@@ -759,7 +759,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "get_stats": {
-					// W3 D1：与 `omp stats --json` 同源——先增量同步会话文件再读聚合。
+					// W3 D1：与 `cornfield stats --json` 同源——先增量同步会话文件再读聚合。
 					// 只读转发 stats.db（本地聚合缓存），不触碰任何 attached session。
 					// W3 D2：可选 period 对聚合做时间窗口；响应附带 models.json 单价目录。
 					// 性能：聚合查询扫全量 messages 表 ~700ms-1s——TTL 10s 内同 period 复用响应

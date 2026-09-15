@@ -1,7 +1,7 @@
 /**
- * `omp serve` — multidevice host（P3 多 Agent）。
+ * `cornfield serve` — multidevice host（P3 多 Agent）。
  *
- * 在本地把 omp 会话暴露为 WS 服务：TUI 继续进程内渲染，web/pc/mobile
+ * 在本地把 CornField 会话暴露为 WS 服务：TUI 继续进程内渲染，web/pc/mobile
  * 通过 ws://127.0.0.1:<port>/ws?token=<token> 连接。
  *
  * P3：serve 从单 AgentSession 升级为会话注册表。
@@ -28,7 +28,7 @@ import { SessionStore } from "../session/session-store";
 import { repo } from "../utils/git";
 
 export default class Serve extends Command {
-	static description = "Run omp as a multidevice host: share sessions with TUI/web/pc/mobile over WS";
+	static description = "Run cornfield as a multidevice host: share sessions with TUI/web/pc/mobile over WS";
 
 	static flags = {
 		port: Flags.integer({ description: "WS server port", default: 7891 }),

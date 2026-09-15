@@ -28,7 +28,7 @@ export const WORKSPACE_DIR_NAME = ".cornfield";
 export const WORKSPACE_FILE_NAME = "workspace.json";
 export const WORKSPACE_SCHEMA_VERSION = 2;
 
-/** Knowledge layer declarations (omp-flavored six-layer boundary). */
+/** Knowledge layer declarations (CornField six-layer boundary). */
 export interface WorkspaceKnowledgePaths {
 	/** Identity file (human face of the agent). */
 	identity?: string;
@@ -109,7 +109,7 @@ export async function loadWorkspace(agentDir: string): Promise<WorkspaceDeclarat
 
 /**
  * Write the declaration if missing (additive, never overwrites an existing
- * valid declaration). Used by `omp agent init` / `register` and the gateway
+ * valid declaration). Used by `cornfield agent init` / `register` and the gateway
  * account path so every agentDir converges on the v2 shape with zero moves.
  *
  * Defaults mirror the default skeleton layout; `projectRoot` defaults to the

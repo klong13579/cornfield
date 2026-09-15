@@ -22,7 +22,7 @@ export async function checkDependencies(): Promise<STTDependencyStatus> {
 		});
 		whisperAvailable = check.exitCode === 0;
 	}
-	const whisperHint = "Run 'omp setup stt' to auto-install, or: pip install mlx-whisper";
+	const whisperHint = "Run 'cornfield setup stt' to auto-install, or: pip install mlx-whisper";
 
 	return {
 		recorder: { available: recorderTools.length > 0, tool: recorderTools[0] ?? null, installHint: recorderHint },

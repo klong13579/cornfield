@@ -12,7 +12,7 @@
  * the filename. The slug is only included when a title is available at
  * file creation time (e.g. forking from a titled parent). For the common
  * case (fresh session), the filename is `HHMMSS__<8hex>.jsonl`; the title
- * lives in the JSONL header and surfaces via `omp session ls`.
+ * lives in the JSONL header and surfaces in the session selector (`cornfield -r`).
  */
 import * as path from "node:path";
 import { slugifySync } from "@cornfield/utils";

@@ -1,4 +1,4 @@
-Switch the current LLM model for this omp session.
+Switch the current LLM model for this CornField session.
 
 <instruction>
 - `query` accepts any of:
@@ -15,7 +15,7 @@ Switch the current LLM model for this omp session.
 </instruction>
 
 <boundary>
-- This tool only changes the model for the **current omp session**. It does not affect the gateway daemon, other agent accounts, or cron tasks.
+- This tool only changes the model for the **current CornField session**. It does not affect the gateway daemon, other agent accounts, or cron tasks.
 - Slash command `/model <provider>/<id>` is a fast path handled by the gateway directly (bypasses the LLM); both paths end up at the same `session.setModel()`.
 - Do **not** try to switch models by editing config files, sending RPC commands to the bridge, or reading/writing SQLite — use this tool.
 - The bridge's `set_model` RPC command is the underlying transport; you should not invoke it directly. RPC is bridge→agent, not agent→bridge.
