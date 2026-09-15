@@ -59,7 +59,7 @@ cornfield 会话 A(进程内)           cornfield 会话 B(进程内)      gatew
 | `list` / `list-cwd` | 在线会话(id/名字/cwd/模型/状态/上下文占比) |
 | `children` | 本会话的子会话列表(声明了本会话为父的在线会话,含实时状态) |
 | `send` | 单发,可带附件(file/snippet/context),自动推断 pending ask 作为回复 |
-| `ask` | 发送并阻塞等待回复(默认超时 10min,`CORNFIELD_INTERCOM_ASK_TIMEOUT_MS` 覆盖);**子模式下不带 `to` 时默认发给父** |
+| `ask` | 发送并阻塞等待回复(默认超时 10min,`PI_INTERCOM_ASK_TIMEOUT_MS` 覆盖);**子模式下不带 `to` 时默认发给父** |
 | `reply` | 回复指定待回复 ask(显式 `replyTo` 优先,始终带 correlation id;多条 pending 未指定时 fail loud 报错,不再按会话状态隐式猜测),保持线程 |
 | `pending` | 列出未回复的 inbound ask |
 | `status` | 连接状态 |
@@ -80,7 +80,7 @@ cornfield 会话 A(进程内)           cornfield 会话 B(进程内)      gatew
   (`contact_supervisor` 的 need_decision / interview_request 走同一条通路),所以普通
   `send`(通知、FYI、完成报告)和 `reply` **永远不会出现**在 `pending` 里。它回答的是
   「还有谁在等我回话」,不是「我收到了什么」;条目按到达时间正序,带 sender、message id、
-  已等待秒数与 80 字预览。未回复的 ask 超过 ask 超时(`CORNFIELD_INTERCOM_ASK_TIMEOUT_MS`,
+  已等待秒数与 80 字预览。未回复的 ask 超过 ask 超时(`PI_INTERCOM_ASK_TIMEOUT_MS`,
   默认 10min)会被剪除,因此 **`pending` 为空 ≠ 从来没有 ask 来过**。
 - **`history` 是唯一能回放「我忙的时候错过了什么」的 action**:broker 在**接受**每条消息时
   就把它写进 `~/.cornfield/intercom/journal.jsonl`(在线投递与离线暂存都写,暂存条目回放时
@@ -172,7 +172,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 | `replyHint` | true | 收到的 ask 附回复指引(始终携带显式 `replyTo`) |
 | `stableId` | — | 重启后保持的会话地址 |
 
-环境变量:`CORNFIELD_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`CORNFIELD_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)。
+环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`CORNFIELD_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)。
 
 ## 7. 前置条件与排障
 
