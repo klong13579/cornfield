@@ -46,7 +46,15 @@ import {
 	type OutputMeta,
 	persistToolOutputArtifact,
 } from "./output-meta";
-import { expandPath, formatPathRelativeToCwd, type LineRange, parseLineRanges, resolveReadPath } from "./path-utils";
+import { expandPath, formatPathRelativeToCwd, type LineRange, resolveReadPath } from "./path-utils";
+import {
+	formatRangeLabel,
+	isMultiRange,
+	type ParsedSelector,
+	parseSel,
+	resolveTailSelector,
+	selToOffsetLimit,
+} from "./read-selector";
 import { type ReadSummarySettings, summarizeFileContent } from "./read-summary";
 import { formatAge, formatBytes, shortenPath, wrapBrackets } from "./render-utils";
 import {
@@ -96,6 +104,27 @@ function formatTextWithMode(
 }
 
 const READ_CHUNK_SIZE = 8 * 1024;
+
+/**
+ * Separates blocks of a multi-range read. A bare ellipsis on its own line is
+ * never file content under either display mode (numbered lines carry `N|`, raw
+ * lines are verbatim but a multi-range read implies the caller wants the
+ * addresses), so it cannot be mistaken for a line that was read.
+ */
+const RANGE_ELISION = "…";
+
+/**
+ * Collects one absolute line window and reports the source's total line count.
+ * The two sources read cannot share a slice implementation — a file streams
+ * under a byte budget, an in-memory body slices a `\n` split — so the multi-
+ * range renderer takes this instead and both sources stay one implementation
+ * of their own kind.
+ */
+type RangeLineSource = (
+	startLine: number,
+	maxLines: number,
+	maxBytes: number,
+) => Promise<{ lines: string[]; totalLines: number }>;
 
 // Cap on reading a whole file into memory for structured summarization (see #readFileText).
 const MAX_SUMMARIZE_BYTES = 8 * 1024 * 1024;
@@ -279,6 +308,39 @@ async function streamLinesFromFile(
 	};
 }
 
+/**
+ * Count the lines {@link streamLinesFromFile} reports for `filePath`: one per
+ * `\n` plus a trailing segment, so a file ending in a newline has one more line
+ * than it has newlines and an empty file counts as one empty line.
+ *
+ * A `-N` tail selector needs the total before it can pick a start line, and
+ * `streamLinesFromFile` only reports it after a full scan. Counting here is a
+ * second scan of the same bytes, deliberately: the alternative is a ring buffer
+ * that reimplements line collection, the byte budget, and the truncation
+ * notices, and then has to agree with them forever.
+ */
+async function countFileLines(filePath: string, signal?: AbortSignal): Promise<number> {
+	const bufferChunk = Buffer.allocUnsafe(READ_CHUNK_SIZE);
+	let lines = 1;
+	let fileHandle: fs.FileHandle | null = null;
+	try {
+		fileHandle = await fs.open(filePath, "r");
+		while (true) {
+			throwIfAborted(signal);
+			const { bytesRead } = await fileHandle.read(bufferChunk, 0, bufferChunk.length, null);
+			if (bytesRead === 0) break;
+			for (let i = 0; i < bytesRead; i++) {
+				if (bufferChunk[i] === 0x0a) lines++;
+			}
+		}
+	} finally {
+		if (fileHandle) {
+			await fileHandle.close();
+		}
+	}
+	return lines;
+}
+
 // Maximum image file size (20MB) - larger images will be rejected to prevent OOM during serialization
 const MAX_IMAGE_SIZE = MAX_IMAGE_INPUT_BYTES;
 const GLOB_TIMEOUT_MS = 5000;
@@ -353,7 +415,12 @@ function prependSuffixResolutionNotice(text: string, suffixResolution?: { from: 
 
 const readSchema = Type.Object({
 	path: Type.String({ description: "path or url", examples: ["src/foo.ts", "https://example.com"] }),
-	sel: Type.Optional(Type.String({ description: "line range or mode", examples: ["50", "50-200", "50+150", "raw"] })),
+	sel: Type.Optional(
+		Type.String({
+			description: "line range, last-N tail, comma-separated ranges, or a mode",
+			examples: ["50", "50-200", "50+150", "-60", "1-2,40-45", "raw"],
+		}),
+	),
 	timeout: Type.Optional(Type.Number({ description: "timeout in seconds", default: 20 })),
 });
 
@@ -373,41 +440,13 @@ export interface ReadToolDetails {
 	meta?: OutputMeta;
 	/** Raw text + start line for user-visible TUI rendering, set when content is text-like.
 	 * Mirrors the same lines the model receives but without hashline/line-number prefixes,
-	 * so the TUI can render the file content with its own gutter without re-parsing the formatted text. */
+	 * so the TUI can render the file content with its own gutter without re-parsing the formatted text.
+	 * For a multi-range read the text holds every window joined by `…` and `startLine`
+	 * names the first window only — the windows are not contiguous by construction. */
 	displayContent?: { text: string; startLine: number };
 }
 
 type ReadParams = ReadToolInput;
-
-/** Parsed representation of the `sel` parameter. */
-type ParsedSelector = { kind: "none" } | { kind: "raw" } | { kind: "lines"; ranges: [LineRange, ...LineRange[]] };
-
-/**
- * Parse `sel`. A selector that is not recognized is an error, never "none":
- * reading the whole resource after the caller asked for a slice silently widens
- * the request. Bare `N` is open-ended from N, which is what read.md documents.
- */
-function parseSel(sel: string | undefined): ParsedSelector {
-	if (!sel || sel.length === 0) return { kind: "none" };
-	if (sel === "raw") return { kind: "raw" };
-	const ranges = parseLineRanges(sel);
-	if (ranges) return { kind: "lines", ranges };
-	throw new ToolError(`Unsupported selector "${sel}". Use N, N-M, N+K (K lines from N), N- (from N onward), or raw.`);
-}
-
-/** Convert a line-range selector to the offset/limit pair used by internal pagination. */
-function selToOffsetLimit(parsed: ParsedSelector): { offset?: number; limit?: number } {
-	if (parsed.kind !== "lines") return {};
-	const [range, ...extra] = parsed.ranges;
-	if (extra.length > 0) {
-		const shown = parsed.ranges.map(r =>
-			r.endLine === undefined ? `${r.startLine}-` : `${r.startLine}-${r.endLine}`,
-		);
-		throw new ToolError(`Multi-range selectors are not supported: ${shown.join(", ")}. Read one range per call.`);
-	}
-	const limit = range.endLine !== undefined ? range.endLine - range.startLine + 1 : undefined;
-	return { offset: range.startLine, limit };
-}
 
 interface ResolvedArchiveReadPath {
 	absolutePath: string;
@@ -785,6 +824,191 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		return resultBuilder.done();
 	}
 
+	/**
+	 * Render a selector against in-memory text: pin a `-N` tail to the text's own
+	 * line count, then dispatch a multi-range selector to
+	 * {@link #buildMultiRangeResult} and everything else to
+	 * {@link #buildInMemoryTextResult}.
+	 */
+	async #buildInMemorySelectorResult(
+		text: string,
+		parsed: ParsedSelector,
+		options: {
+			details?: ReadToolDetails;
+			sourcePath?: string;
+			sourceUrl?: string;
+			sourceInternal?: string;
+			entityLabel: string;
+			ignoreResultLimits?: boolean;
+			immutable?: boolean;
+			raw?: boolean;
+		},
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const allLines = text.split("\n");
+		const resolved = resolveTailSelector(parsed, allLines.length);
+		if (isMultiRange(resolved)) {
+			const source: RangeLineSource = (startLine, maxLines, maxBytes) => {
+				const lines: string[] = [];
+				let bytes = 0;
+				for (let i = startLine - 1; i < allLines.length && lines.length < maxLines; i++) {
+					const line = allLines[i]!;
+					const cost = (lines.length > 0 ? 1 : 0) + Buffer.byteLength(line, "utf-8");
+					if (bytes + cost > maxBytes) break;
+					bytes += cost;
+					lines.push(line);
+				}
+				return Promise.resolve({ lines, totalLines: allLines.length });
+			};
+			return this.#buildMultiRangeResult(source, resolved.ranges, options);
+		}
+		const { offset, limit } = selToOffsetLimit(resolved);
+		return this.#buildInMemoryTextResult(text, offset, limit, options);
+	}
+
+	/**
+	 * Render several disjoint line windows as one result. Each window keeps the
+	 * source's own line numbers and windows are separated by the elision marker,
+	 * so the reader can tell the output is not contiguous. The windows share one
+	 * line and byte budget: a multi-range selector is still one call, and the
+	 * output ceiling is per call, not per range. A range past the end is reported
+	 * instead of dropped, and exhausting the budget stops the read with a notice
+	 * naming the line to resume from — a short answer with no notice reads as
+	 * "the source ends there".
+	 */
+	async #buildMultiRangeResult(
+		source: RangeLineSource,
+		ranges: readonly LineRange[],
+		options: {
+			details?: ReadToolDetails;
+			sourcePath?: string;
+			sourceUrl?: string;
+			sourceInternal?: string;
+			entityLabel: string;
+			/** Callers that own their own output ceiling (skill resources) still get the
+			 * line budget — only the byte budget is theirs to lift. */
+			ignoreResultLimits?: boolean;
+			immutable?: boolean;
+			raw?: boolean;
+		},
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const displayMode = resolveFileDisplayMode(this.session, { raw: options.raw, immutable: options.immutable });
+		const shouldAddHashLines = displayMode.hashLines;
+		const shouldAddLineNumbers = shouldAddHashLines ? false : displayMode.lineNumbers;
+
+		let remainingLines = DEFAULT_MAX_LINES;
+		let remainingBytes = options.ignoreResultLimits
+			? Number.POSITIVE_INFINITY
+			: Math.max(DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES * 512);
+		let totalLines = 0;
+		const blocks: string[] = [];
+		const displayBlocks: string[] = [];
+		const notices: string[] = [];
+		let firstBlockStart: number | undefined;
+		let resumeFrom: number | undefined;
+
+		for (const range of ranges) {
+			const requested = range.endLine !== undefined ? range.endLine - range.startLine + 1 : Number.POSITIVE_INFINITY;
+			const maxLines = Math.min(requested, remainingLines);
+			if (maxLines < 1 || remainingBytes < 1) {
+				resumeFrom = range.startLine;
+				break;
+			}
+
+			const collected = await source(range.startLine, maxLines, remainingBytes);
+			totalLines = collected.totalLines;
+
+			if (range.startLine > totalLines) {
+				notices.push(
+					`[Range ${formatRangeLabel(range)} is beyond end of ${options.entityLabel} (${totalLines} lines total); skipped]`,
+				);
+				continue;
+			}
+
+			const blockText = collected.lines.join("\n");
+			if (collected.lines.length > 0) {
+				blocks.push(formatTextWithMode(blockText, range.startLine, shouldAddHashLines, shouldAddLineNumbers));
+				displayBlocks.push(blockText);
+				firstBlockStart ??= range.startLine;
+				remainingLines -= collected.lines.length;
+				remainingBytes -= Buffer.byteLength(blockText, "utf-8") + 1;
+			}
+
+			const windowEnd = Math.min(range.endLine ?? totalLines, totalLines);
+			if (collected.lines.length < windowEnd - range.startLine + 1) {
+				resumeFrom = range.startLine + collected.lines.length;
+				break;
+			}
+		}
+
+		if (resumeFrom !== undefined) {
+			notices.push(
+				`[Result limit reached; lines from ${resumeFrom} were not read. Use sel=${resumeFrom} to continue]`,
+			);
+		}
+
+		const body = blocks.join(`\n${RANGE_ELISION}\n`);
+		const text = notices.length > 0 ? (body ? `${body}\n\n${notices.join("\n")}` : notices.join("\n")) : body;
+
+		const details: ReadToolDetails = { ...options.details };
+		if (firstBlockStart !== undefined) {
+			details.displayContent = {
+				text: displayBlocks.join(`\n${RANGE_ELISION}\n`),
+				startLine: firstBlockStart,
+			};
+		}
+
+		const resultBuilder = toolResult<ReadToolDetails>(details).text(text);
+		if (options.sourcePath) resultBuilder.sourcePath(options.sourcePath);
+		if (options.sourceUrl) resultBuilder.sourceUrl(options.sourceUrl);
+		if (options.sourceInternal) resultBuilder.sourceInternal(options.sourceInternal);
+		return resultBuilder.done();
+	}
+
+	/**
+	 * Attach a suffix-resolution notice to a finished read result: the detail
+	 * carries the mapping and the model sees it inline, above the content it
+	 * corrects. Every reader that can resolve a suffix by unique match funnels
+	 * through here so the notice has one wording and one position.
+	 */
+	#withSuffixResolution(
+		result: AgentToolResult<ReadToolDetails>,
+		suffixResolution: { from: string; to: string } | undefined,
+	): AgentToolResult<ReadToolDetails> {
+		if (!suffixResolution) return result;
+		result.details = { ...result.details, suffixResolution };
+		const notice = `[Path '${suffixResolution.from}' not found; resolved to '${suffixResolution.to}' via suffix match]`;
+		const firstText = result.content.find((part): part is TextContent => part.type === "text");
+		if (firstText) {
+			firstText.text = `${notice}\n${firstText.text}`;
+		} else {
+			result.content = [{ type: "text", text: notice }, ...result.content];
+		}
+		return result;
+	}
+
+	/**
+	 * Directory listings are not line-addressed, so only the pagination limit
+	 * applies. A tail or multi-range selector here names lines that do not exist;
+	 * rejecting it keeps the tool's promise that `sel` is never silently ignored.
+	 */
+	#directoryLimit(parsed: ParsedSelector, entityLabel: string): number | undefined {
+		switch (parsed.kind) {
+			case "lines":
+				if (parsed.ranges.length > 1) {
+					throw new ToolError(
+						`A multi-range selector cannot be applied to ${entityLabel}; pass one limit instead (e.g. sel=50).`,
+					);
+				}
+				return selToOffsetLimit(parsed).limit;
+			case "tail":
+				throw new ToolError(
+					`A tail selector (-${parsed.count}) cannot be applied to ${entityLabel}; listings are not line-addressed. Page with sel=N instead.`,
+				);
+			default:
+				return undefined;
+		}
+	}
+
 	async #readArchiveDirectory(
 		archive: ArchiveReader,
 		archivePath: string,
@@ -828,11 +1052,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 	async #readArchive(
 		readPath: string,
-		offset: number | undefined,
-		limit: number | undefined,
+		parsed: ParsedSelector,
 		resolvedArchivePath: ResolvedArchiveReadPath,
 		signal?: AbortSignal,
-		options?: { raw?: boolean },
 	): Promise<AgentToolResult<ReadToolDetails>> {
 		throwIfAborted(signal);
 		const archive = await openArchive(resolvedArchivePath.absolutePath);
@@ -853,7 +1075,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				archive,
 				resolvedArchivePath.absolutePath,
 				resolvedArchivePath.archiveSubPath,
-				limit,
+				this.#directoryLimit(parsed, "an archive directory"),
 				details,
 				signal,
 			);
@@ -873,17 +1095,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				.done();
 		}
 
-		const result = this.#buildInMemoryTextResult(text, offset, limit, {
+		const result = await this.#buildInMemorySelectorResult(text, parsed, {
 			details,
 			sourcePath: resolvedArchivePath.absolutePath,
 			entityLabel: "archive entry",
-			raw: options?.raw,
+			raw: parsed.kind === "raw",
 		});
-		const firstText = result.content.find((content): content is TextContent => content.type === "text");
-		if (firstText) {
-			firstText.text = prependSuffixResolutionNotice(firstText.text, resolvedArchivePath.suffixResolution);
-		}
-		return result;
+		return this.#withSuffixResolution(result, resolvedArchivePath.suffixResolution);
 	}
 
 	async #readSqlite(
@@ -1042,9 +1260,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://)
 			const internalRouter = this.session.internalRouter;
 			if (internalRouter?.canHandle(readPath)) {
-				const parsed = parseSel(sel);
-				const { offset, limit } = selToOffsetLimit(parsed);
-				return this.#handleInternalUrl(readPath, offset, limit);
+				return this.#handleInternalUrl(readPath, parseSel(sel));
 			}
 
 			const parsedUrlTarget = parseReadUrlTarget(readPath, sel);
@@ -1088,8 +1304,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 			const archivePath = await this.#resolveArchiveReadPath(localReadPath, signal);
 			if (archivePath) {
-				const { offset, limit } = selToOffsetLimit(parsed);
-				return this.#readArchive(readPath, offset, limit, archivePath, signal, { raw: parsed.kind === "raw" });
+				return this.#readArchive(readPath, parsed, archivePath, signal);
 			}
 
 			let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
@@ -1130,7 +1345,11 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 
 			if (isDirectory) {
-				const dirResult = await this.#readDirectory(absolutePath, selToOffsetLimit(parsed).limit, signal);
+				const dirResult = await this.#readDirectory(
+					absolutePath,
+					this.#directoryLimit(parsed, "a directory"),
+					signal,
+				);
 				if (suffixResolution) {
 					dirResult.details ??= {};
 					dirResult.details.suffixResolution = suffixResolution;
@@ -1245,8 +1464,35 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					await fs.rm(imageDir, { recursive: true, force: true }).catch(() => {});
 				}
 			} else {
-				// Raw text or line-range mode
-				const { offset, limit } = selToOffsetLimit(parsed);
+				// Raw text or line-range mode. A `-N` tail needs the file's line count
+				// before it names a window; every other kind is already absolute.
+				const resolved =
+					parsed.kind === "tail"
+						? resolveTailSelector(parsed, await countFileLines(absolutePath, signal))
+						: parsed;
+
+				if (isMultiRange(resolved)) {
+					const fileSource: RangeLineSource = async (startLine, maxLines, maxBytes) => {
+						const streamed = await streamLinesFromFile(
+							absolutePath,
+							startLine - 1,
+							maxLines,
+							maxBytes,
+							maxLines,
+							signal,
+						);
+						return { lines: streamed.lines, totalLines: streamed.totalFileLines };
+					};
+					return this.#withSuffixResolution(
+						await this.#buildMultiRangeResult(fileSource, resolved.ranges, {
+							sourcePath: absolutePath,
+							entityLabel: "file",
+						}),
+						suffixResolution,
+					);
+				}
+
+				const { offset, limit } = selToOffsetLimit(resolved);
 				const startLine = offset ? Math.max(0, offset - 1) : 0;
 				const startLineDisplay = startLine + 1;
 
@@ -1398,17 +1644,6 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				content = [{ type: "text", text: outputText }];
 			}
 
-			if (suffixResolution) {
-				details.suffixResolution = suffixResolution;
-				// Inline resolution notice into first text block so the model sees the actual path
-				const notice = `[Path '${suffixResolution.from}' not found; resolved to '${suffixResolution.to}' via suffix match]`;
-				const firstText = content.find((c): c is TextContent => c.type === "text");
-				if (firstText) {
-					firstText.text = `${notice}\n${firstText.text}`;
-				} else {
-					content = [{ type: "text", text: notice }, ...content];
-				}
-			}
 			const resultBuilder = toolResult(details).content(content);
 			if (sourcePath) {
 				resultBuilder.sourcePath(sourcePath);
@@ -1416,7 +1651,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			if (truncationInfo) {
 				resultBuilder.truncation(truncationInfo.result, truncationInfo.options);
 			}
-			return resultBuilder.done();
+			return this.#withSuffixResolution(resultBuilder.done(), suffixResolution);
 		})();
 		this.#pendingReads.set(cacheKey, promise);
 		// Must return the finally-chain: discarding it leaves an orphan promise that
@@ -1426,31 +1661,32 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 	/**
 	 * Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://).
-	 * Supports pagination via offset/limit but rejects them when query extraction is used.
+	 * Paginates by line selector, except when query extraction already names the lines.
 	 */
-	async #handleInternalUrl(url: string, offset?: number, limit?: number): Promise<AgentToolResult<ReadToolDetails>> {
+	async #handleInternalUrl(url: string, parsed: ParsedSelector): Promise<AgentToolResult<ReadToolDetails>> {
 		const internalRouter = this.session.internalRouter!;
 
 		// Check if URL has query extraction (agent:// only).
 		// Use parseInternalUrl which handles colons in host (namespaced skills).
-		let parsed: InternalUrl;
+		let urlParts: InternalUrl;
 		try {
-			parsed = parseInternalUrl(url);
+			urlParts = parseInternalUrl(url);
 		} catch (e) {
 			throw new ToolError(e instanceof Error ? e.message : String(e));
 		}
-		const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+		const scheme = urlParts.protocol.replace(/:$/, "").toLowerCase();
 		let hasExtraction = false;
 		if (scheme === "agent") {
-			const hasPathExtraction = parsed.pathname && parsed.pathname !== "/" && parsed.pathname !== "";
-			const queryParam = parsed.searchParams.get("q");
+			const hasPathExtraction = urlParts.pathname && urlParts.pathname !== "/" && urlParts.pathname !== "";
+			const queryParam = urlParts.searchParams.get("q");
 			const hasQueryExtraction = queryParam !== null && queryParam !== "";
 			hasExtraction = hasPathExtraction || hasQueryExtraction;
 		}
 
-		// Reject offset/limit with query extraction
-		if (hasExtraction && (offset !== undefined || limit !== undefined)) {
-			throw new ToolError("Cannot combine query extraction with offset/limit");
+		// Reject a line selector with query extraction: the extraction has already
+		// named the lines the caller wants, and there is no text to slice by.
+		if (hasExtraction && (parsed.kind === "lines" || parsed.kind === "tail")) {
+			throw new ToolError("Cannot combine query extraction with a line selector");
 		}
 
 		// Resolve the internal URL
@@ -1460,7 +1696,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		// A directory resource has no text body of its own: render it with the same
 		// dirent listing used for filesystem directories so there is one format.
 		if (resource.isDirectory && resource.sourcePath) {
-			return this.#readDirectory(resource.sourcePath, limit);
+			return this.#readDirectory(resource.sourcePath, this.#directoryLimit(parsed, "a directory resource"));
 		}
 
 		// If extraction was used, return directly (no pagination)
@@ -1468,7 +1704,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			return toolResult(details).text(resource.content).sourceInternal(url).done();
 		}
 
-		return this.#buildInMemoryTextResult(resource.content, offset, limit, {
+		return this.#buildInMemorySelectorResult(resource.content, parsed, {
 			details,
 			sourcePath: resource.sourcePath,
 			sourceInternal: url,

@@ -15,6 +15,11 @@ Multi-purpose: files, directories, archives, SQLite databases, images, documents
 |`50-200`|Read lines 50-200|
 |`50+150`|Read 150 lines starting at line 50|
 |`20+1`|Read exactly one line|
+|`-60`|Read the last 60 lines (clamped to the file; `-N` >= file length reads the whole file)|
+|`1-2,40-45`|Read both ranges in one call. They keep their own line numbers and are separated by `…` — that marker is not file content|
+|`raw`|Return the text verbatim, with no line numbers|
+
+Ranges are 1-indexed and are never widened: an unrecognized selector is an error, not a whole-file read.
 ## Filesystem
 - Reading a directory path returns a list of dirents.
 {{#if IS_HASHLINE_MODE}}
