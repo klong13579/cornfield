@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "child_process";
 import { realpathSync, statSync } from "fs";
 import { resolve } from "path";
+import { childSessionEnv } from "./child-session-metadata";
 import { sameCwd } from "./cwd";
 import type { SessionInfo } from "./types";
 
@@ -59,13 +60,14 @@ export interface ChildPaneMetadata {
 }
 
 function buildPaneCommandEnvPrefix(metadata: ChildPaneMetadata): string {
-	const entries: Array<[string, string]> = [
-		["PI_SUBAGENT_ORCHESTRATOR_TARGET", metadata.parentTarget],
-		["PI_SUBAGENT_ORCHESTRATOR_SESSION_ID", metadata.parentSessionId ?? metadata.parentTarget],
-		["PI_SUBAGENT_RUN_ID", metadata.runId ?? "pane-unknown"],
-		["PI_SUBAGENT_CHILD_AGENT", metadata.agent ?? "project-pane"],
-		["PI_SUBAGENT_CHILD_INDEX", metadata.index ?? "0"],
-	];
+	const env = childSessionEnv({
+		parentTarget: metadata.parentTarget,
+		parentSessionId: metadata.parentSessionId,
+		runId: metadata.runId ?? "pane-unknown",
+		agent: metadata.agent ?? "project-pane",
+		index: metadata.index ?? "0",
+	});
+	const entries = Object.entries(env);
 	return `${entries.map(([key, value]) => `${key}=${shellQuote(value)}`).join(" ")} `;
 }
 

@@ -9,6 +9,7 @@ import { Type } from "@sinclair/typebox";
 import { randomUUID } from "crypto";
 import { resolveAskRouting } from "./ask-routing";
 import { IntercomClient } from "./broker/client";
+import { CHILD_SESSION_ENV } from "./child-session-metadata";
 import { getAskTimeoutMs, type InboundMode, type IntercomConfig, loadConfig } from "./config";
 import { sameCwd } from "./cwd";
 import {
@@ -51,14 +52,9 @@ const SUBAGENT_RESULT_INTERCOM_DELIVERY_EVENT = "subagent:result-intercom-delive
 const INBOUND_MESSAGE_DEDUPE_MAX = 1000;
 const INBOUND_MESSAGE_DEDUPE_RETENTION_MS = 60 * 60 * 1000;
 const DEFAULT_UNNAMED_SESSION_ALIAS_PREFIX = "subagent-chat";
-const SUBAGENT_ORCHESTRATOR_TARGET_ENV = "PI_SUBAGENT_ORCHESTRATOR_TARGET";
-const SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV = "PI_SUBAGENT_ORCHESTRATOR_SESSION_ID";
 const INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
 const STABLE_INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_STABLE_ID";
 const NAME_POLL_MS_ENV = "PI_INTERCOM_NAME_POLL_MS";
-const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
-const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
-const SUBAGENT_CHILD_INDEX_ENV = "PI_SUBAGENT_CHILD_INDEX";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
 const SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV = "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR";
 const SUBAGENT_COMPLETION_REPORT_MIN_INTERVAL_MS = 5_000;
@@ -129,12 +125,12 @@ function formatAttachments(attachments: Attachment[]): string {
 	return text;
 }
 function readChildOrchestratorMetadata(): ChildOrchestratorMetadata | null {
-	const orchestratorTarget = process.env[SUBAGENT_ORCHESTRATOR_TARGET_ENV]?.trim();
+	const orchestratorTarget = process.env[CHILD_SESSION_ENV.orchestratorTarget]?.trim();
 	const orchestratorSessionId =
-		process.env[SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV]?.trim() || process.env[INTERCOM_SESSION_ID_ENV]?.trim();
-	const runId = process.env[SUBAGENT_RUN_ID_ENV]?.trim();
-	const agent = process.env[SUBAGENT_CHILD_AGENT_ENV]?.trim();
-	const index = process.env[SUBAGENT_CHILD_INDEX_ENV]?.trim();
+		process.env[CHILD_SESSION_ENV.orchestratorSessionId]?.trim() || process.env[INTERCOM_SESSION_ID_ENV]?.trim();
+	const runId = process.env[CHILD_SESSION_ENV.runId]?.trim();
+	const agent = process.env[CHILD_SESSION_ENV.childAgent]?.trim();
+	const index = process.env[CHILD_SESSION_ENV.childIndex]?.trim();
 	if (!orchestratorTarget || !runId || !agent || !index) {
 		return null;
 	}
