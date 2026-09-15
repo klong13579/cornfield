@@ -2199,11 +2199,20 @@ async function buildEnvironmentSummary(registry: SessionRegistry): Promise<WireE
 
 // ── Agent 详情页文件系统（只读）──
 
+/**
+ * 单次 fs_read 的磁盘字节预算（128KiB）。
+ *
+ * 比较对象是**文件在磁盘上的字节数**，不是解码后的字符数：多字节文本（中文 3B/字、
+ * emoji 4B/字）按字符判会让超标文件报 `truncated:false`，从而把「只读降级」关掉。
+ */
 const FS_MAX_READ_BYTES = 128 * 1024;
 
 /**
  * 单次整段写入正文的内存上限（8 MiB）。
- * 与只读侧的 {@link FS_MAX_READ_BYTES} 无关：读侧按字符裁剪，写侧按 UTF-8 字节整体拒绝，两者互不推导。
+ *
+ * 与只读侧的 {@link FS_MAX_READ_BYTES} 是两件事，互不推导：读侧超预算就裁剪并标记 truncated
+ * （拿得到一份不完整的预览），写侧超上限就整体拒写（一份不完整的正文不该落盘）。
+ * 两者都以磁盘/载荷的 **UTF-8 字节**为准。
  */
 const FS_MAX_WRITE_BYTES = 8 * 1024 * 1024;
 
@@ -2258,9 +2267,18 @@ async function listDirEntries(
 }
 
 /**
- * 读文本文件，> 128KB 截断并标记 truncated。
+ * 读文本文件，磁盘字节 > {@link FS_MAX_READ_BYTES} 就截断并标记 `truncated`。
+ *
+ * 判定按**原始字节**，不按解码后的 `text.length`：常量名就是 BYTES，而「这份内容还全不全」
+ * 是磁盘上的事实。按字符数判会让多字节文本（中文/emoji）超出很多字节仍然报 `truncated:false`
+ * —— 一个 300KiB 的中文文件会被当成「读全了」，下游（编辑器）就会拿半份内容去写回，
+ * 把文件真的截断。
+ *
+ * 截断是 UTF-8 安全的：`stream: true` 让解码器把边界上被切开的多字节序列留在缓冲里丢掉，
+ * 而不是吐一个 U+FFFD —— 截断是「少一截」，不是「改一个字」。
+ *
  * 字节只读一次：`text` 是裁剪后的内容，`version` 覆盖整份文件的原始字节——
- * 因此对 > 128KB 文件只改尾部（裁剪区之外）也能被写侧 CAS 发现。
+ * 因此对超限文件只改尾部（裁剪区之外）也能被写侧 CAS 发现。
  */
 async function readTextFileClipped(
 	file: string,
@@ -2276,9 +2294,11 @@ async function readTextFileClipped(
 		throw err;
 	}
 	const version = contentVersionOf(bytes);
-	const text = new TextDecoder().decode(bytes);
-	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false, version };
-	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true, version };
+	if (bytes.byteLength <= FS_MAX_READ_BYTES) {
+		return { text: new TextDecoder("utf-8").decode(bytes), truncated: false, version };
+	}
+	const clipped = new TextDecoder("utf-8").decode(bytes.subarray(0, FS_MAX_READ_BYTES), { stream: true });
+	return { text: clipped, truncated: true, version };
 }
 
 // ── P2-W3-3 回切：已停用技能名单（settings.skills.ignoredSkills + SKILL.md 元数据）──

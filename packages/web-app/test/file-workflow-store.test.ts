@@ -21,6 +21,9 @@ function versionOf(content: string): string {
 	return new Bun.CryptoHasher("sha256").update(content).digest("hex");
 }
 
+/** 服务端 fs_read 的字节预算（与 wire-server 的 FS_MAX_READ_BYTES 同值）。 */
+const READ_MAX_BYTES = 128 * 1024;
+
 /** 内存「serve」：文件表 + 与线上同语义的 fs_read / fs_write(CAS) / fs_diff。 */
 class FakeServe {
 	readonly files = new Map<string, string>();
@@ -38,10 +41,14 @@ class FakeServe {
 	#read(path: string): FsReadResult {
 		const content = this.files.get(path);
 		if (content === undefined) throw new Error(`no such file: ${path}`);
-		// >128KB 截断（与 serve 的 128KB 读数上限同语义，按字符）
-		const truncated = content.length > 128 * 1024;
+		// 截断按**字节**判、且 UTF-8 安全（与 serve 的真实语义一致：按字符判会让多字节文本漏报）。
+		// 替身若与线上语义不一致，这里测出来的就是幻觉——这条边界正是要测的东西。
+		const bytes = new TextEncoder().encode(content);
+		const truncated = bytes.byteLength > READ_MAX_BYTES;
 		return {
-			text: truncated ? content.slice(0, 128 * 1024) : content,
+			text: truncated
+				? new TextDecoder("utf-8").decode(bytes.subarray(0, READ_MAX_BYTES), { stream: true })
+				: content,
 			truncated,
 			version: versionOf(content),
 		};
@@ -164,9 +171,23 @@ describe("打开与编辑", () => {
 		await settle();
 		const openFile = store.getSnapshot().open;
 		expect(openFile?.readOnly).toBe(true);
-		expect(openFile?.baseText.length).toBe(128 * 1024);
+		expect(openFile?.baseText.length).toBe(READ_MAX_BYTES);
 		// 只读时保存是空操作：拿半份内容写回去就是把文件截断
 		store.edit("trimmed");
+		store.save();
+		await settle();
+		expect(serve.writes).toHaveLength(0);
+	});
+
+	test("多字节文本按字节降级：字符数不到 128K 但磁盘超限 → 仍只读", async () => {
+		// 45000 个汉字 = 135000 字节（> 128KiB），而 text.length 只有 45000
+		serve.seed("cjk.txt", "中".repeat(45_000));
+		open("cjk.txt");
+		await settle();
+		const openFile = store.getSnapshot().open;
+		expect(openFile?.readOnly).toBe(true);
+		// 只读降级一旦漏报，用户就能拿半份内容写回、把文件真截断
+		store.edit("改过的内容");
 		store.save();
 		await settle();
 		expect(serve.writes).toHaveLength(0);

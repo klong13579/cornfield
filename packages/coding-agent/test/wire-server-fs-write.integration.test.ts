@@ -340,3 +340,86 @@ describe("fs_write 乐观并发（expectedVersion ↔ fs_read version）", () =>
 		});
 	}, 20_000);
 });
+
+/**
+ * fs_read 的截断边界 —— 判定按磁盘**字节**，不是解码后的字符数；截断必须 UTF-8 安全。
+ *
+ * 这条边界是「只读降级」的唯一依据：`truncated:false` 等于告诉调用方「你手上是全文」，
+ * 下游（编辑器）据此允许整段写回 —— 多报一次，写回就是把文件截断。多字节文本（中文 3B/字、
+ * emoji 4B/字）按字符判会大面积漏报，是本用例组存在的原因。
+ */
+describe("fs_read 截断边界（128KiB 按字节，UTF-8 安全）", () => {
+	const LIMIT = 128 * 1024;
+	const READ_MAX_BYTES = LIMIT; // 与 src/server/wire-server.ts 的 FS_MAX_READ_BYTES 同值
+	const replacementChar = "\uFFFD";
+
+	async function readBack(client: PiClient, rel: string, content: string): Promise<FsReadResult> {
+		await Bun.write(path.join(projectCwd, rel), content);
+		return fsRead(client, rel);
+	}
+
+	test("恰好 128KiB 字节：不截断（边界本身算读全）", async () => {
+		await withClient(async client => {
+			const res = await readBack(client, "clip-exact.txt", "a".repeat(READ_MAX_BYTES));
+			expect(res.truncated).toBe(false);
+			expect(res.text.length).toBe(READ_MAX_BYTES);
+		});
+	});
+
+	test("128KiB + 1 字节：截断（ASCII 基线）", async () => {
+		await withClient(async client => {
+			const res = await readBack(client, "clip-over.txt", "a".repeat(READ_MAX_BYTES + 1));
+			expect(res.truncated).toBe(true);
+			expect(res.text.length).toBe(READ_MAX_BYTES);
+			expect(res.text.includes(replacementChar)).toBe(false);
+		});
+	});
+
+	test("中文（3B/字）字符数不到 128K 但磁盘超限 → 必须截断", async () => {
+		await withClient(async client => {
+			// 45000 个汉字 = 135000 字节（> 128KiB），而 text.length 只有 45000（< 128K）
+			const content = "中".repeat(45_000);
+			expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(READ_MAX_BYTES);
+			expect(content.length).toBeLessThan(READ_MAX_BYTES);
+			const res = await readBack(client, "clip-cjk.txt", content);
+			expect(res.truncated).toBe(true);
+			// 截断后的内容必须是原文前缀，且编码后不超字节预算，且没有半个字造成的替换符
+			expect(content.startsWith(res.text)).toBe(true);
+			expect(Buffer.byteLength(res.text, "utf8")).toBeLessThanOrEqual(READ_MAX_BYTES);
+			expect(res.text.includes(replacementChar)).toBe(false);
+			expect(res.text.length).toBe(Math.floor(READ_MAX_BYTES / 3));
+		});
+	});
+
+	test("边界切在 4 字节 emoji 中间：丢掉半个序列，不吐替换字符", async () => {
+		await withClient(async client => {
+			// 1 字节 ASCII + 33000 个 4 字节 emoji：131072 落在一个 emoji 的第 4 个字节之前，
+			// 解码器必须把这三个字节一起丢掉（而不是补一个 U+FFFD）。
+			const emojis = 33_000;
+			const content = `a${"😀".repeat(emojis)}`;
+			const res = await readBack(client, "clip-emoji.txt", content);
+			expect(res.truncated).toBe(true);
+			expect(res.text.includes(replacementChar)).toBe(false);
+			// 完整保留的 emoji 个数 = floor((131072 - 1) / 4) = 32767，再加开头的 "a"。
+			// 注意 JS 字符串长度是 UTF-16 码元数：一个 4 字节 emoji 占 2 个（所以这里乘 2）。
+			// 别把码元数当字符数或字节数用——三套计数混着用正是本用例组要钉住的那类错。
+			expect(res.text.length).toBe(1 + Math.floor((READ_MAX_BYTES - 1) / 4) * 2);
+			expect(res.text.startsWith("a😀")).toBe(true);
+			expect(res.text.endsWith("😀")).toBe(true);
+			expect(content.startsWith(res.text)).toBe(true);
+		});
+	});
+
+	test("截断只影响正文：version 仍覆盖整份文件字节", async () => {
+		await withClient(async client => {
+			const head = "中".repeat(45_000);
+			const first = await readBack(client, "clip-version.txt", head);
+			const second = await fsRead(client, "clip-version.txt");
+			expect(second.version).toBe(first.version);
+			// 只改裁剪区之外的尾部：正文一样，version 变（否则写侧 CAS 会放过一次真改动）
+			const changed = await readBack(client, "clip-version.txt", `${head}尾`);
+			expect(changed.text).toBe(first.text);
+			expect(changed.version).not.toBe(first.version);
+		});
+	});
+});

@@ -34,6 +34,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const FILE = "hello.txt";
 const BIG_FILE = "big.txt";
 const BIG_FILE_BYTES = 200 * 1024;
+/** 多字节文本：45000 个汉字 = 135000 字节（超 128KiB），但字符数只有 45000（不到 128K）。 */
+const CJK_FILE = "cjk.txt";
+const CJK_CHARS = 45_000;
 
 function freePort(): Promise<number> {
 	return new Promise(resolve => {
@@ -102,7 +105,8 @@ test.describe("文件编辑闭环（真实 serve + 真实文件系统）", () =>
 		const disk = (): Promise<string> => fsp.readFile(projectFile, "utf8");
 
 		await fsp.writeFile(projectFile, "alpha\nbeta\ngamma\n");
-		await fsp.writeFile(bigFile, `${"x".repeat(BIG_FILE_BYTES)}\n`);
+		await fsp.writeFile(bigFile, `${`x`.repeat(BIG_FILE_BYTES)}\n`);
+		await fsp.writeFile(path.join(projectDir, CJK_FILE), "中".repeat(CJK_CHARS));
 		// 真 git 仓库：serve 的 default agent 根 = cwd 的仓库根（不经回退路径）
 		execFileSync("git", ["init", "-q"], { cwd: projectDir });
 
@@ -184,6 +188,12 @@ test.describe("文件编辑闭环（真实 serve + 真实文件系统）", () =>
 			await expect(page.getByLabel(`编辑 ${BIG_FILE}`)).toHaveAttribute("readonly", "", { timeout: 15_000 });
 			await expect(page.getByText("只读 · 已截断")).toBeVisible();
 			await expect(page.getByText(/超过 128KB/)).toBeVisible();
+
+			// 多字节文本按**字节**判（中文 3B/字）：字符数不到 128K 也照样只读降级，
+			// 否则编辑器会拿半份中文去写回，把文件真截断。
+			await page.locator(`[data-path="${CJK_FILE}"]`).click();
+			await expect(page.getByLabel(`编辑 ${CJK_FILE}`)).toHaveAttribute("readonly", "", { timeout: 15_000 });
+			await expect(page.getByText("只读 · 已截断")).toBeVisible();
 
 			// ── 6. 回到小文件：选区 → 上下文项 → 发送带上 @mention 与选区原文 ──
 			// 外部把文件改回已知内容，再用「重新加载」同步（这一步同时验证重载按钮）

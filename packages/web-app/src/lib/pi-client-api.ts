@@ -73,6 +73,7 @@ export interface FsImageResult {
  */
 export interface FsReadResult {
 	text: string;
+	/** 磁盘字节超预算（128KiB）被裁剪：`text` **不是**全文，调用方不得据此整段写回。 */
 	truncated: boolean;
 	version: string;
 }
@@ -423,7 +424,13 @@ export interface PiClient {
 	// ── 文件系统（Agent 详情页只读浏览）──
 	/** 列出 agent workspace 目录（fs_list，相对 agentDir；省略 path = 根）。 */
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
-	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated；version = 磁盘内容身份）。 */
+	/**
+	 * 读 agent workspace 文件（fs_read）。
+	 *
+	 * 磁盘字节 > 128KiB 就截断并标记 `truncated`（按**字节**判、UTF-8 安全截断；不是按字符数），
+	 * `version` = 整份文件的磁盘内容身份。编辑器用 `truncated` 决定只读降级 —— 漏报一次就会
+	 * 让人拿半份内容写回、把文件真截断。
+	 */
 	fsRead(sessionId: string, path: string): Promise<FsReadResult>;
 	/**
 	 * 整段写文件（fs_write）。
