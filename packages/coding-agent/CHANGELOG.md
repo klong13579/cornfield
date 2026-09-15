@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-09-15
+
 ### Fixed
 
 - **bash 命令里内部 URI 解析失败时不报出问题的 token**（`src/tools/bash-skill-urls.ts`、`test/tools/bash-skill-urls.test.ts`）：bash tool 在执行命令前替换命令字符串里的每一处内部 URI（**单引号、双引号里的也替换**），所以失败可能来自与当前操作无关的一段文本，而旧报错不指向它 —— 2026-09-15 实测：`git commit -m "…字面 skill:// 路径以 `...` 结尾…"` 被拦下，命令一条没执行，输出只有一行 `Path traversal (..) is not allowed in skill:// URLs`，既不指向命令里的哪一段触发了解析，也没说明「命令里的字面 URI 会被解析」这一机制（同一个坑此前已让人误判过一次：`grep -c "skill://…"` 返回 0，因为模式本身先被替换了）。现 `resolveSkillUrlToPath` 的失败路径（traversal / 未知 skill）都带上 `token: <原文>` 与一行 `note`；正常解析路径不变，既有断言（子串匹配）继续成立。
