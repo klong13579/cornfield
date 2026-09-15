@@ -3,7 +3,7 @@
 - 日期：2026-09-16
 - 上游：`can1357/oh-my-pi` @ `c5a8e0e`（快照 `/tmp/omp-upstream`）
 - 本地基线：`main` @ `3d9ddde0`
-- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；**第 2 波（第 5/8/10/11 条能力）四票已交付并合并到 `main` @ `c229b2df2f`**；第 11 条的 section 半（增量 yield）随后单独补做并交付。**第 3 波：第 9 条已交付（集成分支 `squad-20260916-upstream-tool-port-w3`，待用户确认合并）+ 一张 13 条之外的清扫票同批交付；第 12 条取证后扣下（无本地消费方）；第 13 条按用户决策留待「记忆后端」架构决策**
+- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；**第 2 波（第 5/8/10/11 条能力）四票已交付并合并到 `main` @ `c229b2df2f`**；第 11 条的 section 半（增量 yield）随后单独补做并交付。**第 3 波：第 9 条已交付（集成分支 `squad-20260916-upstream-tool-port-w3`，待用户确认合并）+ 一张 13 条之外的清扫票同批交付；第 12 条取证后扣下（无本地消费方）；第 13 条按用户决策留待「记忆后端」架构决策**。**第 2 波 B 批（第 6/7 条，2026-09-16 补发）已交付（集成分支 `squad-20260916-upstream-tool-port-2b`，待合并）**
 - 范围：**两棵树都有的 Tool，其能力差**（含行为、TUI 渲染、prompt）
 
 与另两篇的分工（禁止分叉）：
@@ -25,8 +25,8 @@
 | 3 | edit auto-repair：hunk 隔离（singles→pairs→贪心剥）+ reference 文本 + realign + blackbox 语料 | `edit/auto-repair.ts:110-133,183-202,229-266`、`edit/blackbox.ts` | 部分：`edit/post-write.ts:283-292` 用线性 diff 范围 `[复核]` | M | 1 已交付 |
 | 4 | todo：`blocked` 状态 + `blocker` + `block`/`unblock`/`view` | `tools/todo.ts:21-29,126-128` | 缺：`todo-write.ts:21` 四状态 `[复核]` | S | 1 已交付 |
 | 5 | read：tail 选择器 `-N` + 多段选择器渲染 | `read-selector.ts`、`read-format.ts` | 缺：本地对 `-N` 与不相邻多段直接报错 | M | 2 已交付 |
-| 6 | 未解决 git 合并冲突浮出 + `conflict://N` 读写解决 | `tools/conflict-detect.ts:1-500` | 缺 | M | 2 |
-| 7 | PDF 读取（Chromium 渲染单页） | `read-pdf.ts` | 缺（本地 PDF 走文本抽取） | M | 2 |
+| 6 | 未解决 git 合并冲突浮出 + `conflict://N` 读写解决 | `tools/conflict-detect.ts:1-500` | 缺 | M | 2 已交付（与第 7 条合为一票，它们同改 `read.ts`） |
+| 7 | PDF 读取（Chromium 渲染单页） | `read-pdf.ts` | 缺（本地 PDF 走文本抽取） | M | 2 已交付（与第 6 条同票） |
 | 8 | `run_watch` 健壮性（429 退避、fast/slow 轮询、no-runs-give-up、completed jobs 缓存）+ `pr_checkout` worktree 冲突后缀 + `view` 的 stateReason 回退 | `gh-run-watch.ts:44-46,192-200,1015-1026`、`gh-pr-checkout.ts:96-117`、`gh-view.ts:81-114` | 部分 | S（每项） | 2 已交付 |
 | 9 | GitHub 视图 SQLite 缓存层（soft/hard TTL、后台刷新、auth-key 隔离） | `github-cache.ts` | 缺 | M | 3 已交付 |
 | 10 | edit `sloppy` 模式 + inline-edit-recovery（模型把 edit 写成纯文本时捞回） | `session/inline-edit-recovery.ts`、`edit/schemas.ts` | 缺 | M | 2 已交付 |

@@ -35,7 +35,7 @@
 - **gateway 配置文件**：`~/.cornfield/gateway.json`
 - **gateway 数据目录**：`~/.cornfield/gateway-data/`
 - **调度器数据库**：`~/.cornfield/gateway-data/scheduler/scheduler.db`
-- **日志**：`~/.cornfield/logs/omp.YYYY-MM-DD.log`
+- **日志**：`~/.cornfield/logs/cornfield.YYYY-MM-DD.log`
 
 同 gateway 下可能还运行其他账号的机器人，各自独立 agentDir 和 session，互不干扰。
 
