@@ -206,6 +206,13 @@ export class SessionStore {
 	 * 身份一变（切 Agent / 开新会话）就重新请求 —— 只清缓存不重请求会让归属停在上一次的「未归属」。
 	 */
 	#projectAttributionKey: string | undefined;
+	/**
+	 * 归属请求的代际。每次发起读请求前递增；响应回来时对不上就整份丢弃。
+	 *
+	 * 会话 A 的慢请求可能在切到 B 之后才回来 —— 提交它就是把 B 的 projects/currentProjectId/
+	 * pending/error 覆盖成 A 的答案。请求取不得消，所以靠这道门把迟到的答案挡在外面。
+	 */
+	#projectGeneration = 0;
 
 	init(client: PiClient): void {
 		this.#client = client;
@@ -784,26 +791,42 @@ export class SessionStore {
 	 * 这是「手动重算」入口；会话换人时的自动重算见 {@link #syncProjectAttribution}。
 	 */
 	async refreshProjects(agentId?: string): Promise<void> {
+		// 手动重算：它是比任何在途请求更新的一次请求，所以递增 generation 让旧的那份作废。
+		return await this.#loadProjects(agentId, ++this.#projectGeneration);
+	}
+
+	/**
+	 * 发一次读请求，并把结果**按 generation 提交**。
+	 *
+	 * 请求本身取不得消（pi-client 的 request 没有 abort），所以迟到的那一份只能丢掉：
+	 * 会话 A 的慢响应在切到 B 之后到达时，它描述的是 A 的归属 —— 提交它就会把 B 的
+	 * projects / currentProjectId / pending / projectsError 全部覆盖成 A 的答案（包括一个
+	 * 与 B 无关的错误）。判定放在**每一个**写入点之前，成功和失败走同一条门。
+	 */
+	async #loadProjects(agentId: string | undefined, generation: number): Promise<void> {
+		let projects: ProjectRecordDto[] | undefined;
+		let currentProjectId: string | undefined;
+		let error: string | undefined;
 		try {
 			const result = await this.#client.listProjects(agentId);
-			this.#projects = result.projects;
-			this.#currentProjectId = result.currentProjectId;
-			this.#projectsError = undefined;
+			projects = result.projects;
+			currentProjectId = result.currentProjectId;
 		} catch (err) {
 			// 读不到就不知道归属，不是「没有归属」：列表与归属一起作废，错误挡住阅读。
-			this.#projects = undefined;
-			this.#currentProjectId = undefined;
-			this.#projectsError = errorMessageOf(err);
-		} finally {
-			this.#projectsPending = false;
-			const view = cloneView(this.getSnapshot());
-			view.projects = this.#projects;
-			view.currentProjectId = this.#currentProjectId;
-			view.projectsPending = false;
-			view.projectsError = this.#projectsError;
-			this.#view = view;
-			this.#notify();
+			error = errorMessageOf(err);
 		}
+		if (generation !== this.#projectGeneration) return;
+		this.#projects = projects;
+		this.#currentProjectId = currentProjectId;
+		this.#projectsError = error;
+		this.#projectsPending = false;
+		const view = cloneView(this.getSnapshot());
+		view.projects = projects;
+		view.currentProjectId = currentProjectId;
+		view.projectsPending = false;
+		view.projectsError = error;
+		this.#view = view;
+		this.#notify();
 	}
 
 	/**
@@ -826,7 +849,9 @@ export class SessionStore {
 		view.projectsPending = true;
 		this.#view = view;
 		this.#notify();
-		void this.refreshProjects(this.#activeAgentId ?? undefined);
+		// generation 在发请求之前递增：从这一刻起，上一个身份的响应就再也落不了地。
+		const generation = ++this.#projectGeneration;
+		void this.#loadProjects(this.#activeAgentId ?? undefined, generation);
 	}
 
 	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */

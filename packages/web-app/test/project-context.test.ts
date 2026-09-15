@@ -106,11 +106,29 @@ function pushSnapshot(agentId: string, sessionFile: string): void {
 	);
 }
 
-/** 已发出的 list_projects 请求。 */
+/** 已发出的 list_projects 请求（id + command）。 */
 function projectRequests(): Array<Record<string, unknown>> {
 	return sentRequests()
 		.map(r => r.command)
 		.filter(c => c.type === "list_projects");
+}
+
+/** 最后一条 list_projects 请求帧（用它定向回包）。 */
+function lastProjectRequestId(): string {
+	const frames = sentRequests().filter(r => r.command.type === "list_projects");
+	const last = frames.at(-1);
+	if (!last) throw new Error("no list_projects request was sent");
+	return last.id;
+}
+
+/** 定向回一个成功响应（可以晚于后来的请求，用来复现乱序）。 */
+function respondTo(id: string, result: unknown): void {
+	lastCreated?.receive(JSON.stringify({ type: "response", id, ok: true, result }));
+}
+
+/** 定向回一个失败响应。 */
+function respondErrorTo(id: string, error: string): void {
+	lastCreated?.receive(JSON.stringify({ type: "response", id, ok: false, error }));
 }
 
 const PROJECTS = [
@@ -243,6 +261,62 @@ describe("会话切换后的归属重算（P1 回归）", () => {
 
 		expect(projectRequests().length).toBe(before);
 		expect(store.getSnapshot().currentProjectId).toBe("cornfield");
+	});
+});
+
+describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
+	it("A 慢→切 B→B 先返回→A 后返回：A 的那份整份丢掉", async () => {
+		const { store } = await createConnectedStore();
+
+		// 会话 A：发请求，先不回包
+		pushSnapshot("default", "/sessions/a.jsonl");
+		await Bun.sleep(0);
+		const requestA = lastProjectRequestId();
+
+		// 切到会话 B
+		store.switchSession("hr");
+		pushSnapshot("hr", "/sessions/b.jsonl");
+		await Bun.sleep(0);
+		const requestB = lastProjectRequestId();
+		expect(requestB).not.toBe(requestA);
+
+		// B 先回来：落地
+		respondTo(requestB, { projects: PROJECTS, currentProjectId: "dtc" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("dtc");
+		expect(store.getSnapshot().projectsPending).toBe(false);
+
+		// A 后回来（携带着 A 的归属）：不得改动任何一项
+		respondTo(requestA, { projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+
+		const view = store.getSnapshot();
+		expect(view.currentProjectId).toBe("dtc");
+		expect(view.projectsPending).toBe(false);
+		expect(view.projectsError).toBeUndefined();
+	});
+
+	it("A 的迟到**错误**也不会把 B 打成错误态", async () => {
+		const { store } = await createConnectedStore();
+
+		pushSnapshot("default", "/sessions/a.jsonl");
+		await Bun.sleep(0);
+		const requestA = lastProjectRequestId();
+
+		store.switchSession("hr");
+		pushSnapshot("hr", "/sessions/b.jsonl");
+		await Bun.sleep(0);
+		const requestB = lastProjectRequestId();
+
+		respondTo(requestB, { projects: PROJECTS, currentProjectId: "dtc" });
+		await Bun.sleep(0);
+		respondErrorTo(requestA, "list_projects failed: A 的存储坏了");
+		await Bun.sleep(0);
+
+		const view = store.getSnapshot();
+		expect(view.projectsError).toBeUndefined();
+		expect(view.currentProjectId).toBe("dtc");
+		expect(view.projects?.map(p => p.projectId)).toEqual(["cornfield", "dtc"]);
 	});
 });
 
