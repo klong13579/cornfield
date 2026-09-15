@@ -599,17 +599,20 @@ export class SessionStore {
 		// 挂在当前会话下）；等下一次 refreshSessionTree 给出真实答案。
 		this.#sessionTree = undefined;
 		this.#sessionTreeError = undefined;
-		// Project 归属是会话级的：焦点一换就作废，否则新会话会顶着上一个会话的项目。
-		// 重算交给紧随其后的权威快照触发（见 #syncProjectAttribution）—— 那里才有新会话的身份；
-		// 在这里发请求会拿到一个还没 attach 完的会话（归属为空），而且会与快照那次撞车。
-		this.#currentProjectId = undefined;
-		this.#projectsPending = true;
 		const view = cloneView(this.getSnapshot());
 		// view.sessionId 是 serve 推来的焦点（agent 注册名）：它与目标不同，说明手上这批消息
 		// 属于**另一个 Agent**。留着它就是让 A 的工作显示在 B 的上下文里，等新快照到达再
 		// 自动填回。同一个会话上的重复切换不算切换，不动转录。
 		const sameSession = view.sessionId === agentId;
 		if (!sameSession) {
+			// Project 归属同样是会话级的，而它在途的请求也必须跟着作废：只清显示值、不动
+			// generation 的话，旧会话的响应在新快照到达前仍持有当前代际，就会把它的
+			// projects / currentProjectId / error 提交进已经切到新会话的视图。
+			this.#projectGeneration += 1;
+			this.#currentProjectId = undefined;
+			this.#projectsPending = true;
+			view.currentProjectId = undefined;
+			view.projectsPending = true;
 			view.messages = [];
 			view.live = undefined;
 			view.sessionName = undefined;
@@ -621,8 +624,6 @@ export class SessionStore {
 		view.activeWorkspace = workspace;
 		view.sessionTree = undefined;
 		view.sessionTreeError = undefined;
-		view.currentProjectId = undefined;
-		view.projectsPending = true;
 		this.#view = view;
 		this.#notify();
 	}

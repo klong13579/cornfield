@@ -296,6 +296,37 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 		expect(view.projectsError).toBeUndefined();
 	});
 
+	it("切换后、新快照到达前旧响应就到了：同样丢掉（不能提交进已切走的视图）", async () => {
+		const { store } = await createConnectedStore();
+
+		// 会话 A：发请求，挂着不回
+		pushSnapshot("default", "/sessions/a.jsonl");
+		await Bun.sleep(0);
+		const requestA = lastProjectRequestId();
+		expect(store.getSnapshot().projectsPending).toBe(true);
+
+		// 切到 B —— 此时 B 的权威快照**还没到**（身份尚未落定）
+		store.switchSession("hr");
+		await Bun.sleep(0);
+
+		// A 的响应现在才回来：它的代际已经作废，不得写入任何一项
+		respondTo(requestA, { projects: PROJECTS, currentProjectId: "cornfield" });
+		await Bun.sleep(0);
+
+		const during = store.getSnapshot();
+		expect(during.currentProjectId).toBeUndefined();
+		expect(during.projects).toBeUndefined();
+		expect(during.projectsPending).toBe(true);
+		expect(during.projectsError).toBeUndefined();
+
+		// B 的快照到达后才重算并落地
+		pushSnapshot("hr", "/sessions/b.jsonl");
+		await Bun.sleep(0);
+		respond({ projects: PROJECTS, currentProjectId: "dtc" });
+		await Bun.sleep(0);
+		expect(store.getSnapshot().currentProjectId).toBe("dtc");
+	});
+
 	it("A 的迟到**错误**也不会把 B 打成错误态", async () => {
 		const { store } = await createConnectedStore();
 
