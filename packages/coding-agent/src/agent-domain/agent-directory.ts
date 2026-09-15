@@ -92,7 +92,17 @@ export function findAgentRecordByDir(
 	return entries.find(entry => resolveEquivalentPath(entry.agent.agentDir) === wanted);
 }
 
-function declaredProjectIds(
+/**
+ * The Projects an agentDir's declaration binds it to: the declared `projectRoot` resolved
+ * against the Project store. `undefined` = no declared binding, which the relation
+ * validators read as *unconstrained* — never as "bound to nothing".
+ *
+ * Exported because the rule has to mean the same thing for every reader: the Agent Todo
+ * bridge asks the same question when it decides which Projects a Todo may bind to
+ * (`agent.project-binding-violated`). Re-deriving it there would let the two answers
+ * drift.
+ */
+export function declaredProjectIds(
 	agentDir: string,
 	declaration: WorkspaceDeclaration | undefined,
 	projects: readonly ProjectRecord[],

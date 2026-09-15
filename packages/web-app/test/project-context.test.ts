@@ -54,14 +54,33 @@ function sentRequests(): Array<{ id: string; command: Record<string, unknown> }>
 		);
 }
 
+/**
+ * 回给**最近一条 list_projects**。
+ *
+ * 不再是「最近一条请求」：同一个生命周期点（连接就绪 / 快照到达 / 切 Agent）现在还会有
+ * 另一条 registry 读（T10A 的 list_agent_todos），回给「最后一条」就会把 Project 的结果
+ * 投到别处，让这些用例在断言没变的情况下“失败”。这里定向到被测的那一条命令。
+ */
 function respond(result: unknown): void {
-	const reqs = sentRequests();
-	lastCreated?.receive(JSON.stringify({ type: "response", id: reqs[reqs.length - 1]!.id, ok: true, result }));
+	respondTo(lastProjectRequestId(), result);
 }
 
 function respondError(error: string): void {
+	respondErrorTo(lastProjectRequestId(), error);
+}
+
+/**
+ * 最近一条请求的 id（不挑命令）。
+ *
+ * `respond` / `respondError` 一律定向到 list_projects：同一个生命周期点（连接就绪 / 快照
+ * 到达 / 切 Agent）还会有别的 registry 读（T10A 的 list_agent_todos），回给「最后一条」就
+ * 会把 Project 的结果投到别处。回**别的**命令时用这个显式取最后一条。
+ */
+function lastRequestId(): string {
 	const reqs = sentRequests();
-	lastCreated?.receive(JSON.stringify({ type: "response", id: reqs[reqs.length - 1]!.id, ok: false, error }));
+	const last = reqs.at(-1);
+	if (!last) throw new Error("no request was sent");
+	return last.id;
 }
 
 async function createConnectedStore(): Promise<{ store: SessionStore; adapter: PiClientAdapter }> {
@@ -349,7 +368,7 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 			sessionFile: "/sessions/hr-history.jsonl",
 		});
 		await Bun.sleep(0);
-		respond({}); // switch_session 回包，让 #setActiveAgent 真的跑到
+		respondTo(lastRequestId(), {}); // switch_session 回包，让 #setActiveAgent 真的跑到
 		await Bun.sleep(0);
 
 		// 旧会话的响应现在才回来：它的代际已作废，不得写入

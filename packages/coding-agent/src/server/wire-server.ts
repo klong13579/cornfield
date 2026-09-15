@@ -21,6 +21,7 @@ import type {
 } from "@cornfield/wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
+import type { AgentTodo } from "../agent-domain/types";
 import { withFileLock } from "../config/file-lock";
 import { parseModelString } from "../config/model-resolver";
 import { getDefault, SETTINGS_SCHEMA, type SettingPath, Settings } from "../config/settings";
@@ -77,6 +78,7 @@ import type { ToolSession } from "../tools";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
+import { asAgentTodoCommand, dropAgentTodo, listAgentTodos, writeAgentTodo } from "./agent-todos-wire";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
@@ -383,6 +385,31 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			) {
 				await handleMcpServerCommand(command, done, fail);
 				return;
+			}
+
+			// ── Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）──
+			// 只读/只写这个 agentDir 的板子，不 lazy attach：列一块板不该把 agent 拉起来。
+			// 目标 agent 未注册 → ok:false（不拿别的 agent 的板子冒充）。
+			const agentTodoCommand = asAgentTodoCommand(command);
+			if (agentTodoCommand) {
+				const agentId = agentTodoCommand.sessionId ?? ctx.activeAgentId;
+				const meta = registry.getMeta(agentId);
+				if (!meta) {
+					fail(`unknown agent: ${agentId}`);
+					return;
+				}
+				const target = { agentId, agentDir: meta.agentDir };
+				switch (agentTodoCommand.type) {
+					case "list_agent_todos":
+						done(await listAgentTodos(target));
+						return;
+					case "set_agent_todo":
+						done({ todo: await writeAgentTodo(target, agentTodoCommand.todo as AgentTodo) });
+						return;
+					case "delete_agent_todo":
+						done({ deleted: await dropAgentTodo(target, agentTodoCommand.todoId) });
+						return;
+				}
 			}
 
 			// ── registry 级命令（不定向具体 session）──

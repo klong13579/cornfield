@@ -36,6 +36,8 @@ import type {
 } from "@cornfield/wire";
 import type {
 	AgentMessageDto,
+	AgentTodoDto,
+	AgentTodoListDto,
 	ArtifactDto,
 	DiagnosisAggregationDto,
 	DiagnosisReportListItemDto,
@@ -561,6 +563,39 @@ export class PiClientAdapter implements PiClient {
 	 */
 	listProjects(sessionId?: string): Promise<ProjectListDto> {
 		return this.#req<ProjectListDto>({ type: "list_projects", ...(sessionId ? { sessionId } : {}) });
+	}
+
+	/**
+	 * Agent Todo（T10A）。
+	 *
+	 * 三条命令尚未登记进 pi-wire 的 `WireCommand` union（登记要改 `packages/pi-wire`，
+	 * 不在本票 scope），所以走本文件已有的先行实现写法（`as never`，同
+	 * get_config / diagnose_session）。登记收口后这里的 cast 应当消失。
+	 *
+	 * 三个都不捕获错误：读不到（存储损坏）与写不进去（owner / Project 绑定）必须原样
+	 * 到 store 显示 —— 捕获后返回空板或假装成功，就是把「坏了」显示成「没有」。
+	 */
+	listAgentTodos(sessionId?: string): Promise<AgentTodoListDto> {
+		return this.#req<AgentTodoListDto>({
+			type: "list_agent_todos",
+			...(sessionId ? { sessionId } : {}),
+		} as never);
+	}
+
+	setAgentTodo(todo: AgentTodoDto, sessionId?: string): Promise<{ todo: AgentTodoDto }> {
+		return this.#req<{ todo: AgentTodoDto }>({
+			type: "set_agent_todo",
+			todo,
+			...(sessionId ? { sessionId } : {}),
+		} as never);
+	}
+
+	deleteAgentTodo(todoId: string, sessionId?: string): Promise<{ deleted: boolean }> {
+		return this.#req<{ deleted: boolean }>({
+			type: "delete_agent_todo",
+			todoId,
+			...(sessionId ? { sessionId } : {}),
+		} as never);
 	}
 
 	async diagnoseSession(

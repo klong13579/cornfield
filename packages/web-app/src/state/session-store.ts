@@ -36,6 +36,7 @@ import type {
 } from "@cornfield/wire";
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
+	AgentTodoDto,
 	ArtifactDto,
 	FsEntryDto,
 	GatewayAccountPatchDto,
@@ -141,6 +142,17 @@ export interface SessionView {
 	projectsPending: boolean;
 	/** Project 读不到的原因（存储损坏）。读失败 ≠ 没声明过。 */
 	projectsError?: string;
+	/**
+	 * 当前焦点 Agent 的 Todo 板（list_agent_todos）。
+	 * `undefined` = 还没读到；`[]` = 读到了，**确实是空的** —— 两者不能当成同一件事。
+	 */
+	agentTodos?: AgentTodoDto[];
+	/** 该 Agent 声明过的 Project 绑定（写面的上限）。缺省 = 未约束，不是「一个都不能绑」。 */
+	agentTodoProjectIds?: string[];
+	/** 板子还没读出来（切 Agent 后的窗口期 / 还没读过）。 */
+	agentTodosPending: boolean;
+	/** 板子读不到的原因（存储损坏 / 版本不符）。读失败 ≠ 没有任务。 */
+	agentTodosError?: string;
 }
 
 /** B7-1：回合收尾通知——有错误消息走出错告警（errors 开关），否则走完成（agentDone 开关）。 */
@@ -198,6 +210,18 @@ export class SessionStore {
 	#projects: ProjectRecordDto[] | undefined;
 	#currentProjectId: string | undefined;
 	#projectsPending = true;
+	/**
+	 * Agent Todo 板属于一个 Agent，**不随会话变**：切会话（同一 Agent 换历史会话）不重读，
+	 * 换 Agent 才作废重读。
+	 */
+	#agentTodos: AgentTodoDto[] | undefined;
+	#agentTodoProjectIds: string[] | undefined;
+	#agentTodosPending = true;
+	#agentTodosError: string | undefined;
+	/** 板子对应的 Agent（空串 = 还没定过焦点）；undefined 与 "" 都表示「还没读过」。 */
+	#agentTodoKey: string | undefined;
+	/** 请求按代际提交：换 Agent 后，上一个 Agent 的迟到响应整份丢弃。 */
+	#agentTodoGeneration = 0;
 	#projectsError: string | undefined;
 	/**
 	 * 最近一次算过归属的「会话身份」（焦点 agent + 会话文件）。
@@ -230,7 +254,10 @@ export class SessionStore {
 				this.#notify();
 				// 连接（重）建立时对齐一次归属。不走「先作废 key」：连接通知在 env 刷新等场合会重复
 				// 到达，每次重置 key 就是每次重读 registry —— 而 registry 不随会话变。
-				if (conn.connected) this.#syncProjectAttribution();
+				if (conn.connected) {
+					this.#syncProjectAttribution();
+					this.#syncAgentTodos();
+				}
 				void unsubConn;
 			});
 		}
@@ -621,6 +648,9 @@ export class SessionStore {
 		// 重算一次，也不要让上一会话的归属（和它在途请求）继续落在屏幕上。
 		const identity = this.#projectIdentityOf(agentId, targetSessionFile);
 		if (identity !== this.#projectAttributionKey) this.#invalidateProjectAttribution(view);
+		// Todo 板跟着 **Agent** 走（不是会话）：同一个 Agent 换历史会话，板子不变；换 Agent 立即作废，
+		// 在重读结果回来之前界面上是「还不知道」，而不是上一个 Agent 的任务。
+		if (agentId !== this.#agentTodoKey) this.#invalidateAgentTodos(view);
 		view.activeAgentId = agentId;
 		view.activeWorkspace = workspace;
 		view.sessionTree = undefined;
@@ -881,6 +911,142 @@ export class SessionStore {
 		void this.#loadProjects(this.#activeAgentId ?? undefined, generation);
 	}
 
+	// ── Agent Todo（T10A）──────────────────────────────────────────────────
+	// 与 Project 归属同一套纪律：**作废是同步的**（重读回来之前界面只能是「还不知道」），
+	// 请求**按代际提交**（换 Agent 后上一个 Agent 的迟到响应整份丢弃）。
+	// 差别只在 key：归属跟会话身份（agent + 会话文件），板子只跟 Agent。
+
+	/**
+	 * 手动重读 Todo 板（工作台刷新入口）。
+	 *
+	 * 不降级：读不到就错误态（调用方把「记过但读坏了」与「没记过」分开显示）。
+	 */
+	async refreshAgentTodos(): Promise<void> {
+		return await this.#loadAgentTodos(++this.#agentTodoGeneration);
+	}
+
+	/**
+	 * 新建或更新一条 Agent Todo（set_agent_todo），返回存储真正落盘的那一份。
+	 *
+	 * 失败**原样抛出**（owner 不对 / Project 没声明过 / 存储坏了）：吞掉它就会让用户以为已经
+	 * 存下了。成功后就地替换板上那条 —— 用 serve 返回的记录，不是自己发出去的那份，因为
+	 * `createdAt` / `updatedAt` / `sessionRefs` 是存储盖章的。
+	 */
+	async saveAgentTodo(todo: AgentTodoDto): Promise<AgentTodoDto> {
+		const key = this.#agentTodoKey;
+		const result = await this.#client.setAgentTodo(todo, this.#activeAgentId ?? undefined);
+		this.#mergeAgentTodo(result.todo, key);
+		return result.todo;
+	}
+
+	/** 删除一条 Agent Todo（delete_agent_todo）。幂等：本来就不在板上返回 false。 */
+	async deleteAgentTodo(todoId: string): Promise<boolean> {
+		const key = this.#agentTodoKey;
+		const result = await this.#client.deleteAgentTodo(todoId, this.#activeAgentId ?? undefined);
+		if (result.deleted) this.#mergeAgentTodoRemoval(todoId, key);
+		return result.deleted;
+	}
+
+	/**
+	 * 把一条权威记录合进板子。
+	 *
+	 * 板子属于另一个 Agent（`expectedKey` 已经过期）或还没读出来（错误态 / 初读中）时**不合并**：
+	 * 前者是往别人的板上写，后者会把「读坏了」伪装成「读到了、里面就这几条」。两种情况都改用
+	 * 重读拿真实结果。
+	 */
+	#mergeAgentTodo(todo: AgentTodoDto, expectedKey: string | undefined): void {
+		if (expectedKey !== this.#agentTodoKey || this.#agentTodos === undefined) {
+			void this.refreshAgentTodos();
+			return;
+		}
+		const exists = this.#agentTodos.some(item => item.id === todo.id);
+		this.#setAgentTodos(
+			exists ? this.#agentTodos.map(item => (item.id === todo.id ? todo : item)) : [...this.#agentTodos, todo],
+		);
+	}
+
+	/** 从板子上拿掉一条；板子已换主人 / 未读出时同样改走重读。 */
+	#mergeAgentTodoRemoval(todoId: string, expectedKey: string | undefined): void {
+		if (expectedKey !== this.#agentTodoKey || this.#agentTodos === undefined) {
+			void this.refreshAgentTodos();
+			return;
+		}
+		this.#setAgentTodos(this.#agentTodos.filter(item => item.id !== todoId));
+	}
+
+	#setAgentTodos(todos: AgentTodoDto[]): void {
+		this.#agentTodos = todos;
+		const view = cloneView(this.getSnapshot());
+		view.agentTodos = todos;
+		view.agentTodosPending = false;
+		this.#view = view;
+		this.#notify();
+	}
+
+	/**
+	 * 焦点 Agent 变了就重读板子，没变就不动。
+	 *
+	 * 与归属同源调用点（连接就绪 / 快照到达 / 切 Agent），保证「切 Agent 后板子自己跟上」
+	 * 不需要任何手动刷新。
+	 */
+	#syncAgentTodos(): void {
+		const key = this.#activeAgentId ?? "";
+		if (key === this.#agentTodoKey) return;
+		const view = cloneView(this.getSnapshot());
+		this.#invalidateAgentTodos(view, key);
+		this.#view = view;
+		this.#notify();
+		void this.#loadAgentTodos(this.#agentTodoGeneration);
+	}
+
+	/**
+	 * 把板子作废到「还不知道」：代际同步递增（在途响应从此落不了地）、显示值清空。
+	 *
+	 * `nextKey` 缺省 = key 置回「还没读过」，下一次 sync 无条件重算 —— 切换入口只负责作废，
+	 * 重读交给紧随其后的快照（与 Project 归属同一条路）。
+	 *
+	 * 清错误也是清：留着上一个 Agent 的读取失败，新 Agent 在 pending 期间会继续挂着一个与它
+	 * 无关的「读不出来」。
+	 */
+	#invalidateAgentTodos(view: SessionView, nextKey?: string): void {
+		this.#agentTodoGeneration += 1;
+		this.#agentTodoKey = nextKey;
+		this.#agentTodos = undefined;
+		this.#agentTodoProjectIds = undefined;
+		this.#agentTodosPending = true;
+		this.#agentTodosError = undefined;
+		view.agentTodos = undefined;
+		view.agentTodoProjectIds = undefined;
+		view.agentTodosPending = true;
+		view.agentTodosError = undefined;
+	}
+
+	/** 发一次读请求，并按代际提交（成功与失败走同一道门）。 */
+	async #loadAgentTodos(generation: number): Promise<void> {
+		let todos: AgentTodoDto[] | undefined;
+		let projectIds: string[] | undefined;
+		let error: string | undefined;
+		try {
+			const result = await this.#client.listAgentTodos(this.#activeAgentId ?? undefined);
+			todos = result.todos;
+			projectIds = result.projectIds;
+		} catch (err) {
+			error = errorMessageOf(err);
+		}
+		if (generation !== this.#agentTodoGeneration) return;
+		this.#agentTodos = todos;
+		this.#agentTodoProjectIds = projectIds;
+		this.#agentTodosError = error;
+		this.#agentTodosPending = false;
+		const view = cloneView(this.getSnapshot());
+		view.agentTodos = todos;
+		view.agentTodoProjectIds = projectIds;
+		view.agentTodosError = error;
+		view.agentTodosPending = false;
+		this.#view = view;
+		this.#notify();
+	}
+
 	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }> {
 		return this.#client.fsList(sessionId, path);
@@ -1083,6 +1249,7 @@ export class SessionStore {
 		this.#notify();
 		// 快照是「会话身份」唯一的权威来源（切 Agent / 开新会话后 serve 必推一份）：归属在这儿对齐。
 		this.#syncProjectAttribution();
+		this.#syncAgentTodos();
 	}
 
 	#applyProgress(event: ProgressEventDto): void {
@@ -1260,6 +1427,10 @@ export class SessionStore {
 				currentProjectId: this.#currentProjectId,
 				projectsPending: this.#projectsPending,
 				projectsError: this.#projectsError,
+				agentTodos: this.#agentTodos,
+				agentTodoProjectIds: this.#agentTodoProjectIds,
+				agentTodosPending: this.#agentTodosPending,
+				agentTodosError: this.#agentTodosError,
 			};
 		}
 		return {
@@ -1300,6 +1471,10 @@ export class SessionStore {
 			currentProjectId: this.#currentProjectId,
 			projectsPending: this.#projectsPending,
 			projectsError: this.#projectsError,
+			agentTodos: this.#agentTodos,
+			agentTodoProjectIds: this.#agentTodoProjectIds,
+			agentTodosPending: this.#agentTodosPending,
+			agentTodosError: this.#agentTodosError,
 		};
 	}
 

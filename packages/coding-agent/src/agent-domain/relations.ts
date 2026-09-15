@@ -598,8 +598,9 @@ export function validateContextItems(snapshot: DomainSnapshot): DomainViolation[
  * The Agent Todo board must never be the Project TODO file (§9: one file, one
  * concept; no double write, no context-dependent choice of "which TODO.md").
  *
- * The AgentTodo store is still undecided (§37), so this rule is inert until a caller
- * declares both paths — at which point choosing the same file is the error.
+ * WP10 settled the Agent side on `<agentDir>/.cornfield/agent-todos.json`
+ * (`./agent-todo-store`), so the two cannot collide through the store. The rule stays for
+ * callers that declare paths of their own — and stays inert until both are declared.
  */
 export function validateTodoBoardPaths(snapshot: DomainSnapshot): DomainViolation[] {
 	const board = snapshot.todoBoardPaths;
