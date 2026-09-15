@@ -594,6 +594,19 @@ export class SessionStore {
 		void this.#client.switchSession(sessionId).catch(() => undefined);
 	}
 
+	/**
+	 * 把本连接的焦点切到某个 Agent。
+	 *
+	 * attach 与 switch_session 是同一件事的两半：只 attach 不切会话，serve 仍把消息发给上一个
+	 * Agent（回复也就不会回到这一屏）；只切会话不 attach，目标 Agent 可能还没起来。
+	 * 两半必须在一处绑定 —— 之前首页、Agent 管理、Composer 的 agent 菜单各写一遍这两行，
+	 * 任何一处将来只改一半，都会表现成「切过去了但回复不来」。
+	 */
+	focusAgent(agentId: string): void {
+		this.attach(agentId);
+		this.switchSession(agentId);
+	}
+
 	/** 记录本连接焦点 agent 并立即同步到 view（UI 立即跟随，不等 serve 快照）。 */
 	#setActiveAgent(agentId: string, workspace?: string, targetSessionFile?: string): void {
 		this.#activeAgentId = agentId;

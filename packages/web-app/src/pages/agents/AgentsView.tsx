@@ -185,8 +185,7 @@ export function AgentsView(): React.JSX.Element {
 										stopped={isAccountStopped(agent)}
 										onOpen={() => navigate(`/agents/${agent.id}`)}
 										onSession={() => {
-											store.attach(agent.id); // lazy attach（幂等）
-											store.switchSession(agent.id); // 切 active 再进工作台
+											store.focusAgent(agent.id); // attach + 切 active，一处语义
 											navigate("/workspace");
 										}}
 									/>

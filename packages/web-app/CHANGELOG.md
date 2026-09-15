@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **导航与外壳收口：面板注册表成为唯一元数据源**（`src/router.tsx`, `src/layout/panel-registry.ts`, `src/layout/AppShell.tsx`, `src/layout/AppTopbar.tsx`）: 删除 `PAGE_META` / `PageMeta` / `findPageMeta`（与 panelRegistry 平行的第二份 path→标题/分组表；其 `protocol` 字段从无消费者，是随时会说谎的死元数据）；路由表由注册表派生（path / element / children 同源），当前面板改为从路由匹配链的 `handle` 解析（`activePanelOf` / `panelHandle`），不再按 pathname 前缀猜——子路由（`/models/catalog`、`/records/:id`、`/m`）在自己的路由上声明归属，自带顶栏由注册表的 `customTopbar` 声明。同时解掉 router ↔ AppShell 的循环 import，并删掉不再做任何查表的 `PanelHost`（面板就是路由，内容区直接是 Outlet）。
+
+### Added
+
+- **工作台上下文控件：AgentSwitcher / ProjectSwitcher**（`src/layout/AgentSwitcher.tsx`, `src/layout/ProjectSwitcher.tsx`, `src/components/ProjectContext.tsx`, `src/pages/workspace/WorkspaceView.tsx`, `src/pages/home/HomeView.tsx`）: 首页内联的 Agent `<select>` 与工作台只读 Agent chip 收敛为同一件控件；Project 上下文由只读 chip 升级为可展开控件（原生 `<details>`，展开即见已声明清单 + 当前归属 + 重读），首页区块与工作台控件共用同一份清单（`ProjectList`）与同一份判据（`projectLabelOf`）。三种「没有」分开渲染：读不到 / 未声明 / 未归属，另加「焦点不在注册表」。控件只挂在工作台（与首页），不进入外壳。
+
+### Fixed
+
+- **未知深链落到框架开发者错误页**（`src/router.tsx`, `src/layout/NotFoundView.tsx`）: `#/<不存在的路径>` 之前由 React Router 默认 ErrorBoundary 接管（整页替换、无侧栏、开发者提示）。改为壳内兜底路由（`path: "*"`）：侧栏保留、可直接走开；未知路径也不冒充任何面板（顶栏标题位为空，而不是落回 Home）。
+- **顶栏上下文条被挤成竖排字**（`src/pages/workspace/WorkspaceView.tsx`, `src/index.css`）: 顶栏是单行 flex，工作区路径 / 会话名 / 连接状态这些会变长的值之前没有截断也没有 `min-width: 0`，被挤窄时文字竖排（实测 chip 高 48px、连接状态高 57px，右侧「新会话」按钮被挤出外框）。改为可在 chip 内省略号截断（`.chip-truncate`）+ 控件与按钮 `shrink-0`，整行不再溢出。
+- **焦点 Agent 不在注册表时把 uuid 当选项文字**（`src/layout/AgentSwitcher.tsx`）: serve 的焦点可能是 36 字符的会话 uuid（实测），当成 `<option>` 文字会把整个 chip 撑到 300px 并挤爆邻座。改为占位「焦点未注册」，原样 id 进 title 供排查。
+- **切 Agent 的两半收敛到一处**（`src/state/session-store.ts`）: 新增 `focusAgent(agentId)`（attach + switch_session）；首页、Agent 管理页、Composer 的 agent 菜单不再各写一遍那两行——任何一处只改一半都会表现成「切过去了但回复不来」。
+
 ## [1.1.1] - 2026-09-06
 
 ### Added

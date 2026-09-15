@@ -1,11 +1,12 @@
-import { Bot, Folder, Menu, MessagesSquare, PanelRight, Smartphone } from "lucide-react";
+import { Folder, Menu, MessagesSquare, PanelRight, Smartphone } from "lucide-react";
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ProjectCell } from "../../components/ProjectContext";
 import { QueueCard } from "../../components/QueueCard";
+import { AgentSwitcher } from "../../layout/AgentSwitcher";
 import { DevicePreview } from "../../layout/DevicePreview";
+import { ProjectSwitcher } from "../../layout/ProjectSwitcher";
 import { FloatingCardHost } from "../../render/FloatingCardHost";
-import { activeAgentOf } from "../../state/agent-context";
+import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -81,29 +82,29 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					>
 						<Menu size={16} strokeWidth={1.5} />
 					</button>
-					<span className="flex items-center gap-1.5 text-[12px] text-success">
+					<span className="flex shrink-0 items-center gap-1.5 text-[12px] text-success whitespace-nowrap">
 						<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
 						{view.reconnecting ? `重连中${view.connectionId ? ` · ${view.connectionId}` : ""}` : "已连接"}
 					</span>
 					<span className="h-[18px] w-px bg-hairline" />
-					{/* 上下文条：Agent / 工作区 / 会话 —— 三者的权威各不同（Agent 是服务这个会话的人，
-				    工作区是它落的目录，会话是正在做的事），拼成一个字符串就丢掉了来源。 */}
-					<span className="chip" title="服务当前会话的 Agent">
-						<Bot size={13} strokeWidth={1.5} />
-						<b>{activeAgent?.name ?? view.activeAgentId ?? "未选择 Agent"}</b>
-					</span>
+					{/* 上下文条：Agent / 工作区 / Project / 会话 —— 四者的权威各不同（Agent 是服务这个会话的人，
+				    工作区是它落的目录，Project 是会话归属，会话是正在做的事），拼成一个字符串就丢掉了来源。
+				    Agent 与 Project 是可交互的上下文控件（见 layout/ 下两个 Switcher），工作区与会话是只读读数。 */}
+					<AgentSwitcher view={view} onSelect={id => store.focusAgent(id)} />
 					<span className="text-[12px] text-ink-faint">/</span>
-					<span className="chip" title={activeAgent?.agentDir ?? view.env?.repos ?? undefined}>
+					<span className="chip min-w-0" title={activeAgent?.agentDir ?? view.env?.repos ?? undefined}>
 						<Folder size={13} strokeWidth={1.5} />
-						<b>{workspaceLabel}</b>
-						{view.env ? ` · ${view.env.branch}` : ""}
+						<b className="chip-truncate">
+							{workspaceLabel}
+							{view.env ? ` · ${view.env.branch}` : ""}
+						</b>
 					</span>
 					<span className="text-[12px] text-ink-faint">/</span>
-					<ProjectCell view={view} />
+					<ProjectSwitcher view={view} onRefresh={() => void store.refreshProjects(activeAgentIdOf(view))} />
 					<span className="text-[12px] text-ink-faint">/</span>
-					<span className="chip" title={view.sessionFile ?? undefined}>
+					<span className="chip min-w-0" title={view.sessionFile ?? undefined}>
 						<MessagesSquare size={13} strokeWidth={1.5} />
-						<b>{view.sessionName ?? view.sessionId ?? "未命名会话"}</b>
+						<b className="chip-truncate">{view.sessionName ?? view.sessionId ?? "未命名会话"}</b>
 					</span>
 					<span className="flex-1" />
 					{!compact && (
@@ -126,10 +127,10 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 							>
 								<PanelRight size={16} strokeWidth={1.5} />
 							</button>
-							<button type="button" className="cbtn" onClick={() => store.compact()}>
+							<button type="button" className="cbtn shrink-0" onClick={() => store.compact()}>
 								compact
 							</button>
-							<button type="button" className="cbtn" onClick={() => store.newSession()}>
+							<button type="button" className="cbtn shrink-0" onClick={() => store.newSession()}>
 								新会话
 							</button>
 						</>

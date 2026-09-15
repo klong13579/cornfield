@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { SessionSnapshotDto } from "@cornfield/wire";
 import type { ReactElement } from "react";
-import { getPanels } from "../src/layout/panel-registry";
+import { activePanelOf, getPanels } from "../src/layout/panel-registry";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import { SessionStore } from "../src/state/session-store";
 
@@ -54,7 +54,7 @@ mock.module("../src/state/use-session", () => ({
 const React = (await import("react")).default;
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { createMemoryRouter, matchRoutes, Navigate, RouterProvider } = await import("react-router-dom");
-const { findPageMeta, modelsRoutes } = await import("../src/router");
+const { appRoutes, modelsRoutes } = await import("../src/router");
 const { ModelsView } = await import("../src/pages/models/ModelsView");
 const { CatalogView } = await import("../src/pages/models/CatalogView");
 const { ProvidersView } = await import("../src/pages/models/ProvidersView");
@@ -197,11 +197,12 @@ describe("模型控制中心：路由骨架", () => {
 		}
 	});
 
-	it("panel 注册表与页面 meta 更新为「模型控制中心」，子路径回退匹配 /models", () => {
+	it("panel 注册表更新为「模型控制中心」，子路径由路由上下文回落到 /models 面板", () => {
 		expect(getPanels().find(p => p.id === "models")?.title).toBe("模型控制中心");
-		const meta = findPageMeta("/models/catalog");
-		expect(meta?.id).toBe("models");
-		expect(meta?.name).toBe("模型控制中心");
+		// 子路由的面板归属来自路由匹配链上的 handle，不再按 pathname 前缀猜。
+		const handles = (matchRoutes(appRoutes, "/models/catalog") ?? []).map(m => ({ handle: m.route.handle }));
+		expect(activePanelOf(handles)?.id).toBe("models");
+		expect(activePanelOf(handles)?.title).toBe("模型控制中心");
 	});
 });
 

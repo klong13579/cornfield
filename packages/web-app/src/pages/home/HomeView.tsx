@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Orb } from "../../components/Orb";
 import { ProjectSection, projectLabelOf } from "../../components/ProjectContext";
+import { AgentSwitcher } from "../../layout/AgentSwitcher";
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -106,8 +107,7 @@ export function HomeView(): React.JSX.Element {
 
 	/** 切到某个 Agent：serve 侧焦点 + 权威快照一起过来（不是前端滤镜）。 */
 	const selectAgent = (id: string): void => {
-		store.attach(id);
-		store.switchSession(id);
+		store.focusAgent(id);
 	};
 
 	const send = (): void => {
@@ -165,24 +165,8 @@ export function HomeView(): React.JSX.Element {
 							快速会话
 						</span>
 						<span className="flex-1" />
-						<label className="flex items-center gap-1.5 text-[12px] text-ink-subtle">
-							Agent
-							<select
-								value={agentId ?? ""}
-								onChange={e => selectAgent(e.target.value)}
-								disabled={!view.connected || view.agents.length === 0}
-								className="rounded-md border border-hairline bg-surface-2 px-2 py-1 text-[12px] text-ink outline-none disabled:opacity-50"
-							>
-								{view.agents.length === 0 && <option value="">未连接</option>}
-								{agentId === undefined && view.agents.length > 0 && <option value="">选择 Agent…</option>}
-								{view.agents.map(a => (
-									<option key={a.id} value={a.id}>
-										{a.name}
-										{a.status === "online" ? "" : `（${a.status}）`}
-									</option>
-								))}
-							</select>
-						</label>
+						{/* 与工作台顶栏同一件控件：切 Agent 的语义只有一处（store.focusAgent） */}
+						<AgentSwitcher view={view} onSelect={selectAgent} />
 					</div>
 
 					{/* 上下文：Agent / 工作区 / 会话 分开显示，各自有各自的来源 */}
