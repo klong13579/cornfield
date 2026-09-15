@@ -7,6 +7,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { normalizePath } from "@cornfield/coding-agent/agent-domain";
 import { logger, prompt } from "@cornfield/utils";
 import type { AgentBridge } from "./agent-bridge";
 import { resolveDefaultCornfieldPath } from "./agent-transport-wire";
@@ -105,9 +106,14 @@ export class CronLifecycle {
 			// like `omp-atomix` rather than the registered account id
 			// `algorithm`), and the registry's `get(<channel>:<id>)`
 			// miss makes the user see no card at all.
+			//
+			// Compared with the domain's path identity (`normalizePath`), not raw string
+			// equality: a trailing separator or a backslash spelling on the task would
+			// otherwise miss its own account and silently degrade delivery.
 			resolveAccountId: agentDir => {
+				const target = normalizePath(agentDir);
 				for (const [acctId, dir] of this.#deps.accountAgentDirs) {
-					if (dir === agentDir) return acctId;
+					if (normalizePath(dir) === target) return acctId;
 				}
 				return undefined;
 			},
@@ -357,9 +363,11 @@ export class CronLifecycle {
 		}
 	}
 
+	/** Find the warm bridge whose account owns `agentDir` (path identity, not raw string). */
 	#getBridgeByAgentDir(agentDir: string): AgentBridge | undefined {
+		const target = normalizePath(agentDir);
 		for (const [acctId, dir] of this.#deps.accountAgentDirs) {
-			if (dir === agentDir) {
+			if (normalizePath(dir) === target) {
 				return this.#deps.getAccountBridge(acctId);
 			}
 		}

@@ -96,6 +96,14 @@
 			"types": "./src/*.ts",
 			"import": "./src/*.ts"
 		},
+		"./agent-domain": {
+			"types": "./src/agent-domain/index.ts",
+			"import": "./src/agent-domain/index.ts"
+		},
+		"./agent-domain/*": {
+			"types": "./src/agent-domain/*.ts",
+			"import": "./src/agent-domain/*.ts"
+		},
 		"./async": {
 			"types": "./src/async/index.ts",
 			"import": "./src/async/index.ts"

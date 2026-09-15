@@ -30,6 +30,8 @@ export interface GatewayAccountPatch {
 	enabled?: boolean;
 	robotName?: string;
 	robotCode?: string;
+	/** Registered Agent this account speaks for (registry key). */
+	agentId?: string;
 	agentDir?: string;
 	deniedTools?: string[];
 	hideThinkingBlock?: boolean;
@@ -260,6 +262,7 @@ export async function handleGatewayWireCommand(
 				"enabled",
 				"robotName",
 				"robotCode",
+				"agentId",
 				"agentDir",
 				"deniedTools",
 				"hideThinkingBlock",
