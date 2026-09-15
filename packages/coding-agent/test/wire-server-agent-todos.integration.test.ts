@@ -7,6 +7,10 @@
  *
  * 只读/只写 agentDir，不 lazy attach：列一块板不该把 agent 拉起来，所以这里从头到尾
  * 没有 attach 过 hr。
+ *
+ * 另一半是**错误响应路径**：桥里的错（owner / Project / 声明读不出来 / 存储坏了）必须变成
+ * 一个带同一个请求 id 的 ok:false frame —— 不是让 promise 拒掉、让客户端干等到超时。
+ * 所以每个失败都用 `raw:true` 拿原始帧来断言，而不是只看 throw。
  */
 import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -41,13 +45,22 @@ test("agent todo：命令面 → 落盘 → owner/Project 边界", async () => {
 		path.join(hrDir, ".cornfield", "workspace.json"),
 		JSON.stringify({ schemaVersion: 2, id: "hr", name: "hr-agent", type: "agent", root: ".", projectRoot: "." }),
 	);
+	// 声明读不出内容的 agent：它的 Project 绑定上限**无法确定**，所以 list 与 write 都必须硬报错
+	// （当成「未约束」就是绕开隔离）。
+	const brokenDir = path.join(isolatedHome, "agents", "broken");
+	await fs.mkdir(path.join(brokenDir, ".cornfield"), { recursive: true });
+	await Bun.write(path.join(brokenDir, ".cornfield", "workspace.json"), "{ not json");
+
 	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),
 		JSON.stringify({
 			version: 2,
-			agents: { hr: { path: hrDir, registeredAt: new Date().toISOString(), template: "default" } },
+			agents: {
+				hr: { path: hrDir, registeredAt: new Date().toISOString(), template: "default" },
+				broken: { path: brokenDir, registeredAt: new Date().toISOString(), template: "default" },
+			},
 		}),
 	);
 	// 只声明一个 Project：绑定范围之外的 Project 必须被拒，而不是被当成本地随便写的字符串。
@@ -143,6 +156,27 @@ test("agent todo：命令面 → 落盘 → owner/Project 边界", async () => {
 			deleted: false,
 		});
 		expect(await request(ws, { type: "list_agent_todos", sessionId: "hr" })).toEqual({ agentId: "hr", todos: [] });
+
+		// ── 错误响应路径：声明读不出来的 agent，list 与 write 都是 ok:false 且不写盘 ──
+		const badList = (await request(ws, { type: "list_agent_todos", sessionId: "broken" }, true)) as Frame;
+		expect(badList.ok).toBe(false);
+		expect(String(badList.error)).toMatch(/not valid JSON/);
+
+		const badWrite = (await request(
+			ws,
+			{ type: "set_agent_todo", sessionId: "broken", todo: { ...todo, id: "todo-broken", agentId: "broken" } },
+			true,
+		)) as Frame;
+		expect(badWrite.ok).toBe(false);
+		expect(String(badWrite.error)).toMatch(/not valid JSON/);
+		// 报错就是真的没写：板子文件不该被建出来
+		expect(await Bun.file(path.join(brokenDir, ".cornfield", "agent-todos.json")).exists()).toBe(false);
+
+		// 存储坏了也是 ok:false（不是空板）
+		await Bun.write(path.join(hrDir, ".cornfield", "agent-todos.json"), "{ not json");
+		const badStore = (await request(ws, { type: "list_agent_todos", sessionId: "hr" }, true)) as Frame;
+		expect(badStore.ok).toBe(false);
+		expect(String(badStore.error)).toMatch(/not valid JSON/);
 
 		ws.close();
 	} finally {

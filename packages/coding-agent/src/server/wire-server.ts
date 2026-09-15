@@ -2042,7 +2042,16 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				}),
 			broadcastServerSnapshot: () => core.broadcastServerSnapshot(),
 		};
-		void core.handleCommand(ctx, frame.command, reply);
+		// 命令的 promise 不能裸奔。命令体内部的 try/catch 覆盖了各个 case，但**只要有一处逃出去**
+		// （或 reply 自身抛错），这次请求就一个响应帧都没有 —— 客户端只能干等到超时。
+		// 「每个请求都要有一个带本请求 id 的 ok:false 帧」不该依赖于「try 恰好包住了所有路径」。
+		void core.handleCommand(ctx, frame.command, reply).catch((err: unknown) => {
+			try {
+				reply({ type: "response", id: "", ok: false, error: err instanceof Error ? err.message : String(err) });
+			} catch {
+				// 连接已断：没有可回复的对象，也不能再往外丢一个 rejection
+			}
+		});
 	};
 
 	const server = Bun.serve<Connection | undefined>({
