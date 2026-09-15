@@ -118,6 +118,7 @@
 |tools/resolve-tool-runtime.md|Resolve 工具运行时|真值|
 |tools/notebook-tool-runtime.md|Notebook 工具运行时|真值|
 |tools/python-repl.md|Python 工具与 IPython 运行时|真值|
+|tools/auto-qa.md|工具缺陷上报（report_tool_issue + grievances CLI）|真值|
 
 ## tui — 终端 UI
 
