@@ -7,11 +7,13 @@
 /** 会话运行阶段（镜像 SessionPhase，枚举化 UI 提示，非权威门控）。 */
 export type SessionPhaseDto = "idle" | "streaming" | "compacting" | "retrying" | "executing_tool";
 
-export type TodoStatusDto = "pending" | "in_progress" | "completed" | "abandoned";
+export type TodoStatusDto = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
 
 export interface TodoItemDto {
 	content: string;
 	status: TodoStatusDto;
+	/** status 为 blocked 时任务在等什么；与 TodoItem.blocker 同步。 */
+	blocker?: string;
 	notes?: string[];
 }
 

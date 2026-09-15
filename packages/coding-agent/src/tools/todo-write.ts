@@ -1,5 +1,6 @@
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
 import { StringEnum } from "@cornfield/ai";
+import { sanitizeText } from "@cornfield/natives";
 import type { Component } from "@cornfield/tui";
 import { Text } from "@cornfield/tui";
 import { prompt } from "@cornfield/utils";
@@ -11,18 +12,27 @@ import todoWriteDescription from "../prompts/tools/todo-write.md" with { type: "
 import type { ToolSession } from "../sdk";
 import type { SessionEntry } from "../session/session-manager";
 import { renderStatusLine, renderTreeList } from "../tui";
-import { PREVIEW_LIMITS } from "./render-utils";
+import { PREVIEW_LIMITS, replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "./render-utils";
 
 import { ToolError } from "./tool-errors";
 // =============================================================================
 // Types
 // =============================================================================
 
-export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned";
+export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
 
 export interface TodoItem {
 	content: string;
 	status: TodoStatus;
+	/**
+	 * What the task is waiting for, set by `op: "block"` and cleared by
+	 * `op: "unblock"`. Always a single non-empty line when present: `block`
+	 * collapses whitespace runs and maps a blank reason to `undefined`, and the
+	 * Markdown round-trip drops an empty `<!-- blocker: -->` comment. Every
+	 * surface (panel, summary, checklist) renders it on one line, so a value
+	 * containing a line break would corrupt both the display and the parse-back.
+	 */
+	blocker?: string;
 	/**
 	 * Append-only list of freeform notes attached by `op: "note"`.
 	 * Each element is one note and may itself be multi-line.
@@ -40,15 +50,28 @@ export interface TodoPhase {
 export interface TodoWriteToolDetails {
 	phases: TodoPhase[];
 	storage: "session" | "memory";
+	/**
+	 * Resolved op names this call applied, in call order.
+	 * A call whose ops are all `view` only echoed the list — see
+	 * {@link isReadOnlyTodoCall}. Persisting it as the session's canonical todo
+	 * snapshot would re-arm the auto-clear timers, so consumers check this field.
+	 */
+	ops: TodoOpName[];
 }
 
 // =============================================================================
 // Schema
 // =============================================================================
 
-const TodoOp = StringEnum(["init", "start", "done", "rm", "drop", "append", "note"] as const, {
-	description: "operation to apply",
-});
+const TodoOp = StringEnum(
+	["init", "start", "done", "rm", "drop", "block", "unblock", "append", "note", "view"] as const,
+	{
+		description: "operation to apply",
+	},
+);
+
+/** Op names, in the order the prompt documents them. */
+export type TodoOpName = Static<typeof TodoOp>;
 
 const InitListEntry = Type.Object({
 	phase: Type.String({ description: "phase name (short noun phrase)", examples: ["Foundation", "Auth"] }),
@@ -62,9 +85,11 @@ const TodoOpEntry = Type.Object({
 	op: Type.Optional(TodoOp),
 	list: Type.Optional(Type.Array(InitListEntry, { description: "phased task list for op=init" })),
 	task: Type.Optional(
-		Type.String({ description: "task content for start/done/rm/drop/note", examples: ["Run tests"] }),
+		Type.String({ description: "task content for start/done/rm/drop/block/unblock/note", examples: ["Run tests"] }),
 	),
-	phase: Type.Optional(Type.String({ description: "phase name for done/rm/drop/append", examples: ["Auth"] })),
+	phase: Type.Optional(
+		Type.String({ description: "phase name for done/rm/drop/block/unblock/append", examples: ["Auth"] }),
+	),
 	items: Type.Optional(
 		Type.Array(Type.String({ description: "task content (5-10 words)" }), {
 			minItems: 1,
@@ -72,6 +97,12 @@ const TodoOpEntry = Type.Object({
 		}),
 	),
 	text: Type.Optional(Type.String({ description: "note text for op=note (appended with newline)" })),
+	reason: Type.Optional(
+		Type.String({
+			description: "why the task is blocked, for op=block; omit when the reason is unknown",
+			examples: ["waiting on PR review"],
+		}),
+	),
 });
 
 const todoWriteSchema = Type.Object(
@@ -86,7 +117,6 @@ const todoWriteSchema = Type.Object(
 
 type TodoWriteParams = Static<typeof todoWriteSchema>;
 type TodoOpEntryValue = TodoWriteParams["ops"][number];
-type TodoOpName = Static<typeof TodoOp>;
 type ResolvedTodoOpEntry = TodoOpEntryValue & { op: TodoOpName };
 
 // =============================================================================
@@ -107,11 +137,18 @@ function findPhaseByName(phases: TodoPhase[], name: string): TodoPhase | undefin
 
 function cloneTask(task: TodoItem): TodoItem {
 	const out: TodoItem = { content: task.content, status: task.status };
+	if (task.blocker !== undefined) out.blocker = task.blocker;
 	if (task.notes && task.notes.length > 0) out.notes = [...task.notes];
 	return out;
 }
 
-function clonePhases(phases: TodoPhase[]): TodoPhase[] {
+/**
+ * Deep-copy phases. This is the one place that decides which task fields survive
+ * a copy: the tool snapshots, the session's stored list, and branch rehydration
+ * all go through it, so a newly added task field can never be dropped by one of
+ * those paths while surviving the others.
+ */
+export function clonePhases(phases: TodoPhase[]): TodoPhase[] {
 	return phases.map(phase => ({ name: phase.name, tasks: phase.tasks.map(cloneTask) }));
 }
 
@@ -148,8 +185,12 @@ export function getLatestTodoPhasesFromEntries(entries: SessionEntry[]): TodoPha
 		const message = entry.message as { role?: string; toolName?: string; details?: unknown; isError?: boolean };
 		if (message.role !== "toolResult" || message.toolName !== "todo" || message.isError) continue;
 
-		const details = message.details as { phases?: unknown } | undefined;
+		const details = message.details as { phases?: unknown; ops?: unknown } | undefined;
 		if (!details || !Array.isArray(details.phases)) continue;
+		// A `view` call echoes the list without touching it. Skipping it keeps the
+		// last state-changing call canonical, so `/todo` and resume agree with what
+		// the agent last actually did.
+		if (isReadOnlyTodoCall(Array.isArray(details.ops) ? details.ops : undefined)) continue;
 
 		return clonePhases(details.phases as TodoPhase[]);
 	}
@@ -253,7 +294,18 @@ function removeTasks(phases: TodoPhase[], entry: TodoOpEntryValue, errors: strin
 	return phases;
 }
 
-const ALLOWED_OPS: readonly TodoOpName[] = ["init", "start", "done", "rm", "drop", "append", "note"];
+const ALLOWED_OPS: readonly TodoOpName[] = [
+	"init",
+	"start",
+	"done",
+	"rm",
+	"drop",
+	"block",
+	"unblock",
+	"append",
+	"note",
+	"view",
+];
 
 function buildOpInferenceError(index: number): ToolError {
 	return new ToolError(
@@ -303,6 +355,43 @@ function applyEntry(phases: TodoPhase[], entry: ResolvedTodoOpEntry, errors: str
 			}
 			return phases;
 		}
+		case "block": {
+			if (!entry.task && !entry.phase) {
+				errors.push("block requires a task or phase target");
+				return phases;
+			}
+			// `blocker` rides on one Markdown checklist line (as a trailing HTML
+			// comment) and one panel/summary line, so collapse whitespace runs — a
+			// multi-line reason from a pasted error would corrupt the round-trip
+			// parse and the rendered line. A blank reason clears any previous one:
+			// the latest `block` call is authoritative, so `block` with a reason can
+			// refine a bare earlier `block` and vice versa.
+			const reason = entry.reason?.replace(/\s+/gu, " ").trim() || undefined;
+			for (const task of getTaskTargets(phases, entry, errors)) {
+				// Only actionable open work can be blocked: blocking a phase must not
+				// reopen completed/abandoned tasks or erase finished progress. An
+				// already-blocked task stays eligible so a later block can replace its
+				// reason.
+				if (task.status !== "pending" && task.status !== "in_progress" && task.status !== "blocked") continue;
+				task.status = "blocked";
+				task.blocker = reason;
+			}
+			return phases;
+		}
+		case "unblock": {
+			if (!entry.task && !entry.phase) {
+				errors.push("unblock requires a task or phase target");
+				return phases;
+			}
+			for (const task of getTaskTargets(phases, entry, errors)) {
+				if (task.status !== "blocked") continue;
+				task.status = "pending";
+				task.blocker = undefined;
+			}
+			return phases;
+		}
+		case "view":
+			return phases;
 		case "rm":
 			return removeTasks(phases, entry, errors);
 		case "note": {
@@ -321,22 +410,40 @@ function applyEntry(phases: TodoPhase[], entry: ResolvedTodoOpEntry, errors: str
 	}
 }
 
-function applyParams(phases: TodoPhase[], params: TodoWriteParams): { phases: TodoPhase[]; errors: string[] } {
+function applyParams(
+	phases: TodoPhase[],
+	params: TodoWriteParams,
+): { phases: TodoPhase[]; errors: string[]; ops: TodoOpName[] } {
 	const errors: string[] = [];
+	const ops: TodoOpName[] = [];
 	let next = phases;
 	for (let index = 0; index < params.ops.length; index++) {
 		const entry = resolveOp(params.ops[index]!, index);
+		ops.push(entry.op);
 		next = applyEntry(next, entry, errors);
 	}
 	normalizeInProgressTask(next);
-	return { phases: next, errors };
+	return { phases: next, errors, ops };
+}
+
+/**
+ * Whether a `todo` call only echoed the list. A call whose ops are all `view`
+ * leaves every task untouched, so it must not become the branch's canonical
+ * snapshot nor re-arm the auto-clear timers.
+ *
+ * Ops from transcript entries written before `view` existed are absent, and any
+ * op the caller does not recognise is treated as state-changing — the safe
+ * default is to keep the snapshot.
+ */
+export function isReadOnlyTodoCall(ops: readonly string[] | undefined): boolean {
+	return Array.isArray(ops) && ops.length > 0 && ops.every(op => op === "view");
 }
 
 /** Apply an array of `todo`-style ops to existing phases. Used by /todo slash command. */
 export function applyOpsToPhases(
 	currentPhases: TodoPhase[],
 	ops: TodoWriteParams["ops"],
-): { phases: TodoPhase[]; errors: string[] } {
+): { phases: TodoPhase[]; errors: string[]; ops: TodoOpName[] } {
 	return applyParams(clonePhases(currentPhases), { ops });
 }
 
@@ -349,6 +456,7 @@ const STATUS_TO_MARKER: Record<TodoStatus, string> = {
 	in_progress: "/",
 	completed: "x",
 	abandoned: "-",
+	blocked: "!",
 };
 
 /** Render todo phases as a Markdown checklist suitable for editing/copying. */
@@ -359,7 +467,12 @@ export function phasesToMarkdown(phases: TodoPhase[]): string {
 		if (i > 0) out.push("");
 		out.push(`# ${phases[i].name}`);
 		for (const task of phases[i].tasks) {
-			out.push(`- [${STATUS_TO_MARKER[task.status]}] ${task.content}`);
+			// A blocked task's reason rides in a trailing HTML comment: invisible in
+			// rendered Markdown, unambiguous to parse back (task content cannot contain
+			// the comment delimiters), so the reason survives `/todo edit` and
+			// export/import round-trips instead of being silently dropped.
+			const blockerNote = task.status === "blocked" && task.blocker ? ` <!-- blocker: ${task.blocker} -->` : "";
+			out.push(`- [${STATUS_TO_MARKER[task.status]}] ${task.content}${blockerNote}`);
 			if (task.notes && task.notes.length > 0) {
 				for (let j = 0; j < task.notes.length; j++) {
 					if (j > 0) out.push("  >");
@@ -382,6 +495,16 @@ const MARKER_TO_STATUS: Record<string, TodoStatus> = {
 	">": "in_progress",
 	"-": "abandoned",
 	"~": "abandoned",
+	"!": "blocked",
+};
+
+/** One glyph per status in the model-facing summary, so no two states read alike. */
+const SUMMARY_STATUS_SYMBOL: Record<TodoStatus, string> = {
+	pending: "○",
+	in_progress: "→",
+	completed: "✓",
+	abandoned: "✗",
+	blocked: "⊘",
 };
 
 /** Parse a Markdown checklist back into todo phases. */
@@ -443,11 +566,22 @@ export function markdownToPhases(md: string): { phases: TodoPhase[]; errors: str
 			const marker = taskMatch[1];
 			const status = MARKER_TO_STATUS[marker];
 			if (!status) {
-				errors.push(`Line ${lineNum + 1}: unknown status marker "[${marker}]" (use [ ], [x], [/], [-])`);
+				errors.push(`Line ${lineNum + 1}: unknown status marker "[${marker}]" (use [ ], [x], [/], [-], [!])`);
 				currentTask = undefined;
 				continue;
 			}
-			currentTask = { content: taskMatch[2].trim(), status };
+			// Recover a blocked task's reason from its trailing HTML comment (see
+			// phasesToMarkdown) and strip the comment from the visible content. A
+			// comment with nothing after it means "blocked, reason unknown".
+			const rawContent = taskMatch[2].trim();
+			const blockerMatch = status === "blocked" ? /^(.*?)\s*<!--\s*blocker:\s*(.*?)\s*-->$/u.exec(rawContent) : null;
+			if (blockerMatch) {
+				const content = blockerMatch[1]!.trim();
+				const blocker = blockerMatch[2]!.trim();
+				currentTask = blocker ? { content, status, blocker } : { content, status };
+			} else {
+				currentTask = { content: rawContent, status };
+			}
 			currentPhase.tasks.push(currentTask);
 			continue;
 		}
@@ -473,6 +607,14 @@ function formatSummary(phases: TodoPhase[], errors: string[]): string {
 		}))
 		.filter(phase => phase.tasks.length > 0);
 	const remainingTasks = remainingByPhase.flatMap(phase => phase.tasks.map(task => ({ ...task, phase: phase.name })));
+	// Blocked tasks are deliberately not "remaining": nothing moves them without an
+	// `unblock`, so they are reported separately rather than inflating the count of
+	// work the agent can still pick up.
+	const blockedTasks = phases.flatMap(phase =>
+		phase.tasks
+			.filter(task => task.status === "blocked")
+			.map(task => ({ content: task.content, blocker: task.blocker, phase: phase.name })),
+	);
 
 	let currentIdx = phases.findIndex(phase =>
 		phase.tasks.some(task => task.status === "pending" || task.status === "in_progress"),
@@ -491,23 +633,24 @@ function formatSummary(phases: TodoPhase[], errors: string[]): string {
 			lines.push(`  - ${task.content} [${task.status}] (${task.phase})`);
 		}
 	}
+	if (blockedTasks.length > 0) {
+		lines.push(`Blocked (${blockedTasks.length}):`);
+		for (const task of blockedTasks) {
+			lines.push(`  - ${task.content} (${task.phase})${task.blocker ? ` — ${task.blocker}` : ""}`);
+		}
+	}
 	lines.push(
 		`Phase ${currentIdx + 1}/${phases.length} "${current.name}" — ${done}/${current.tasks.length} tasks complete`,
 	);
 	for (const phase of phases) {
 		lines.push(`  ${phase.name}:`);
 		for (const task of phase.tasks) {
-			const sym =
-				task.status === "completed"
-					? "✓"
-					: task.status === "in_progress"
-						? "→"
-						: task.status === "abandoned"
-							? "✗"
-							: "○";
+			const sym = SUMMARY_STATUS_SYMBOL[task.status];
 			const noteCount = task.notes?.length ?? 0;
 			const noteMarker = noteCount > 0 ? ` (+${noteCount} note${noteCount === 1 ? "" : "s"})` : "";
-			lines.push(`    ${sym} ${task.content}${noteMarker}`);
+			const blockedTag =
+				task.status !== "blocked" ? "" : task.blocker ? ` (blocked: ${task.blocker})` : " (blocked)";
+			lines.push(`    ${sym} ${task.content}${noteMarker}${blockedTag}`);
 			if (task.status === "in_progress" && task.notes && task.notes.length > 0) {
 				for (let j = 0; j < task.notes.length; j++) {
 					if (j > 0) lines.push("        ---");
@@ -548,13 +691,15 @@ export class TodoWriteTool implements AgentTool<typeof todoWriteSchema, TodoWrit
 		_context?: AgentToolContext,
 	): Promise<AgentToolResult<TodoWriteToolDetails>> {
 		const previousPhases = clonePhases(this.session.getTodoPhases?.() ?? []);
-		const { phases: updated, errors } = applyParams(previousPhases, params);
-		this.session.setTodoPhases?.(updated);
+		const { phases: updated, errors, ops } = applyParams(previousPhases, params);
+		// A read-only call leaves the session's list where the last state-changing
+		// call put it; republishing it would restart the auto-clear grace period.
+		if (!isReadOnlyTodoCall(ops)) this.session.setTodoPhases?.(updated);
 		const storage = this.session.getSessionFile() ? "session" : "memory";
 
 		return {
 			content: [{ type: "text", text: formatSummary(updated, errors) }],
-			details: { phases: updated, storage },
+			details: { phases: updated, storage, ops },
 		};
 	}
 }
@@ -637,7 +782,33 @@ function noteMarker(count: number, uiTheme: Theme): string {
 	return uiTheme.fg("dim", chalk.italic(` \u207a${toSuperscript(count)}`));
 }
 
-function formatTodoLine(item: TodoItem, uiTheme: Theme, prefix: string): string {
+/**
+ * ` (blocked: why)` / ` (blocked)` — the one definition of how a blocker reads
+ * in a one-line todo surface, shared by the tool result and the sticky panel so
+ * the two can never disagree.
+ *
+ * A blocker is free text from the model (or, via `/todo edit`, from the user),
+ * so it is the one task field that can carry escape sequences and any length.
+ * `block` collapses it to a single line, but nothing bounds it, and this text
+ * goes straight to the terminal: strip control/escape sequences, expand tabs,
+ * and clamp the width. The untruncated reason still reaches the model through
+ * the tool result text, so only what the panel draws is bounded.
+ */
+export function formatBlockerAnnotation(blocker: string | undefined): string {
+	if (!blocker) return " (blocked)";
+	const display = truncateToWidth(replaceTabs(sanitizeText(blocker)), TRUNCATE_LENGTHS.CONTENT);
+	return ` (blocked: ${display})`;
+}
+
+/**
+ * One line of a todo list: checkbox, status color, note marker.
+ *
+ * Exported because the sticky HUD in `modes/interactive-mode` draws the same
+ * rows — it used to carry its own copy of this switch, which is how a new status
+ * could be color-coded in the tool result and silently fall through to the
+ * pending style on the panel. Both surfaces call this now.
+ */
+export function formatTodoLine(item: TodoItem, prefix: string, uiTheme: Theme): string {
 	const checkbox = uiTheme.checkbox;
 	const marker = noteMarker(item.notes?.length ?? 0, uiTheme);
 	switch (item.status) {
@@ -647,6 +818,15 @@ function formatTodoLine(item: TodoItem, uiTheme: Theme, prefix: string): string 
 			return uiTheme.fg("accent", `${prefix}${checkbox.unchecked} ${item.content}`) + marker;
 		case "abandoned":
 			return uiTheme.fg("error", `${prefix}${checkbox.unchecked} ${chalk.strikethrough(item.content)}`) + marker;
+		case "blocked":
+			// `warning` is the one palette slot no other status uses, so a blocked row
+			// never reads as an ordinary pending one.
+			return (
+				uiTheme.fg(
+					"warning",
+					`${prefix}${checkbox.unchecked} ${item.content}${formatBlockerAnnotation(item.blocker)}`,
+				) + marker
+			);
 		default:
 			return uiTheme.fg("dim", `${prefix}${checkbox.unchecked} ${item.content}`) + marker;
 	}
@@ -715,7 +895,7 @@ export const todoWriteToolRenderer = {
 					expanded,
 					maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
 					itemType: "todo",
-					renderItem: todo => formatTodoLine(todo, uiTheme, ""),
+					renderItem: todo => formatTodoLine(todo, "", uiTheme),
 				},
 				uiTheme,
 			);

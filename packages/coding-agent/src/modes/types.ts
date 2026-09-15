@@ -16,6 +16,7 @@ import type { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
 import type { ListenController } from "../stt/listen-controller";
 import type { ExitPlanModeDetails, LspStartupServerInfo } from "../tools";
+import type { TodoItem, TodoPhase } from "../tools/todo-write";
 import type { AssistantMessageComponent } from "./components/assistant-message";
 import type { BashExecutionComponent } from "./components/bash-execution";
 import type { CustomEditor } from "./components/custom-editor";
@@ -28,6 +29,11 @@ import type { ToolExecutionHandle } from "./components/tool-execution";
 import type { OAuthManualInputManager } from "./oauth-manual-input";
 import type { Theme } from "./theme/theme";
 
+// Todo shapes are owned by the tool that produces them — re-exported rather than
+// redeclared: a second hand-maintained copy of this status union is how a new
+// state (`blocked`) compiles here but never reaches the panel.
+export type { TodoItem, TodoPhase, TodoStatus } from "../tools/todo-write";
+
 export type CompactionQueuedMessage = {
 	text: string;
 	mode: "steer" | "followUp";
@@ -38,20 +44,6 @@ export type SubmittedUserInput = {
 	images?: ImageContent[];
 	cancelled: boolean;
 	started: boolean;
-};
-
-export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned";
-
-export type TodoItem = {
-	content: string;
-	status: TodoStatus;
-	details?: string;
-	notes?: string[];
-};
-
-export type TodoPhase = {
-	name: string;
-	tasks: TodoItem[];
 };
 
 export interface InteractiveModeContext {
