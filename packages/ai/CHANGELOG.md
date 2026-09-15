@@ -11,6 +11,8 @@
 
 ### Added
 
+- **发现侧的家族回退：种子未覆盖的新 id 不再一律落成「非思考模型」**（`src/model-thinking.ts`、`src/provider-models/openai-compat.ts`、`test/narwal-plan-provider.test.ts`）：网关 `/v1/models` 不返回任何能力字段，所以 `NARWAL_PLAN_STATIC_MODELS` 之外的 id 一律拿发现占位（`reasoning: false` + 只收 text）—— `narwal-plan/gpt-6-astra` 就是这么变成「不能思考、不能发图」的。新增 `infersReasoningFromFamily(modelId)`：id 若解析为 openai ≥5.2 / gemini ≥3.0 / claude opus|sonnet ≥4.6，且种子精确条目与父级后缀回退都没命中，就把 `reasoning` 置真，思考档由同一份解析经 `enrichModelThinking` 推出；家族版本下限与 `inferSupportedEfforts` 共用一处常量，两端不会漂。解析不出的家族维持占位 —— 猜真会让每一轮请求 400（glm-5.3 两次事故的形态），猜假只是少一个思考档。代价实测为零：对现网 100 个 id 做前后对比，0 个字段变化（今天没有一个未种子 id 能解析到已知家族）；护栏用例用假想 id `gpt-7-hypothetical` 覆盖正向、`hy5-unknown` 覆盖保守分支。
+
 - **`narwal-plan/gpt-6-astra` 静态种子**（`src/provider-models/narwal-plan.ts`、`test/narwal-plan-provider.test.ts`、`src/models.json` 重新生成）：网关 `/v1/models` 只返回裸 id 与 context/max_tokens，reasoning / vision / 思考档 / cost 四个字段没有任何来源，所以不在 `NARWAL_PLAN_STATIC_MODELS` 里的新模型一律落成占位元数据 —— gpt-6-astra 此前就是 `reasoning: false`、只收 text、没有 thinking 档（选中它等于没有思考等级、不能发图）。实测（2026-09-15 直打 `coder.narwal.com/v1/chat/completions`）：`reasoning_effort` 只接受 `low|medium|high|xhigh|max`，`minimal` 与 `none` 均 400「Unsupported value」；图片 content part 与 tools 均 200。种子按实测声明 `minLevel: low` / `maxLevel: xhigh`（会话默认 `medium` 落在区间内，不再被夹到 low），cost 保持 0 —— 上游不公布该 id 的定价，不编数。回归用例在 `test/narwal-plan-provider.test.ts`（走发现合并路径，非静态路径）：拿掉种子条目后它立刻红在 `reasoning: false`，即这次要修的线上症状。重跑 `bun run generate-models` 只带出 14 处条目变动（openrouter 10 changed / 2 added、alibaba-coding-plan 1 added，narwal-plan 1 changed 且仅键序不同），无删除。
 
 ## [1.2.3] - 2026-09-14

@@ -30,6 +30,19 @@ const GEMINI_3_PRO_EFFORTS: readonly Effort[] = [Effort.Low, Effort.High];
 const GEMINI_3_FLASH_EFFORTS: readonly Effort[] = [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High];
 const GPT_5_2_PLUS_EFFORTS: readonly Effort[] = [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh];
 const GPT_5_1_CODEX_MINI_EFFORTS: readonly Effort[] = [Effort.Medium, Effort.High];
+/**
+ * The version at which each family's published effort ladder begins.
+ *
+ * Below these floors the catalog claims no lineage knowledge: inference falls back to
+ * `inferFallbackEfforts`, which guesses from the transport rather than the model. The
+ * same floors decide {@link infersReasoningFromFamily}, so the "is this a reasoning
+ * model" answer and the ladder it gets can never disagree.
+ */
+const LINEAGE_VERSION_FLOOR = {
+	openai: "5.2",
+	gemini: "3.0",
+	anthropic: "4.6",
+} as const;
 const CLOUDFLARE_AI_GATEWAY_BASE_URL = "https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic";
 const BAILIAN_CODING_PLAN_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1";
 
@@ -238,6 +251,34 @@ export function getSupportedEfforts<TApi extends Api>(model: ApiModel<TApi>): re
 		return configuredEfforts;
 	}
 	return intersectEfforts(configuredEfforts, inferSupportedEfforts(parsedModel, model));
+}
+
+/**
+ * True when the id parses to a family whose effort ladder this catalog encodes.
+ *
+ * Gateways that report no capability metadata leave every id they serve on the
+ * discovery placeholder (`reasoning: false`, text-only) unless a seed entry covers it
+ * — which is how `narwal-plan/gpt-6-astra` shipped as a non-reasoner that could not
+ * think at all. This is the fallback for ids no seed covers: the lineage parse decides
+ * whether the model reasons, and `inferModelThinking` then derives the ladder from the
+ * same parse, so the flag and the ladder cannot disagree.
+ *
+ * Ids no lineage covers return false: the placeholder stays, because a wrong `true`
+ * fails every turn against the upstream (400) while a wrong `false` only costs the
+ * thinking ladder until someone seeds or overrides the model.
+ */
+export function infersReasoningFromFamily(modelId: string): boolean {
+	const parsedModel = parseKnownModel(modelId);
+	switch (parsedModel.family) {
+		case "openai":
+			return semverGte(parsedModel.version, LINEAGE_VERSION_FLOOR.openai);
+		case "gemini":
+			return semverGte(parsedModel.version, LINEAGE_VERSION_FLOOR.gemini);
+		case "anthropic":
+			return semverGte(parsedModel.version, LINEAGE_VERSION_FLOOR.anthropic);
+		case "unknown":
+			return false;
+	}
 }
 
 /**
@@ -500,14 +541,14 @@ function inferOpenAISupportedEfforts(model: OpenAIModel): readonly Effort[] {
 	if (model.variant === "codex-mini" && semverEqual(model.version, "5.1")) {
 		return GPT_5_1_CODEX_MINI_EFFORTS;
 	}
-	if (semverGte(model.version, "5.2")) {
+	if (semverGte(model.version, LINEAGE_VERSION_FLOOR.openai)) {
 		return GPT_5_2_PLUS_EFFORTS;
 	}
 	return DEFAULT_REASONING_EFFORTS;
 }
 
 function inferGeminiSupportedEfforts(model: GeminiModel): readonly Effort[] {
-	if (!semverGte(model.version, "3.0")) {
+	if (!semverGte(model.version, LINEAGE_VERSION_FLOOR.gemini)) {
 		return DEFAULT_REASONING_EFFORTS;
 	}
 	return model.kind === "pro" ? GEMINI_3_PRO_EFFORTS : GEMINI_3_FLASH_EFFORTS;
@@ -519,7 +560,7 @@ function inferAnthropicSupportedEfforts<TApi extends Api>(
 ): readonly Effort[] {
 	if (
 		(model.api === "anthropic-messages" || model.api === "bedrock-converse-stream") &&
-		semverGte(parsedModel.version, "4.6")
+		semverGte(parsedModel.version, LINEAGE_VERSION_FLOOR.anthropic)
 	) {
 		return parsedModel.kind === "opus" ? DEFAULT_REASONING_EFFORTS_WITH_XHIGH : DEFAULT_REASONING_EFFORTS;
 	}

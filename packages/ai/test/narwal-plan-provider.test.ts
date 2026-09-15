@@ -164,6 +164,37 @@ describe("narwal-plan provider support", () => {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	it("falls back to the lineage parse for ids the seed does not cover", async () => {
+		// The gateway reports no capability metadata, so an unseeded id lands on the
+		// discovery placeholder. Ids whose lineage this catalog knows must still arrive as
+		// reasoners (they would otherwise be unusable for thinking), while ids no lineage
+		// covers must stay conservative — a guessed ladder fails every turn upstream.
+		global.fetch = gatewayModelsFetch([
+			{ id: "gpt-7-hypothetical", object: "model", context_window: 1_050_000, max_output_tokens: 128_000 },
+			{ id: "hy5-unknown", object: "model", context_window: 1_050_000, max_output_tokens: 128_000 },
+		]);
+
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-narwal-lineage-"));
+		try {
+			const manager = createModelManager({
+				...narwalPlanModelManagerOptions({ apiKey: "sk-narwal-test" }),
+				cacheDbPath: path.join(tempDir, "models.db"),
+			});
+			const { models } = await manager.refresh("online");
+
+			const lineage = models.find(model => model.id === "gpt-7-hypothetical");
+			expect(lineage?.reasoning).toBe(true);
+			expect(getSupportedEfforts(lineage!)).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
+
+			const unknown = models.find(model => model.id === "hy5-unknown");
+			expect(unknown?.reasoning).toBe(false);
+			expect(unknown?.thinking).toBeUndefined();
+			expect(getSupportedEfforts(unknown!)).toEqual([]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("narwal-plan login", () => {

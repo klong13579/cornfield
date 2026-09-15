@@ -1,4 +1,5 @@
 import type { ModelManagerOptions } from "../model-manager";
+import { infersReasoningFromFamily } from "../model-thinking";
 import { getBundledModels } from "../models";
 import type { Api, Model } from "../types";
 import { isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
@@ -1188,6 +1189,14 @@ export function narwalPlanModelManagerOptions(
 				mapModel: (entry, defaults) => {
 					const reference = references.get(defaults.id);
 					const model = mapWithBundledReference(entry, defaults, reference, references);
+					// The gateway reports no capability metadata: an id with no seed entry lands on
+					// the discovery placeholder (`reasoning: false`, text-only) even when its lineage
+					// certainly reasons. Fall back to the lineage parse so a new model arrives
+					// usable instead of shipping as a non-thinker the way gpt-6-astra did; ids no
+					// lineage covers keep the conservative placeholder.
+					if (!reference && !findParentReference(defaults.id, references) && infersReasoningFromFamily(model.id)) {
+						model.reasoning = true;
+					}
 					Object.assign(model, { category: inferProbeCategory(model.id) });
 					return model;
 				},
