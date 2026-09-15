@@ -386,13 +386,50 @@ describe("github tool", () => {
 		expect(text).not.toContain("+    go test ./... ");
 	});
 
-	it("lets wrapped GitHub diff output spill to an artifact tail instead of head-truncating", async () => {
+	it("spills a large GitHub diff keeping head and tail with the middle elided", async () => {
 		const diffOutput = Array.from({ length: 400 }, (_, index) => `diff line ${index + 1}`).join("\n");
 		vi.spyOn(git.github, "text").mockResolvedValue(diffOutput);
 
 		const settings = Settings.isolated({
 			"github.enabled": true,
 			"tools.artifactSpillThreshold": 1,
+			"tools.artifactTailBytes": 1,
+			"tools.artifactTailLines": 20,
+		});
+		const tool = wrapToolWithMetaNotice(new GithubTool(createSession("/tmp/test", settings)));
+		const result = await tool.execute(
+			"pr-diff",
+			{ op: "pr_diff", pr: "7", repo: "owner/repo" },
+			undefined,
+			undefined,
+			createToolContext(settings),
+		);
+		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+
+		// Both ends survive: a diff's head names the files it touches, its tail carries the outcome.
+		expect(text).toContain("diff line 1");
+		expect(text).toContain("diff line 400");
+		// The middle goes to the artifact and is announced, not silently dropped.
+		expect(text).not.toContain("diff line 200");
+		expect(text).toContain("elided");
+		expect(text).toContain("Read artifact://");
+		expect(text).not.toContain("Use offset=");
+
+		const truncation = result.details?.meta?.truncation;
+		expect(truncation?.direction).toBe("middle");
+		expect(truncation?.truncatedBy).toBe("middle");
+		expect(truncation?.elidedLines).toBeGreaterThan(0);
+		expect(truncation?.artifactId).toBeTruthy();
+	});
+
+	it("falls back to a tail-only spill when the head budget is switched off", async () => {
+		const diffOutput = Array.from({ length: 400 }, (_, index) => `diff line ${index + 1}`).join("\n");
+		vi.spyOn(git.github, "text").mockResolvedValue(diffOutput);
+
+		const settings = Settings.isolated({
+			"github.enabled": true,
+			"tools.artifactSpillThreshold": 1,
+			"tools.artifactHeadBytes": 0,
 			"tools.artifactTailBytes": 1,
 			"tools.artifactTailLines": 20,
 		});
