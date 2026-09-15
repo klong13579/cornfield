@@ -649,10 +649,10 @@ const INTERCOM_ACTION_DESCRIPTIONS: Record<IntercomActionName, string> = {
 	send: "Send a message",
 	ask: "Send and wait for a reply",
 	reply: "Reply to a pending ask",
-	pending: "List unresolved inbound asks",
+	pending: "List inbound asks awaiting your reply (ask only — a plain send never appears here)",
 	status: "Show connection status",
 	cancel: "Request cancellation of a sent message",
-	history: "Read recently received/sent messages",
+	history: "Read recently received/sent messages (missed-message recovery)",
 };
 
 export const INTERCOM_ACTIONS: Array<{ name: string; description: string }> = INTERCOM_ACTION_NAMES.map(name => ({
@@ -2384,9 +2384,9 @@ Usage:
   intercom({ action: "ask", to: "name-or-id", message: "..." })   → Ask and wait for reply
   intercom({ action: "cancel", messageId: "..." })                 → Request cancellation of a sent message
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
-  intercom({ action: "pending" })                                      → List unresolved inbound asks
+  intercom({ action: "pending" })                 → List inbound asks awaiting your reply (only messages sent with "ask" appear here; a plain "send" never does)
   intercom({ action: "status" })                  → Show connection status
-  intercom({ action: "history" })                 → Read recently received/sent messages (async recovery)`,
+  intercom({ action: "history" })                 → Read recently received/sent messages (the only action that replays what you may have missed)`,
 			promptSnippet:
 				"Use to coordinate with other local pi sessions: list peers, monitor child sessions, send updates, ask for help, or check intercom connectivity.",
 

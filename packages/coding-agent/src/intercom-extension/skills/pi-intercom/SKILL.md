@@ -120,6 +120,10 @@ intercom({ action: "reply", to: "planner", message: "Use exponential backoff sta
 
 `reply` still preserves exact threading under the hood by sending the response with the original `replyTo` value.
 
+`pending` lists **asks waiting for your reply** only — a plain `send` never appears there. To find out whether
+someone sent you something while you were busy, use `history` (the only action that replays messages you may
+have missed; an empty result means "nothing delivered yet", not "nobody sent anything").
+
 **Multiple pending asks — verify before replying.** When more than one inbound ask is unanswered (check
 `intercom({ action: "pending" })`), you MUST cross-check the `replyTo` id against the question you are
 answering — the reply command embedded in each incoming message is bound to that message only. Copying
@@ -274,8 +278,8 @@ new visible project panes should go through the supervisor.
 | `send` | Does not block; infers the sole pending ask as its reply | You don't need a response |
 | `ask` | Blocks until reply (10 min default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`) | You need an answer to continue |
 | `reply` | Resolves by explicit `replyTo`, or the unique pending ask; multiple pending asks fail loud and require `to`/`replyTo` | You were asked something and need to answer naturally |
-| `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
-| `history` | Returns recently received/sent messages | You missed a `send` while busy; async recovery |
+| `pending` | Lists inbound **asks** awaiting your reply — only messages sent with `ask`; a plain `send` never appears here | You need to see who is waiting before replying |
+| `history` | Returns recently received/sent messages — the only action that replays messages you may have missed | You missed a `send` while busy; async recovery |
 | `list` | Returns all sessions with live status | You need to discover targets or choose an idle peer |
 | `list-cwd` | Returns sessions in one directory (default: your own cwd) | You want the peers of a specific repo/cwd |
 | `children` | Returns only YOUR child sessions (the ones that declared you as parent) | You spawned children and want their status without scanning the whole roster |

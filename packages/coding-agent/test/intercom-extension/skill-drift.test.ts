@@ -68,4 +68,17 @@ describe("SKILL.md ↔ 代码：已知会写错的那些事实", () => {
 	test("README 的同源错误不得回潮", () => {
 		expect(readmeMd).not.toContain("`name` = path");
 	});
+
+	test("pending / history 的覆盖范围写清了（只列 ask；send 不会出现）", () => {
+		// 2026-09-16：说明只写 “inbound asks” 时，读的人（含 agent）会当成「全部来信」——
+		// 实测 4/4 个 squad worker 把它当收件箱探针，四次全空。锁的是覆盖范围这个事实（pending 只
+		// 装带 expectsReply 的 `ask`，见 src/intercom-extension/index.ts 的那两处 expectsReply），
+		// 不是措辞：改写法可以，把「send 不会出现」丢掉就会红。
+		const pendingRow = skillMd.split("\n").find(line => line.startsWith("| `pending`"));
+		expect(pendingRow).toBeTruthy();
+		expect(pendingRow).toContain("send");
+		const source = fs.readFileSync(path.join(extensionDir, "index.ts"), "utf8");
+		expect(source).not.toContain("List unresolved inbound asks");
+		expect(skillMd).not.toContain("Lists unresolved inbound asks");
+	});
 });
