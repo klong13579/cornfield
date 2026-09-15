@@ -1580,6 +1580,26 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"edit.blackbox.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "editing",
+			label: "Record Parse Regressions",
+			description: "Append every edit that breaks a file's parse to <agentDir>/edit-blackbox.jsonl",
+		},
+	},
+
+	"edit.blackbox.maxBytes": {
+		type: "integer",
+		default: 5242880,
+		ui: {
+			tab: "editing",
+			label: "Parse Regression Log Limit",
+			description: "Rotate the parse-regression log once it reaches this many bytes (0 = never rotate)",
+		},
+	},
+
 	readLineNumbers: {
 		type: "boolean",
 		default: false,
