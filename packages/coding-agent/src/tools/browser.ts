@@ -53,9 +53,13 @@ import { clampTimeout } from "./tool-timeouts";
 /**
  * Lazy-import puppeteer from a safe CWD so cosmiconfig doesn't choke
  * on malformed package.json files in the user's project tree.
+ *
+ * Exported as the one way this package loads puppeteer: any second
+ * caller (the PDF page reader) must go through it or it re-introduces
+ * the cosmiconfig landmine `puppeteer/00_stealth_*` already paid for.
  */
 let puppeteerModule: typeof Puppeteer | undefined;
-async function loadPuppeteer(): Promise<typeof Puppeteer> {
+export async function loadPuppeteer(): Promise<typeof Puppeteer> {
 	if (puppeteerModule) return puppeteerModule;
 	const prev = process.cwd();
 	const safeDir = getPuppeteerDir();
@@ -73,9 +77,13 @@ async function loadPuppeteer(): Promise<typeof Puppeteer> {
  * Lazily download Chromium on first browser launch via @puppeteer/browsers.
  * Skipped when a system Chromium (NixOS) or PUPPETEER_EXECUTABLE_PATH is set.
  * The browser is cached under ~/.cornfield/puppeteer (getPuppeteerDir).
+ *
+ * Exported (with {@link loadPuppeteer}) as the shared browser-acquisition
+ * entry point: the PDF page reader launches the same Chromium this tool
+ * would, instead of shipping a second resolver for the same three cases.
  */
 let chromiumExecutablePromise: Promise<string | undefined> | undefined;
-async function ensureChromiumExecutable(): Promise<string | undefined> {
+export async function ensureChromiumExecutable(): Promise<string | undefined> {
 	const sysChrome = resolveSystemChromium();
 	if (sysChrome) return sysChrome;
 	const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;

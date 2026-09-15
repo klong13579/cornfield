@@ -31,6 +31,16 @@ import { ImageInputTooLargeError, loadImageInput, MAX_IMAGE_INPUT_BYTES } from "
 import { convertFileWithMarkit } from "../utils/markit";
 import { type ArchiveReader, openArchive, parseArchivePathCandidates } from "./archive-reader";
 import {
+	type ConflictScope,
+	formatConflictSummary,
+	formatConflictWarning,
+	getConflictHistory,
+	parseConflictUri,
+	renderConflictRegion,
+	scanConflictLines,
+	scanFileForConflicts,
+} from "./conflict-detect";
+import {
 	executeReadUrl,
 	isReadableUrlPath,
 	loadReadUrlCacheEntry,
@@ -47,6 +57,7 @@ import {
 	persistToolOutputArtifact,
 } from "./output-meta";
 import { expandPath, formatPathRelativeToCwd, type LineRange, resolveReadPath } from "./path-utils";
+import { parsePdfPageReadPath, renderPdfPageToFile } from "./read-pdf";
 import {
 	formatRangeLabel,
 	isMultiRange,
@@ -406,6 +417,30 @@ function decodeUtf8Text(bytes: Uint8Array): string | null {
 	}
 }
 
+const CONFLICTS_PATH_SUFFIX = ":conflicts";
+
+/**
+ * Strip the `:conflicts` sub-target from a read path, or return `null` when
+ * the path does not carry it.
+ *
+ * It belongs to the same colon-suffixed family as `archive.zip:entry` and
+ * `db.sqlite:table`, with one difference: it applies to any file, so it is
+ * also the one whose suffix could be a real file name. A path that exists
+ * on disk wins — the selector reading is the fallback, never an override.
+ */
+async function splitConflictPathSuffix(readPath: string, cwd: string): Promise<string | null> {
+	if (!readPath.toLowerCase().endsWith(CONFLICTS_PATH_SUFFIX)) return null;
+	const base = readPath.slice(0, -CONFLICTS_PATH_SUFFIX.length);
+	if (base.length === 0) return null;
+	try {
+		await Bun.file(resolveReadPath(readPath, cwd)).stat();
+		return null;
+	} catch (error) {
+		if (!isNotFoundError(error)) throw error;
+		return base;
+	}
+}
+
 function prependSuffixResolutionNotice(text: string, suffixResolution?: { from: string; to: string }): string {
 	if (!suffixResolution) return text;
 
@@ -444,6 +479,8 @@ export interface ReadToolDetails {
 	 * For a multi-range read the text holds every window joined by `…` and `startLine`
 	 * names the first window only — the windows are not contiguous by construction. */
 	displayContent?: { text: string; startLine: number };
+	/** Number of unresolved git conflicts surfaced by this read (drives the footer and the TUI badge). */
+	conflictCount?: number;
 }
 
 type ReadParams = ReadToolInput;
@@ -608,6 +645,58 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			unfoldLimit: num("read.summarize.unfoldLimit"),
 			unfoldUntil: num("read.summarize.unfoldUntil"),
 		};
+	}
+
+	/**
+	 * Resolve a plain filesystem read target: the absolute path, its byte size and
+	 * whether it is a directory. A missing path gets one chance at unique suffix
+	 * resolution before it becomes the tool's not-found error, so every reader
+	 * that targets a plain path resolves (and fails) the same way.
+	 */
+	async #resolvePlainFileTarget(
+		localReadPath: string,
+		signal?: AbortSignal,
+	): Promise<{
+		absolutePath: string;
+		fileSize: number;
+		isDirectory: boolean;
+		suffixResolution?: { from: string; to: string };
+	}> {
+		let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
+		let suffixResolution: { from: string; to: string } | undefined;
+		let isDirectory = false;
+		let fileSize = 0;
+		try {
+			const stat = await Bun.file(absolutePath).stat();
+			fileSize = stat.size;
+			isDirectory = stat.isDirectory();
+		} catch (error) {
+			if (!isNotFoundError(error)) throw error;
+
+			// Attempt unique suffix resolution before falling back to fuzzy suggestions
+			if (!isRemoteMountPath(absolutePath)) {
+				const suffixMatch = await findUniqueSuffixMatch(localReadPath, this.session.cwd, signal);
+				if (suffixMatch) {
+					try {
+						const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
+						absolutePath = suffixMatch.absolutePath;
+						fileSize = retryStat.size;
+						isDirectory = retryStat.isDirectory();
+						suffixResolution = { from: localReadPath, to: suffixMatch.displayPath };
+					} catch {
+						// Suffix match candidate no longer stats — fall through to error path
+					}
+				}
+			}
+
+			if (!suffixResolution) {
+				throw new ToolError(
+					`Path '${localReadPath}' not found. Use \`glob\` or \`grep\` to discover the correct path.`,
+				);
+			}
+		}
+
+		return { absolutePath, fileSize, isDirectory, suffixResolution };
 	}
 
 	async #readFileText(absolutePath: string, signal?: AbortSignal): Promise<string | null> {
@@ -1004,6 +1093,8 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				throw new ToolError(
 					`A tail selector (-${parsed.count}) cannot be applied to ${entityLabel}; listings are not line-addressed. Page with sel=N instead.`,
 				);
+			case "conflicts":
+				throw new ToolError(`A conflict index cannot be read from ${entityLabel}; 'conflicts' applies to files.`);
 			default:
 				return undefined;
 		}
@@ -1235,6 +1326,133 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		}
 	}
 
+	/**
+	 * Resolve a `…:conflicts` (or `sel=conflicts`) request: scan the whole file
+	 * once, register every block in the session's conflict history, and return a
+	 * compact `#N L_a-L_b` index instead of file content. Heavily conflicted
+	 * files are the case this exists for — dumping every body would be wasteful.
+	 */
+	async #readConflictsFor(readPath: string, signal?: AbortSignal): Promise<AgentToolResult<ReadToolDetails>> {
+		const target = await this.#resolvePlainFileTarget(readPath, signal);
+		if (target.isDirectory) {
+			throw new ToolError(
+				`A conflict index cannot be read from a directory ('${readPath}'); 'conflicts' applies to files.`,
+			);
+		}
+		return this.#readFileConflicts(
+			target.absolutePath,
+			formatPathRelativeToCwd(target.absolutePath, this.session.cwd),
+			target.suffixResolution,
+			signal,
+		);
+	}
+
+	async #readFileConflicts(
+		absolutePath: string,
+		displayPath: string,
+		suffixResolution: { from: string; to: string } | undefined,
+		signal?: AbortSignal,
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		throwIfAborted(signal);
+		const scan = await scanFileForConflicts(absolutePath);
+		const history = getConflictHistory(this.session);
+		const entries = scan.blocks.map(block => history.register({ absolutePath, displayPath, ...block }));
+
+		const summary =
+			entries.length === 0
+				? `No unresolved git merge conflicts in ${displayPath}.`
+				: formatConflictSummary(entries, { displayPath, scanTruncated: scan.scanTruncated });
+
+		const details: ReadToolDetails = {
+			resolvedPath: absolutePath,
+			suffixResolution,
+			conflictCount: entries.length,
+		};
+		return toolResult<ReadToolDetails>(details).text(summary).sourcePath(absolutePath).done();
+	}
+
+	/**
+	 * Render a `conflict://<N>` (or `conflict://<N>/<scope>`) region as regular
+	 * file content. The lines keep their original file line numbers so hashline
+	 * anchors line up with the source file, and no truncation footer is appended.
+	 */
+	async #readConflictRegion(id: number, scope: ConflictScope | undefined): Promise<AgentToolResult<ReadToolDetails>> {
+		const entry = getConflictHistory(this.session).get(id);
+		if (!entry) {
+			throw new ToolError(
+				`Conflict #${id} not found. Conflict ids are registered when \`read\` surfaces a marker block; re-read the file to get a current id.`,
+			);
+		}
+
+		const region = renderConflictRegion(entry, scope);
+		const displayMode = resolveFileDisplayMode(this.session);
+		const shouldAddHashLines = displayMode.hashLines;
+		const shouldAddLineNumbers = shouldAddHashLines ? false : displayMode.lineNumbers;
+		const rawText = region.lines.join("\n");
+
+		const details: ReadToolDetails = {
+			resolvedPath: entry.absolutePath,
+			displayContent: { text: rawText, startLine: region.startLine },
+		};
+		return toolResult<ReadToolDetails>(details)
+			.text(formatTextWithMode(rawText, region.startLine, shouldAddHashLines, shouldAddLineNumbers))
+			.sourcePath(entry.absolutePath)
+			.done();
+	}
+
+	/**
+	 * `read <file.pdf>:pN` — render one page through Chromium's PDF viewer and
+	 * return it as an image attachment. The renderer reports its own failures
+	 * (out-of-range page, unloadable PDF, no browser) rather than degrading to
+	 * the extracted-text path, which answers a different question.
+	 */
+	async #readPdfPage(
+		readPath: string,
+		absolutePath: string,
+		pageNumber: number,
+		suffixResolution: { from: string; to: string } | undefined,
+		signal?: AbortSignal,
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const rendered = await renderPdfPageToFile(absolutePath, readPath, pageNumber, signal);
+		let imageInput: Awaited<ReturnType<typeof loadImageInput>> = null;
+		try {
+			imageInput = await loadImageInput({
+				path: readPath,
+				cwd: this.session.cwd,
+				autoResize: this.#autoResizeImages,
+				maxBytes: MAX_IMAGE_SIZE,
+				resolvedPath: rendered.filePath,
+			});
+		} catch (error) {
+			if (error instanceof ImageInputTooLargeError) throw new ToolError(error.message);
+			throw error;
+		} finally {
+			// The rendered page is a scratch artifact; its bytes are already in memory.
+			await fs.rm(rendered.filePath, { force: true }).catch(() => {});
+		}
+		if (!imageInput) {
+			throw new ToolError(
+				`Rendered page ${rendered.page} of '${readPath}', but the image could not be loaded as an attachment.`,
+			);
+		}
+
+		const note = `Rendered page ${rendered.page} of ${rendered.pageCount} of ${readPath} with Chromium.`;
+		const details: ReadToolDetails = {
+			resolvedPath: absolutePath,
+			contentType: imageInput.mimeType,
+		};
+		return this.#withSuffixResolution(
+			toolResult<ReadToolDetails>(details)
+				.content([
+					{ type: "text", text: `${note}\n${imageInput.textNote}` },
+					{ type: "image", data: imageInput.data, mimeType: imageInput.mimeType },
+				])
+				.sourcePath(absolutePath)
+				.done(),
+			suffixResolution,
+		);
+	}
+
 	async execute(
 		_toolCallId: string,
 		params: ReadParams,
@@ -1261,6 +1479,20 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			const internalRouter = this.session.internalRouter;
 			if (internalRouter?.canHandle(readPath)) {
 				return this.#handleInternalUrl(readPath, parseSel(sel));
+			}
+
+			// `conflict://<N>` is deliberately not an internal-URL protocol: it
+			// addresses a region a previous `read` registered in this session, not a
+			// resource a router can resolve on its own. Read side only — the write
+			// side is a branch of the write tool's virtual-path dispatch.
+			const conflictUri = parseConflictUri(readPath);
+			if (conflictUri) {
+				if (conflictUri.id === "*") {
+					throw new ToolError(
+						"Reading `conflict://*` is not supported — wildcards are write-only. Use the `<path>:conflicts` read selector for the full list of conflicts in a file, or read `conflict://<N>` to inspect a single block.",
+					);
+				}
+				return this.#readConflictRegion(conflictUri.id, conflictUri.scope);
 			}
 
 			const parsedUrlTarget = parseReadUrlTarget(readPath, sel);
@@ -1293,6 +1525,32 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 			const localReadPath = readPath;
 
+			// `:conflicts` — the same colon-suffixed sub-target family as
+			// `archive.zip:entry` and `db.sqlite:table`, except it applies to any
+			// file. Resolved before those two so a `:conflicts` suffix is never read
+			// as a SQLite table or an archive member.
+			const conflictsPath = await splitConflictPathSuffix(readPath, this.session.cwd);
+			if (conflictsPath !== null) {
+				return this.#readConflictsFor(conflictsPath, signal);
+			}
+
+			// `file.pdf:pN` — page N of a PDF, rendered by the browser instead of
+			// converted to text. A `.pdf` read without the page suffix keeps its
+			// existing markit conversion.
+			const pdfTarget = parsePdfPageReadPath(readPath);
+			if (pdfTarget) {
+				if (sel) {
+					throw new ToolError(
+						`Cannot combine ':p${pdfTarget.page}' with a selector ('sel=${sel}'): a rendered PDF page takes no line range.`,
+					);
+				}
+				const target = await this.#resolvePlainFileTarget(pdfTarget.pdfPath, signal);
+				if (target.isDirectory) {
+					throw new ToolError(`'${pdfTarget.pdfPath}' is a directory, not a PDF.`);
+				}
+				return this.#readPdfPage(readPath, target.absolutePath, pdfTarget.page, target.suffixResolution, signal);
+			}
+
 			// SQLite reads consume `sel` as table/query syntax (e.g. `users?limit=5`),
 			// so they must be dispatched before the line-selector parse rejects it.
 			const sqlitePath = await this.#resolveSqliteReadPath(readPath, signal);
@@ -1301,48 +1559,19 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 
 			const parsed = parseSel(sel);
+			if (parsed.kind === "conflicts") {
+				return this.#readConflictsFor(localReadPath, signal);
+			}
 
 			const archivePath = await this.#resolveArchiveReadPath(localReadPath, signal);
 			if (archivePath) {
 				return this.#readArchive(readPath, parsed, archivePath, signal);
 			}
 
-			let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
-			let suffixResolution: { from: string; to: string } | undefined;
-
-			let isDirectory = false;
-			let fileSize = 0;
-			try {
-				const stat = await Bun.file(absolutePath).stat();
-				fileSize = stat.size;
-				isDirectory = stat.isDirectory();
-			} catch (error) {
-				if (isNotFoundError(error)) {
-					// Attempt unique suffix resolution before falling back to fuzzy suggestions
-					if (!isRemoteMountPath(absolutePath)) {
-						const suffixMatch = await findUniqueSuffixMatch(localReadPath, this.session.cwd, signal);
-						if (suffixMatch) {
-							try {
-								const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
-								absolutePath = suffixMatch.absolutePath;
-								fileSize = retryStat.size;
-								isDirectory = retryStat.isDirectory();
-								suffixResolution = { from: localReadPath, to: suffixMatch.displayPath };
-							} catch {
-								// Suffix match candidate no longer stats — fall through to error path
-							}
-						}
-					}
-
-					if (!suffixResolution) {
-						throw new ToolError(
-							`Path '${localReadPath}' not found. Use \`glob\` or \`grep\` to discover the correct path.`,
-						);
-					}
-				} else {
-					throw error;
-				}
-			}
+			const { absolutePath, fileSize, isDirectory, suffixResolution } = await this.#resolvePlainFileTarget(
+				localReadPath,
+				signal,
+			);
 
 			if (isDirectory) {
 				const dirResult = await this.#readDirectory(
@@ -1641,6 +1870,37 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					details.displayContent = capturedDisplayContent;
 				}
 
+				// Unresolved merge conflicts are surfaced only when the window
+				// actually contains them: a clean file renders byte-identically to
+				// what it rendered before this scan existed.
+				if (!truncation.firstLineExceedsLimit && collectedLines.length > 0) {
+					const blocks = scanConflictLines(collectedLines, startLineDisplay);
+					if (blocks.length > 0) {
+						const history = getConflictHistory(this.session);
+						const displayPathForWarning = formatPathRelativeToCwd(absolutePath, this.session.cwd);
+						const entries = blocks.map(block =>
+							history.register({ absolutePath, displayPath: displayPathForWarning, ...block }),
+						);
+						// The whole-file scan only enriches the "N of M visible" count, so
+						// it is paid for only once the window has shown a conflict.
+						let totalInFile = entries.length;
+						let scanTruncated = false;
+						try {
+							const fileScan = await scanFileForConflicts(absolutePath);
+							totalInFile = Math.max(entries.length, fileScan.blocks.length);
+							scanTruncated = fileScan.scanTruncated;
+						} catch {
+							// Best-effort enrichment; fall back to the window-only count.
+						}
+						outputText += formatConflictWarning(entries, {
+							totalInFile,
+							displayPath: displayPathForWarning,
+							scanTruncated,
+						});
+						details.conflictCount = entries.length;
+					}
+				}
+
 				content = [{ type: "text", text: outputText }];
 			}
 
@@ -1904,6 +2164,13 @@ export const readToolRenderer = {
 			const startLine = args.offset ?? 1;
 			const endLine = args.limit !== undefined ? startLine + args.limit - 1 : "";
 			title += `:${startLine}${endLine ? `-${endLine}` : ""}`;
+		}
+		// A read that surfaced conflicts says so in its title: the warning footer is
+		// inside the text the model reads, and the user needs to see the same thing
+		// without expanding the block.
+		const conflictCount = details?.conflictCount ?? 0;
+		if (conflictCount > 0) {
+			title += ` ${uiTheme.fg("warning", `(⚠ ${conflictCount} conflict${conflictCount === 1 ? "" : "s"})`)}`;
 		}
 		let cachedWidth: number | undefined;
 		let cachedLines: string[] | undefined;

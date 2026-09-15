@@ -13,6 +13,8 @@ import { ToolError } from "./tool-errors";
 export type ParsedSelector =
 	| { kind: "none" }
 	| { kind: "raw" }
+	/** The unresolved-merge-conflict index of the file — see `conflict-detect.ts`. */
+	| { kind: "conflicts" }
 	| { kind: "lines"; ranges: [LineRange, ...LineRange[]] }
 	/** `-N` — the last N lines. Needs the source's line count before it can be sliced. */
 	| { kind: "tail"; count: number };
@@ -52,18 +54,19 @@ export function resolveTailSelector(parsed: ParsedSelector, totalLines: number):
  * Parse `sel`. A selector that is not recognized is an error, never `none`:
  * reading the whole resource after the caller asked for a slice silently widens
  * the request. Bare `N` is open-ended from N, which is what read.md documents;
- * `-N` is the last N lines. Compound selectors (`raw:50-100`) and the
- * `conflicts` / `img` modes are not accepted here.
+ * `-N` is the last N lines. Compound selectors (`raw:50-100`) and the `img`
+ * mode are not accepted here.
  */
 export function parseSel(sel: string | undefined): ParsedSelector {
 	if (!sel || sel.length === 0) return { kind: "none" };
 	if (sel === "raw") return { kind: "raw" };
+	if (sel === "conflicts") return { kind: "conflicts" };
 	const ranges = parseLineRanges(sel);
 	if (ranges) return { kind: "lines", ranges };
 	const count = parseTailCount(sel);
 	if (count !== null) return { kind: "tail", count };
 	throw new ToolError(
-		`Unsupported selector "${sel}". Use N, N-M, N+K (K lines from N), N- (from N onward), -N (last N lines), a comma-separated list of ranges, or raw.`,
+		`Unsupported selector "${sel}". Use N, N-M, N+K (K lines from N), N- (from N onward), -N (last N lines), a comma-separated list of ranges, raw, or conflicts.`,
 	);
 }
 

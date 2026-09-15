@@ -19,6 +19,15 @@ import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { parseArchivePathCandidates } from "./archive-reader";
 import { assertEditableFile } from "./auto-generated-guard";
 import { normalizeToolName } from "./builtin-names";
+import {
+	type ConflictEntry,
+	conflictRegionPresent,
+	conflictRegionsEqual,
+	expandContentTokens,
+	getConflictHistory,
+	parseConflictUri,
+	spliceConflict,
+} from "./conflict-detect";
 import { invalidateFsScanAfterWrite } from "./fs-cache-invalidation";
 import { type OutputMeta, outputMeta } from "./output-meta";
 import { formatPathRelativeToCwd } from "./path-utils";
@@ -215,6 +224,100 @@ function summarizeWriteArgs(pathArg: string, contentArg: WriteContent): string {
 function augmentWriteError(error: unknown, pathArg: string, contentArg: WriteContent): ToolError {
 	const message = error instanceof Error ? error.message : String(error);
 	return new ToolError(`${message}\n\n${summarizeWriteArgs(pathArg, contentArg)}`);
+}
+
+const BULK_DIRECTIVE_RE = /^#?(\d+)\s*[:=]\s*(@ours|@theirs|@base|@both)$/;
+/**
+ * The head of a per-id directive line — `<id>:` / `<id>=` (optionally `#`-prefixed),
+ * regardless of whether its value is a valid `@side` token. Used only to sharpen the
+ * error message (a token that is not one of the four, versus a line that is not a
+ * directive at all).
+ */
+const BULK_DIRECTIVE_HEAD_RE = /^#?\d+\s*[:=]/;
+
+function truncateDirectiveLine(line: string): string {
+	return line.length > 60 ? `${line.slice(0, 57)}…` : line;
+}
+
+/**
+ * Parse `conflict://*` per-id directive content: every non-empty line must be
+ * `<id>: @side` (also accepted: `#<id> = @side`), where `@side` is one of
+ * `@ours` / `@theirs` / `@base` / `@both`.
+ *
+ * Returns `null` only when NO line is directive-shaped (→ uniform bulk mode).
+ * Throws on duplicate ids, and — critically — on a *partial* directive block:
+ * content that mixes valid `<id>: @side` lines with lines that aren't. Without
+ * that guard a per-id write carrying any non-token value (a literal or
+ * multi-line replacement, e.g. `15: <multi-line content>`) fell through to
+ * uniform bulk mode, which pasted the raw directive text verbatim into every
+ * block and still reported success. Per-id bulk is token-only; literal or
+ * multi-line replacements must go through individual `conflict://<N>` writes.
+ */
+function parseBulkDirectives(content: string): Map<number, string> | null {
+	const map = new Map<number, string>();
+	const stray: string[] = [];
+	let sawDirective = false;
+	for (const raw of content.split("\n")) {
+		const line = raw.trim();
+		if (line.length === 0) continue;
+		const match = line.match(BULK_DIRECTIVE_RE);
+		if (!match) {
+			stray.push(line);
+			continue;
+		}
+		sawDirective = true;
+		const id = Number.parseInt(match[1]!, 10);
+		if (map.has(id)) {
+			throw new ToolError(`Bulk directive lists conflict #${id} twice — each id may appear once.`);
+		}
+		map.set(id, match[2]!);
+	}
+	// No directive lines at all → not a per-id block; caller uses uniform mode.
+	if (!sawDirective) return null;
+	if (stray.length > 0) {
+		const sample = stray[0]!;
+		const tokenHint = BULK_DIRECTIVE_HEAD_RE.test(sample)
+			? `Per-id bulk only accepts the tokens @ours/@theirs/@base/@both — one side per id, single line. `
+			: "";
+		throw new ToolError(
+			`Malformed \`conflict://*\` per-id block: ${stray.length} line(s) are not \`<id>: @side\` directives (first: \`${truncateDirectiveLine(sample)}\`). ` +
+				tokenHint +
+				`Literal or multi-line replacement content isn't supported in a per-id block — resolve those blocks with individual \`write({ path: "conflict://<N>", content })\` calls (you can issue several at once). ` +
+				`For a pure pick-a-side pass, make every non-empty line \`<id>: @ours\` (or @theirs/@base/@both).`,
+		);
+	}
+	return map;
+}
+
+/**
+ * Resolve per-id directives, preferring the pre-strip `raw` content and falling
+ * back to the hashline-stripped `stripped` content.
+ *
+ * Raw is preferred because the `<id>:` directive heads look exactly like
+ * hashline `LINE:` prefixes and would be eaten by stripping. When the two
+ * contents are identical (hashline mode off) a single parse decides everything,
+ * so a malformed-block error propagates straight through — a `?? parseBulk(...)`
+ * chain would swallow it and silently degrade to uniform bulk mode, pasting the
+ * raw directive text into every block. When they differ, a malformed raw block
+ * still defers to a *clean* stripped block, but otherwise surfaces its error
+ * rather than degrading.
+ */
+function resolveBulkDirectives(raw: string, stripped: string): Map<number, string> | null {
+	if (raw === stripped) return parseBulkDirectives(raw);
+	let rawResult: Map<number, string> | null;
+	try {
+		rawResult = parseBulkDirectives(raw);
+	} catch (rawError) {
+		let fallback: Map<number, string> | null = null;
+		try {
+			fallback = parseBulkDirectives(stripped);
+		} catch {
+			fallback = null;
+		}
+		if (fallback) return fallback;
+		throw rawError;
+	}
+	return rawResult ?? parseBulkDirectives(stripped);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -563,6 +666,250 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		}
 	}
 
+	/**
+	 * Splice the conflict region recorded in `entry` out of its file and replace
+	 * it with `replacementContent` (markers and all sides included, so the
+	 * caller writes the resolution, not the surviving text).
+	 *
+	 * The write deliberately bypasses the LSP writethrough: the file may still
+	 * hold other unresolved marker blocks, so formatting could corrupt them and
+	 * diagnostics would be marker-noise anyway.
+	 *
+	 * Entry ids are session-stable, so they keep working after later writes
+	 * resolve other blocks in the same file. The recorded region is re-located
+	 * on disk by content before splicing, so an out-of-band edit surfaces as a
+	 * clear error instead of corrupting the file.
+	 */
+	async #resolveConflict(
+		entry: ConflictEntry,
+		replacementContent: string,
+		signal: AbortSignal | undefined,
+	): Promise<AgentToolResult<WriteToolDetails>> {
+		const absolutePath = entry.absolutePath;
+		let originalText: string;
+		try {
+			originalText = await Bun.file(absolutePath).text();
+		} catch (error) {
+			if (isEnoent(error)) {
+				throw new ToolError(`Conflict #${entry.id} target '${entry.displayPath}' no longer exists.`);
+			}
+			throw error;
+		}
+
+		const expanded = expandContentTokens(replacementContent, entry);
+		const splice = spliceConflict(originalText, entry, expanded);
+		const newContent = splice.text;
+
+		await writethroughNoop(absolutePath, newContent, signal);
+		invalidateFsScanAfterWrite(absolutePath);
+
+		const history = getConflictHistory(this.session);
+		history.invalidate(entry.id);
+		// Drop stale duplicate registrations of the same region: a re-read after
+		// an out-of-band shift registers a fresh id at the new startLine while the
+		// stale twin persists at the old one. A DISTINCT conflict block that is
+		// merely byte-identical still occurs in the post-splice content and must
+		// stay addressable.
+		for (const other of history.entries()) {
+			if (
+				other.absolutePath === absolutePath &&
+				conflictRegionsEqual(other, entry) &&
+				!conflictRegionPresent(newContent, other)
+			) {
+				history.invalidate(other.id);
+			}
+		}
+
+		const range =
+			entry.startLine === entry.endLine
+				? `line ${entry.startLine}`
+				: `lines ${entry.startLine}\u2013${entry.endLine}`;
+		let resultText = `Resolved conflict #${entry.id} at ${range} in ${entry.displayPath}.`;
+		const echoTrimmed = splice.trimmedLeading + splice.trimmedTrailing;
+		if (echoTrimmed > 0) {
+			resultText += `\nNote: dropped ${echoTrimmed} content line(s) that duplicated the code adjacent to the conflict region — writes replace only the marker block; surrounding lines stay in place.`;
+		}
+
+		return {
+			content: [{ type: "text", text: resultText }],
+			details: {},
+		};
+	}
+
+	/**
+	 * Look up a single conflict entry by id and dispatch to {@link #resolveConflict}.
+	 * Throws a clear `not found` error when the id has been invalidated.
+	 */
+	async #resolveSingleConflictById(
+		id: number,
+		replacementContent: string,
+		signal: AbortSignal | undefined,
+	): Promise<AgentToolResult<WriteToolDetails>> {
+		const entry = getConflictHistory(this.session).get(id);
+		if (!entry) {
+			throw new ToolError(
+				`Conflict #${id} not found. Conflict ids are registered when \`read\` surfaces a marker block; re-read the file to get a current id.`,
+			);
+		}
+		enforcePlanModeWrite(this.session, entry.absolutePath, { op: "update" });
+		return this.#resolveConflict(entry, replacementContent, signal);
+	}
+
+	/**
+	 * Bulk-resolve every registered conflict via `conflict://*`.
+	 *
+	 * Entries are grouped by file and applied bottom-up by recorded start line
+	 * so each splice keeps later anchors valid. `content` tokens are expanded
+	 * *per entry*, so `content: "@ours"` keeps each block's own ours side rather
+	 * than collapsing every conflict to the first block's ours.
+	 *
+	 * All-or-nothing within a file: if any splice for a file fails (stale
+	 * anchors, missing base for `@base`, …) that file is left untouched and the
+	 * failure is reported. Files that succeeded are still written, and the
+	 * result text reports per-file counts so the caller can re-read the failed
+	 * files and retry.
+	 */
+	async #resolveAllConflicts(
+		replacementContent: string,
+		rawContent: string,
+		signal: AbortSignal | undefined,
+	): Promise<AgentToolResult<WriteToolDetails>> {
+		const history = getConflictHistory(this.session);
+		const allEntries = history.entries();
+		if (allEntries.length === 0) {
+			throw new ToolError(
+				"`conflict://*` has nothing to resolve — no conflicts are currently registered. Re-read the file(s) with conflicts first.",
+			);
+		}
+
+		// Per-id directive mode: content made solely of `<id>: @side` lines resolves
+		// each listed conflict with that side in one call — ideal for merge-hell
+		// files where dozens of pick-one blocks each need their own winner. Parsed
+		// from the PRE-strip content: hashline prefix stripping would otherwise eat
+		// the `<id>:` heads as echoed line numbers.
+		const directives = resolveBulkDirectives(rawContent, replacementContent);
+		if (directives) {
+			const known = new Set(allEntries.map(entry => entry.id));
+			const unknown = [...directives.keys()].filter(id => !known.has(id));
+			if (unknown.length > 0) {
+				throw new ToolError(
+					`Bulk directive references unknown conflict id(s) ${unknown.map(id => `#${id}`).join(", ")}. Currently registered: ${allEntries.map(e => `#${e.id}`).join(", ")}.`,
+				);
+			}
+		}
+		const selectedEntries = directives ? allEntries.filter(entry => directives.has(entry.id)) : allEntries;
+		const contentFor = (entry: ConflictEntry): string =>
+			directives ? (directives.get(entry.id) as string) : replacementContent;
+
+		const byFile = new Map<string, ConflictEntry[]>();
+		for (const entry of selectedEntries) {
+			const bucket = byFile.get(entry.absolutePath) ?? [];
+			bucket.push(entry);
+			byFile.set(entry.absolutePath, bucket);
+		}
+		// Gate every target before the first splice: a bulk resolve that is not
+		// allowed to touch one of its files must not have touched the others.
+		for (const absolutePath of byFile.keys()) {
+			enforcePlanModeWrite(this.session, absolutePath, { op: "update" });
+		}
+
+		const succeededFiles: { displayPath: string; count: number }[] = [];
+		const failedFiles: { displayPath: string; count: number; error: string }[] = [];
+		let totalResolvedIds = 0;
+		let totalEchoTrimmed = 0;
+
+		for (const [absolutePath, fileEntries] of byFile) {
+			const sample = fileEntries[0]!;
+			let text: string;
+			try {
+				text = await Bun.file(absolutePath).text();
+			} catch (error) {
+				failedFiles.push({
+					displayPath: sample.displayPath,
+					count: fileEntries.length,
+					error: isEnoent(error)
+						? "file no longer exists"
+						: error instanceof Error
+							? error.message
+							: String(error),
+				});
+				continue;
+			}
+
+			// Bottom-up: resolving a later block never moves an earlier anchor.
+			fileEntries.sort((a, b) => b.startLine - a.startLine);
+			const resolvedEntries: ConflictEntry[] = [];
+			const staleEntries: ConflictEntry[] = [];
+			let failure: string | undefined;
+			for (const entry of fileEntries) {
+				try {
+					const expanded = expandContentTokens(contentFor(entry), entry);
+					const splice = spliceConflict(text, entry, expanded);
+					text = splice.text;
+					totalEchoTrimmed += splice.trimmedLeading + splice.trimmedTrailing;
+					resolvedEntries.push(entry);
+				} catch (error) {
+					// A locate-miss for a region an earlier entry already spliced in
+					// this pass is a stale duplicate registration (re-read after an
+					// out-of-band shift) — treat it as already resolved.
+					if (resolvedEntries.some(done => conflictRegionsEqual(done, entry))) {
+						staleEntries.push(entry);
+						continue;
+					}
+					failure = error instanceof Error ? error.message : String(error);
+					break;
+				}
+			}
+			if (failure !== undefined) {
+				failedFiles.push({ displayPath: sample.displayPath, count: fileEntries.length, error: failure });
+				continue;
+			}
+
+			await writethroughNoop(absolutePath, text, signal);
+			invalidateFsScanAfterWrite(absolutePath);
+			for (const entry of resolvedEntries) history.invalidate(entry.id);
+			for (const entry of staleEntries) history.invalidate(entry.id);
+			succeededFiles.push({ displayPath: sample.displayPath, count: resolvedEntries.length });
+			totalResolvedIds += resolvedEntries.length;
+		}
+
+		const summaryLines: string[] = [];
+		const fileWord = (n: number) => (n === 1 ? "file" : "files");
+		const conflictWord = (n: number) => (n === 1 ? "conflict" : "conflicts");
+		if (succeededFiles.length > 0) {
+			summaryLines.push(
+				`Resolved ${totalResolvedIds} ${conflictWord(totalResolvedIds)} across ${succeededFiles.length} ${fileWord(succeededFiles.length)}:`,
+			);
+			for (const file of succeededFiles) {
+				summaryLines.push(`  ${file.displayPath}: ${file.count} ${conflictWord(file.count)}`);
+			}
+		}
+		if (directives && selectedEntries.length < allEntries.length) {
+			const remaining = allEntries.filter(entry => !directives.has(entry.id)).map(entry => `#${entry.id}`);
+			summaryLines.push(
+				`Directive mode: ${remaining.length} unlisted ${conflictWord(remaining.length)} still registered (${remaining.join(", ")}).`,
+			);
+		}
+		if (totalEchoTrimmed > 0) {
+			summaryLines.push(
+				`Note: dropped ${totalEchoTrimmed} content line(s) that duplicated code adjacent to conflict regions — writes replace only the marker block; surrounding lines stay in place.`,
+			);
+		}
+		if (failedFiles.length > 0) {
+			summaryLines.push(
+				`FAILED to resolve ${failedFiles.length} ${fileWord(failedFiles.length)} — registered entries left intact for retry:`,
+			);
+			for (const file of failedFiles) {
+				summaryLines.push(`  ${file.displayPath}: ${file.count} ${conflictWord(file.count)} (${file.error})`);
+			}
+		}
+
+		if (failedFiles.length > 0 && succeededFiles.length === 0) {
+			throw new ToolError(summaryLines.join("\n"));
+		}
+		return { content: [{ type: "text", text: summaryLines.join("\n") }], details: {} };
+	}
+
 	async execute(
 		_toolCallId: string,
 		{ path, content }: WriteParams,
@@ -576,23 +923,56 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			if (typeof content !== "string") {
 				const deviceResult = await this.#writeXdDevice(path, content, signal, _onUpdate, context);
 				if (deviceResult) return deviceResult;
+				// conflict:// takes text: an object/array has nothing to splice into
+				// the marker block, and the generic "non-JSON target" message would
+				// bury that.
+				if (parseConflictUri(path)) {
+					throw new ToolError(
+						"conflict:// writes take the resolved text as a string in `content` — or a line of `@ours` / `@theirs` / `@base` / `@both`.",
+					);
+				}
 				if (!isJsonSeriesTarget(path)) throw objectContentError(path, content);
 				const absolutePath = resolvePlanPath(this.session, path);
 				content = await serializeJsonContent(path, absolutePath, content);
 			}
 
+			// Past this point `content` is text. Bound once so the dispatch
+			// closures below hold the narrowed type, not the union.
+			const rawContent = content;
+
 			// Strip hashline display prefixes (LINE+ID|) if the model copied them from read output
-			const { text: cleanContent, stripped } = stripWriteContent(this.session, content);
+			const { text: cleanContent, stripped } = stripWriteContent(this.session, rawContent);
 
 			// Single virtual-path dispatch table: every non-plain-path write target
-			// (xd:// device execution, `archive.zip:entry` and `db.sqlite:table`
-			// concatenation paths) is one entry tried in order; plain filesystem
-			// writes are the terminal fallback. There is no second dispatch path.
+			// (xd:// device execution, `conflict://<N>` resolution, `archive.zip:entry`
+			// and `db.sqlite:table` concatenation paths) is one entry tried in order;
+			// plain filesystem writes are the terminal fallback. There is no second
+			// dispatch path.
 			const dispatch: Array<{
 				try(path: string, text: string): Promise<AgentToolResult<WriteToolDetails> | null>;
 			}> = [
 				{
 					try: (p, text) => this.#writeXdDevice(p, text, signal, _onUpdate, context),
+				},
+				{
+					try: async (p, text) => {
+						const conflictUri = parseConflictUri(p);
+						if (!conflictUri) return null;
+						if (conflictUri.scope) {
+							throw new ToolError(
+								`Conflict URI scope '/${conflictUri.scope}' is read-only — read \`conflict://${conflictUri.id}/${conflictUri.scope}\` to inspect that side. To write, drop the scope (\`conflict://${conflictUri.id}\`) and put the chosen content (or shorthand like \`@${conflictUri.scope}\`) in \`content\`.`,
+							);
+						}
+						const result =
+							conflictUri.id === "*"
+								? await this.#resolveAllConflicts(text, rawContent, signal)
+								: await this.#resolveSingleConflictById(conflictUri.id, text, signal);
+						if (conflictUri.recoveredPrefix === undefined) return result;
+						return this.#appendNote(
+							result,
+							`Note: stripped erroneous '${conflictUri.recoveredPrefix}:' prefix from path; conflict URIs are global (use \`conflict://${conflictUri.id}\`, not \`<file>:conflict://${conflictUri.id}\`).`,
+						);
+					},
 				},
 				{
 					try: async (p, text) => {
@@ -650,6 +1030,15 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		}).catch((error: unknown) => {
 			throw augmentWriteError(error, path, content);
 		});
+	}
+
+	/** Append a note to a result's first text block, if it has one. */
+	#appendNote(result: AgentToolResult<WriteToolDetails>, note: string): AgentToolResult<WriteToolDetails> {
+		const firstText = result.content.find(
+			(block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string",
+		);
+		if (firstText) firstText.text += `\n${note}`;
+		return result;
 	}
 
 	/** Append the hashline-stripping note to the first text block, if any prefixes were stripped. */
