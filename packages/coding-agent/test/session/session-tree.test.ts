@@ -16,6 +16,7 @@ import {
 	applyReconcilePlan,
 	type ChildSessionRecord,
 	planReconcile,
+	type ReconcileLiveness,
 } from "../../src/session/session-tree";
 
 const RUN_ID = "run-1";
@@ -227,9 +228,13 @@ describe("applyChildSessionReport", () => {
 	});
 });
 
+function liveness(livePids: Iterable<number> = [], ownedSessionIds: Iterable<string> = []): ReconcileLiveness {
+	return { livePids: new Set(livePids), ownedSessionIds: new Set(ownedSessionIds) };
+}
+
 describe("planReconcile", () => {
 	test("leaves terminal nodes alone", () => {
-		const plan = planReconcile([baseRecord({}, { status: "completed" })], new Set());
+		const plan = planReconcile([baseRecord({}, { status: "completed" })], liveness());
 		expect(plan.decisions).toEqual([
 			{
 				sessionId: "child-1",
@@ -241,7 +246,7 @@ describe("planReconcile", () => {
 	});
 
 	test("adopts a non-terminal child whose process is still registered under the parent", () => {
-		const plan = planReconcile([baseRecord({ lastPid: 4242 })], new Set([4242]));
+		const plan = planReconcile([baseRecord({ lastPid: 4242 })], liveness([4242]));
 		expect(plan.decisions).toEqual([
 			{
 				sessionId: "child-1",
@@ -253,8 +258,27 @@ describe("planReconcile", () => {
 		]);
 	});
 
+	test("adopts a child this process owns even with no pid to match — a launch in flight is not an orphan", () => {
+		// Queued behind a full slot, or still shaking hands: no pid exists yet, and
+		// declaring it orphaned would kill a delegation that is still coming up.
+		const plan = planReconcile([baseRecord()], liveness([], ["child-1"]));
+		expect(plan.decisions).toEqual([
+			{
+				sessionId: "child-1",
+				disposition: "adopted",
+				status: "running",
+				reason: "this process is still supervising or launching this child",
+			},
+		]);
+	});
+
+	test("a terminal child stays terminal even while this process still owns it", () => {
+		const plan = planReconcile([baseRecord({}, { status: "cancelled" })], liveness([], ["child-1"]));
+		expect(plan.decisions[0]).toMatchObject({ disposition: "terminal", status: "cancelled" });
+	});
+
 	test("orphans a non-terminal child whose process is gone", () => {
-		const plan = planReconcile([baseRecord({ lastPid: 4242 })], new Set());
+		const plan = planReconcile([baseRecord({ lastPid: 4242 })], liveness());
 		expect(plan.decisions[0]).toMatchObject({
 			disposition: "orphaned",
 			status: "failed",
@@ -264,7 +288,7 @@ describe("planReconcile", () => {
 	});
 
 	test("orphans a child no process was ever recorded for", () => {
-		const plan = planReconcile([baseRecord()], new Set([4242]));
+		const plan = planReconcile([baseRecord()], liveness([4242]));
 		expect(plan.decisions[0]).toMatchObject({ disposition: "orphaned", status: "failed" });
 		expect(plan.decisions[0]?.reason).toContain("no process was ever recorded");
 	});
@@ -278,7 +302,7 @@ describe("applyReconcilePlan", () => {
 			baseRecord({ lastPid: 33 }, { sessionId: "child-3", status: "completed" }),
 		];
 
-		const plan = planReconcile(records, new Set([11]));
+		const plan = planReconcile(records, liveness([11]));
 		const applied = applyReconcilePlan(records, plan, NOW + 100);
 
 		expect(applied.applied.map(decision => decision.sessionId)).toEqual(["child-2"]);

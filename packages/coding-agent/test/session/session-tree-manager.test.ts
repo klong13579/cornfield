@@ -206,6 +206,31 @@ describe("SessionTreeManager.delegate", () => {
 		expect(records[0]?.node.status).toBe("failed");
 		expect(records[0]?.statusDetail).toContain("the child did not start");
 	});
+
+	test("refuses a delegation that tries to forge its own orchestrator edge", async () => {
+		const fixture = await fakeChild();
+		const { manager } = managerWith();
+
+		// Every protected key, because a single missed one is enough to launch a child
+		// whose reports the ledger cannot match or attribute.
+		for (const key of Object.values(CHILD_SESSION_ENV)) {
+			const error = await manager
+				.delegate(delegationFor(fixture, { env: { ...fixture.env, [key]: "spoofed" } }))
+				.then(
+					() => null,
+					(cause: unknown) => cause as Error,
+				);
+			expect(error?.message).toContain(key);
+		}
+
+		// Refused before anything happened: no process, no ledger entry, and a normal
+		// delegation afterwards is unaffected.
+		expect(await manager.records()).toEqual([]);
+		expect(await fixture.recordedPid()).toBeNull();
+		const ok = await manager.delegate(delegationFor(fixture));
+		expect(ok.record.node.status).toBe("running");
+		expect(ok.child.spec.env?.[CHILD_SESSION_ENV.runId]).toBe(ok.record.runId);
+	});
 });
 
 describe("SessionTreeManager.applyReport", () => {
@@ -482,6 +507,80 @@ describe("SessionTreeManager.reconcile", () => {
 		// read would otherwise terminalize a whole tree of live children.
 		expect((await store.load())[0]?.node.status).toBe("running");
 		expect((await store.load())[0]?.node.sessionId).toBe(record.node.sessionId);
+	});
+
+	test("a completed report that lands during reconcile is not swept away by the orphan pass", async () => {
+		const fixture = await fakeChild();
+		const store = new MemorySessionTreeStore();
+		// The broker read is the one thing reconcile does outside the lock, so it is
+		// where a report can land between the decision and the write.
+		const broker = Promise.withResolvers<ReadonlySet<number>>();
+		const { manager } = managerWith({
+			store,
+			liveness: {
+				async liveChildPids() {
+					return await broker.promise;
+				},
+			},
+		});
+		const { record, child } = await manager.delegate(delegationFor(fixture));
+		const pid = child.transport.pid!;
+
+		const reconciling = manager.reconcile();
+		const reported = await manager.applyReport(
+			{ pid },
+			formatChildSessionReport(
+				{ runId: record.runId, lifecycle: "completed", result: "/tmp/child-result.jsonl" },
+				"finished while the parent was checking the roster",
+			),
+		);
+		expect(reported).toMatchObject({ applied: true });
+
+		// The broker answers "nothing is alive" — the answer an orphan sweep acts on.
+		broker.resolve(new Set<number>());
+		const result = await reconciling;
+
+		// The report wins: it is newer evidence than the snapshot reconcile started
+		// from, and a child that reported completed must not be written back as the
+		// failed orphan that snapshot still described.
+		expect(result.applied).toEqual([]);
+		expect(result.records.find(entry => entry.node.sessionId === record.node.sessionId)?.node.status).toBe(
+			"completed",
+		);
+		const settled = await manager.record(record.node.sessionId);
+		expect(settled?.node.status).toBe("completed");
+		expect(settled?.node.resultRef).toBe("/tmp/child-result.jsonl");
+		expect((await store.load())[0]?.node.status).toBe("completed");
+	});
+
+	test("a child delegated while reconcile is running survives the sweep", async () => {
+		const fixture = await fakeChild();
+		const store = new MemorySessionTreeStore();
+		const broker = Promise.withResolvers<ReadonlySet<number>>();
+		const { manager } = managerWith({
+			store,
+			liveness: {
+				async liveChildPids() {
+					return await broker.promise;
+				},
+			},
+		});
+
+		const reconciling = manager.reconcile();
+		const delegated = await manager.delegate(delegationFor(fixture, { sessionId: "child-late" }));
+
+		broker.resolve(new Set<number>());
+		const result = await reconciling;
+
+		// The new delegation is not in the snapshot reconcile read, is not on the
+		// broker yet when it answered, and has no pid it could be matched by — every
+		// reason to call it an orphan. It is not one: this process is running it.
+		expect(result.plan.decisions.find(decision => decision.sessionId === "child-late")).toMatchObject({
+			disposition: "adopted",
+		});
+		const settled = await manager.record(delegated.record.node.sessionId);
+		expect(settled?.node.status).toBe("running");
+		expect((await store.load()).map(entry => entry.node.sessionId)).toContain("child-late");
 	});
 
 	test("does not touch a child that already finished", async () => {

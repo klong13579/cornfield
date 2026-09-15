@@ -1,7 +1,7 @@
 /**
  * The Session Tree Manager — the parent half of the parent/child session loop.
  *
- * It owns four things, and nothing else:
+ * It owns five things, and nothing else:
  *
  *   1. **Delegation.** `delegate()` turns a request into a persisted ledger entry
  *      plus a real, isolated child process launched through the Child Session
@@ -44,7 +44,7 @@
 
 import { logger } from "@cornfield/utils";
 import type { AgentId, ProjectId, SessionId, SessionNode } from "../agent-domain/types";
-import { childSessionEnv } from "../intercom-extension/child-session-metadata";
+import { CHILD_SESSION_ENV, childSessionEnv } from "../intercom-extension/child-session-metadata";
 import { type ChildSessionCommand, ChildSessionUnavailableError } from "./child-session-process";
 import { hasChildSessionReportTag, parseChildSessionReport } from "./child-session-report";
 import type { ChildSession, ChildSessionSpec, ChildSessionSupervisor } from "./child-session-supervisor";
@@ -89,7 +89,14 @@ export interface DelegationSpec {
 	delegationRole?: string;
 	/** What the child was started to do. */
 	objective?: string;
-	/** Extra environment, merged over the orchestrator edge. */
+	/**
+	 * Extra environment for the child process.
+	 *
+	 * Merged *under* the orchestrator edge: the parent's own identity for this
+	 * delegation (`runId`, parent edge, child label/index) is written last and
+	 * cannot be set from here — see `assertNoProtectedChildEnv` for why silently
+	 * accepting an override would be worse than refusing it.
+	 */
 	env?: Record<string, string>;
 	/** Cancel the launch before it happens. Only this caller's own abort means `cancelled`. */
 	signal?: AbortSignal;
@@ -170,6 +177,32 @@ export interface SessionTreeManagerOptions {
 	now?: () => number;
 }
 
+/**
+ * The orchestrator edge, and the only writer of it.
+ *
+ * These variables are how a child is identified to its parent: `runId` is what
+ * the ledger keys a delegation by, and the parent edge is where its reports go.
+ * A caller that sets them is not configuring the child — it is claiming to be a
+ * different delegation or a different parent, which the ledger would then refuse
+ * (the report names a run nobody launched) or misattribute.
+ *
+ * Rejecting is deliberate rather than letting the manager's own values win: an
+ * override that silently does nothing leaves the caller believing the child was
+ * launched with the environment it asked for.
+ */
+const PROTECTED_CHILD_ENV: readonly string[] = Object.values(CHILD_SESSION_ENV);
+
+function assertNoProtectedChildEnv(env: Record<string, string> | undefined): void {
+	if (!env) return;
+	const offenders = Object.keys(env).filter(key => PROTECTED_CHILD_ENV.includes(key));
+	if (offenders.length > 0) {
+		throw new Error(
+			`Delegation env may not set the orchestrator edge (${offenders.join(", ")}); ` +
+				"the manager owns those values, and a child launched with a fabricated one cannot be reconciled with its reports",
+		);
+	}
+}
+
 const NO_LIVE_CHILDREN: ChildSessionLivenessProbe = {
 	async liveChildPids(): Promise<ReadonlySet<number>> {
 		return new Set<number>();
@@ -223,8 +256,19 @@ export class SessionTreeManager {
 	/** runId → sessionId. A report addresses a delegation, never a process. */
 	#byRunId = new Map<string, SessionId>();
 	#loaded: Promise<void> | null = null;
-	/** Serializes ledger writes so two paths cannot interleave snapshots. */
-	#writes: Promise<void> = Promise.resolve();
+	/**
+	 * The ledger's single writer.
+	 *
+	 * Every mutation — a delegation, a report, a stop verdict, a bring-back, a
+	 * reconcile — takes this lock, so no two of them can read-modify-write the same
+	 * entry at once. Without it, reconcile replacing the working copy from a store
+	 * read it did moments ago can silently undo a report that landed in between:
+	 * a child that reported `completed` would be written back as the `failed`
+	 * orphan the earlier snapshot still described.
+	 */
+	#ledger: Promise<void> = Promise.resolve();
+	/** Children whose launch this process has started but not yet confirmed. */
+	#launching = new Set<SessionId>();
 	#bringBacks = new Map<SessionId, Promise<BroughtBackResult>>();
 	#delegationSeq = 0;
 
@@ -249,11 +293,16 @@ export class SessionTreeManager {
 	 * report can arrive before `start()` resolves (see `buildChildSessionNode`). A
 	 * launch that fails therefore leaves a `failed` entry rather than a phantom
 	 * `running` one: the parent did delegate, and the ledger says what happened.
+	 *
+	 * Between writing the entry and confirming the launch the child has no pid, so
+	 * it is held in `#launching`: reconcile must not read that window as "a
+	 * delegation nothing is serving".
 	 */
 	async delegate(spec: DelegationSpec): Promise<DelegatedChild> {
 		await this.#ensureLoaded();
 		const sessionId = spec.sessionId ?? Bun.randomUUIDv7();
 		if (!sessionId.trim()) throw new Error("A delegated child session needs a non-empty session id");
+		assertNoProtectedChildEnv(spec.env);
 		if (this.#records.has(sessionId)) {
 			throw new Error(
 				`Session "${sessionId}" is already in this session's ledger; a follow-up is a new child session`,
@@ -266,6 +315,12 @@ export class SessionTreeManager {
 		const runId = Bun.randomUUIDv7();
 		this.#delegationSeq += 1;
 		const env: Record<string, string> = {
+			...(spec.env ?? {}),
+			// The orchestrator edge is written LAST, and callers are refused if they try
+			// to set it themselves (`assertNoProtectedChildEnv`). The edge is how this
+			// child is identified to its parent: a `runId` the ledger does not know, or a
+			// `parentId` pointing somewhere else, is a child whose reports are either
+			// dropped or attributed to another delegation.
 			...childSessionEnv({
 				parentTarget: this.#self.intercomSessionId ?? this.#self.sessionId,
 				parentSessionId: this.#self.intercomSessionId ?? this.#self.sessionId,
@@ -273,7 +328,6 @@ export class SessionTreeManager {
 				agent: spec.delegationRole ?? "child-session",
 				index: String(this.#delegationSeq),
 			}),
-			...(spec.env ?? {}),
 		};
 		const childSpec: ChildSessionSpec = {
 			sessionId,
@@ -304,38 +358,42 @@ export class SessionTreeManager {
 			createdAt: now,
 			updatedAt: now,
 		};
-		this.#put(record);
-		await this.#persist(record);
+		await this.#withLedger(async () => {
+			this.#launching.add(sessionId);
+			this.#put(record);
+			await this.#persist(record);
+		});
 
 		let child: ChildSession;
 		try {
 			child = await this.#supervisor.start(childSpec, spec.signal ? { signal: spec.signal } : {});
 		} catch (error) {
-			const cancelled = spec.signal?.aborted === true;
-			const detail = error instanceof Error ? error.message : String(error);
-			// Read the entry back rather than reusing the local copy: a `started` report
-			// may already have moved it while the launch was in flight.
-			const current = this.#records.get(sessionId) ?? record;
-			await this.#persist(
-				this.#put({
-					...current,
-					node: { ...current.node, status: cancelled ? "cancelled" : "failed" },
-					statusDetail: cancelled
-						? "the launch was cancelled before the child started"
-						: `the child did not start: ${detail}`,
-					updatedAt: this.#now(),
-				}),
-			);
+			await this.#withLedger(async () => {
+				this.#launching.delete(sessionId);
+				const cancelled = spec.signal?.aborted === true;
+				const detail = error instanceof Error ? error.message : String(error);
+				await this.#settleFromParent(
+					sessionId,
+					cancelled ? "cancelled" : "failed",
+					cancelled ? "the launch was cancelled before the child started" : `the child did not start: ${detail}`,
+				);
+			});
 			throw error;
 		}
 
-		const current = this.#records.get(sessionId) ?? record;
-		const live = this.#put({
-			...current,
-			...(child.transport.pid !== undefined ? { lastPid: child.transport.pid } : {}),
-			updatedAt: this.#now(),
+		const live = await this.#withLedger(async () => {
+			this.#launching.delete(sessionId);
+			// Read the entry back rather than reusing the local copy: reports may already
+			// have moved it while the launch was in flight.
+			const current = this.#records.get(sessionId) ?? record;
+			const updated = this.#put({
+				...current,
+				...(child.transport.pid !== undefined ? { lastPid: child.transport.pid } : {}),
+				updatedAt: this.#now(),
+			});
+			if (updated.lastPid !== current.lastPid) await this.#persist(updated);
+			return updated;
 		});
-		if (live.lastPid !== current.lastPid) await this.#persist(live);
 		logger.debug("Child session delegated", { sessionId, runId, pid: child.transport.pid });
 		return { child, record: live };
 	}
@@ -350,7 +408,7 @@ export class SessionTreeManager {
 	 */
 	async records(): Promise<ChildSessionRecord[]> {
 		await this.#ensureLoaded();
-		await this.#syncAllFromSupervisor();
+		await this.#withLedger(() => this.#syncAllFromSupervisor());
 		return [...this.#records.values()];
 	}
 
@@ -385,45 +443,47 @@ export class SessionTreeManager {
 			});
 			return { applied: false, reason: "unknown-run" };
 		}
-		// The pid a child reports from changes when the supervisor relaunches it, so
-		// refresh from the supervisor before judging the sender.
-		await this.#syncFromSupervisor(sessionId);
-		const record = this.#records.get(sessionId);
-		if (!record) return { applied: false, reason: "unknown-run" };
+		return await this.#withLedger(async () => {
+			// The pid a child reports from changes when the supervisor relaunches it, so
+			// refresh from the supervisor before judging the sender.
+			await this.#syncFromSupervisor(sessionId);
+			const record = this.#records.get(sessionId);
+			if (!record) return { applied: false, reason: "unknown-run" } as const;
 
-		const supervised = this.#supervisor.list().find(candidate => candidate.sessionId === sessionId);
-		if (supervised && !isTerminalSessionStatus(supervised.status())) {
-			const servingPid = supervised.transport.pid;
-			if (servingPid !== undefined && servingPid !== from.pid) {
-				logger.warn("Child session report came from a process that does not serve this child", {
+			const supervised = this.#supervisor.list().find(candidate => candidate.sessionId === sessionId);
+			if (supervised && !isTerminalSessionStatus(supervised.status())) {
+				const servingPid = supervised.transport.pid;
+				if (servingPid !== undefined && servingPid !== from.pid) {
+					logger.warn("Child session report came from a process that does not serve this child", {
+						sessionId,
+						runId: envelope.report.runId,
+						expectedPid: servingPid,
+						senderPid: from.pid,
+					});
+					return { applied: false, reason: "sender-mismatch" } as const;
+				}
+			}
+
+			const application = applyChildSessionReport(record, { envelope, senderPid: from.pid, now: this.#now() });
+			if (!application.applied) {
+				logger.debug("Child session report refused", {
 					sessionId,
 					runId: envelope.report.runId,
-					expectedPid: servingPid,
-					senderPid: from.pid,
+					lifecycle: envelope.report.lifecycle,
+					reason: application.reason,
 				});
-				return { applied: false, reason: "sender-mismatch" };
+				return { applied: false, reason: application.reason } as const;
 			}
-		}
-
-		const application = applyChildSessionReport(record, { envelope, senderPid: from.pid, now: this.#now() });
-		if (!application.applied) {
-			logger.debug("Child session report refused", {
-				sessionId,
-				runId: envelope.report.runId,
-				lifecycle: envelope.report.lifecycle,
-				reason: application.reason,
-			});
-			return { applied: false, reason: application.reason };
-		}
-		this.#put(application.record);
-		if (application.changed) await this.#persist(application.record);
-		return { applied: true, record: application.record, changed: application.changed };
+			this.#put(application.record);
+			if (application.changed) await this.#persist(application.record);
+			return { applied: true, record: application.record, changed: application.changed } as const;
+		});
 	}
 
 	/** Children blocked on this parent right now, newest first. */
 	async pendingEscalations(): Promise<ChildSessionRecord[]> {
 		await this.#ensureLoaded();
-		await this.#syncAllFromSupervisor();
+		await this.#withLedger(() => this.#syncAllFromSupervisor());
 		return [...this.#records.values()]
 			.filter(record => record.escalation !== undefined)
 			.sort((a, b) => (b.escalation?.at ?? 0) - (a.escalation?.at ?? 0));
@@ -454,90 +514,163 @@ export class SessionTreeManager {
 	}
 
 	async #runBringBack(sessionId: SessionId): Promise<BroughtBackResult> {
-		const record = this.#records.get(sessionId);
-		if (!record) throw new Error(`Session "${sessionId}" is not in this session's ledger`);
-		const resultRef = record.node.resultRef;
-		if (resultRef === undefined) throw new ChildSessionResultNotReadyError(sessionId, record.node.status);
+		return await this.#withLedger(async () => {
+			const record = this.#records.get(sessionId);
+			if (!record) throw new Error(`Session "${sessionId}" is not in this session's ledger`);
+			const resultRef = record.node.resultRef;
+			if (resultRef === undefined) throw new ChildSessionResultNotReadyError(sessionId, record.node.status);
 
-		const alreadyBroughtBackAt = record.node.resultBroughtBackAt;
-		const content = await this.#results.read(resultRef);
-		if (alreadyBroughtBackAt !== undefined) {
-			return { record, resultRef, content, firstTime: false, broughtBackAt: alreadyBroughtBackAt };
-		}
-		const broughtBackAt = this.#now();
-		const next = this.#put({
-			...record,
-			node: { ...record.node, resultRef, resultBroughtBackAt: broughtBackAt },
-			updatedAt: broughtBackAt,
+			const alreadyBroughtBackAt = record.node.resultBroughtBackAt;
+			// The read is inside the lock too: it is the thing that decides `firstTime`,
+			// and a reconcile that re-read the ledger while it was in flight could
+			// otherwise write the node back without the stamp this call just added.
+			const content = await this.#results.read(resultRef);
+			if (alreadyBroughtBackAt !== undefined) {
+				return { record, resultRef, content, firstTime: false, broughtBackAt: alreadyBroughtBackAt };
+			}
+			const broughtBackAt = this.#now();
+			const next = this.#put({
+				...record,
+				node: { ...record.node, resultRef, resultBroughtBackAt: broughtBackAt },
+				updatedAt: broughtBackAt,
+			});
+			await this.#persist(next);
+			return { record: next, resultRef, content, firstTime: true, broughtBackAt };
 		});
-		await this.#persist(next);
-		return { record: next, resultRef, content, firstTime: true, broughtBackAt };
 	}
 
 	/** Stop a child and mark the node `cancelled`. Idempotent once terminal. */
 	async stop(sessionId: SessionId): Promise<ChildSessionRecord> {
 		await this.#ensureLoaded();
-		const record = this.#records.get(sessionId);
-		if (!record) throw new Error(`Session "${sessionId}" is not in this session's ledger`);
-		if (isTerminalSessionStatus(record.node.status)) return record;
-		const child = this.#supervisor.list().find(candidate => candidate.sessionId === sessionId);
-		if (!child) {
-			throw new ChildSessionUnavailableError(
-				`Session "${sessionId}" is ${record.node.status} but this process does not supervise it; run reconcile() to settle it`,
-			);
-		}
+		const outcome = await this.#withLedger(async () => {
+			const record = this.#records.get(sessionId);
+			if (!record) throw new Error(`Session "${sessionId}" is not in this session's ledger`);
+			if (isTerminalSessionStatus(record.node.status)) return { kind: "already-settled", record } as const;
+			const supervised = this.#supervisor.list().find(candidate => candidate.sessionId === sessionId);
+			if (!supervised) {
+				throw new ChildSessionUnavailableError(
+					`Session "${sessionId}" is ${record.node.status} but this process does not supervise it; run reconcile() to settle it`,
+				);
+			}
+			return { kind: "live", child: supervised } as const;
+		});
+		if (outcome.kind === "already-settled") return outcome.record;
+
 		try {
-			await child.stop();
+			// Outside the lock: the stop ladder waits out a drain window, and holding the
+			// ledger for that long would freeze every report behind it.
+			await outcome.child.stop();
 		} catch (error) {
-			// The supervisor reports a stop it could not complete as `failed`, and it
-			// keeps the slot because the child is still running. The ledger must say
-			// the same thing the supervisor says.
-			await this.#syncFromSupervisor(sessionId);
+			// The supervisor reports a stop it could not complete as `failed` and keeps its
+			// slot because the child is still running. The ledger must say what it says.
+			await this.#withLedger(() => this.#syncFromSupervisor(sessionId));
 			throw error;
 		}
-		const next = this.#put({
-			...record,
-			node: { ...record.node, status: "cancelled" },
-			statusDetail: "stopped by the parent",
-			updatedAt: this.#now(),
+		const settled = await this.#withLedger(async () => {
+			// The supervisor's own verdict first: a child that died while the stop was in
+			// flight is gone, and "cancelled" would be the wrong story for it.
+			await this.#syncFromSupervisor(sessionId);
+			return await this.#settleFromParent(sessionId, "cancelled", "stopped by the parent");
 		});
-		await this.#persist(next);
-		return next;
+		if (!settled) throw new Error(`Session "${sessionId}" left the ledger while it was being stopped`);
+		return settled;
 	}
 
 	/**
 	 * Settle the ledger after a (re)start.
 	 *
-	 * Reads the ledger from the store, asks what the broker can still see, and
-	 * applies `planReconcile`. Children this process still supervises count as
-	 * alive by definition — the supervisor is the authority on processes it owns,
-	 * and a relaunching child is briefly absent from the roster.
+	 * The restart path is the one place that *replaces* the working copy, so it is
+	 * the one that can undo work nobody asked it to touch. Two things keep that from
+	 * happening:
+	 *
+	 *   - the broker read happens outside the lock (it is network I/O), and
+	 *   - everything that decides or writes the outcome happens inside it, from a
+	 *     store read taken *inside* the lock. A report that landed before the lock
+	 *     is therefore in the snapshot; a report that arrives after it waits and is
+	 *     applied to the settled ledger.
 	 */
 	async reconcile(): Promise<ReconcileResult> {
-		await this.#writes;
-		const persisted = await this.#store.load();
-		const live = new Set<number>(await this.#liveness.liveChildPids());
-		for (const child of this.#supervisor.list()) {
-			if (isTerminalSessionStatus(child.status())) continue;
-			const pid = child.transport.pid;
-			if (pid !== undefined) live.add(pid);
-		}
-		const plan = planReconcile(persisted, live);
-		const { records, applied } = applyReconcilePlan(persisted, plan, this.#now());
-		this.#reset(records);
-		for (const decision of applied) {
-			const record = this.#records.get(decision.sessionId);
-			if (record) await this.#persist(record);
-		}
-		if (applied.length > 0) {
-			logger.warn("Session tree reconciled orphaned children", {
-				orphaned: applied.map(decision => decision.sessionId),
-			});
-		}
-		return { plan, records: [...this.#records.values()], applied };
+		await this.#ensureLoaded();
+		// Nothing is alive until the broker says so. This is deliberately outside the
+		// lock: it must not be computed from a snapshot taken before a report landed.
+		const brokerPids = await this.#liveness.liveChildPids();
+
+		return await this.#withLedger(async () => {
+			// A child that crashed while the parent was busy must be settled from the
+			// supervisor before the plan is drawn, or the plan would orphan a session
+			// that still has an owner.
+			await this.#syncAllFromSupervisor();
+			const persisted = await this.#store.load();
+			const ownedSessionIds = new Set<SessionId>(this.#launching);
+			const livePids = new Set<number>(brokerPids);
+			for (const child of this.#supervisor.list()) {
+				if (isTerminalSessionStatus(child.status())) continue;
+				ownedSessionIds.add(child.sessionId);
+				const pid = child.transport.pid;
+				if (pid !== undefined) livePids.add(pid);
+			}
+
+			const plan = planReconcile(persisted, { livePids, ownedSessionIds });
+			const { records, applied } = applyReconcilePlan(persisted, plan, this.#now());
+			this.#reset(records);
+			for (const decision of applied) {
+				const record = this.#records.get(decision.sessionId);
+				if (record) await this.#persist(record);
+			}
+			if (applied.length > 0) {
+				logger.warn("Session tree reconciled orphaned children", {
+					orphaned: applied.map(decision => decision.sessionId),
+				});
+			}
+			return { plan, records: [...this.#records.values()], applied };
+		});
 	}
 
 	// ── internals ────────────────────────────────────────────────────────────
+
+	/**
+	 * Run one ledger mutation with nobody else inside.
+	 *
+	 * Callers queue in call order; the lock is published before the wait so a caller
+	 * that arrives later cannot slip in front of one already waiting.
+	 */
+	async #withLedger<T>(task: () => Promise<T>): Promise<T> {
+		const previous = this.#ledger;
+		const { promise, resolve } = Promise.withResolvers<void>();
+		this.#ledger = promise;
+		await previous;
+		try {
+			return await task();
+		} finally {
+			resolve();
+		}
+	}
+
+	/**
+	 * Write a parent-pronounced terminal status — the caller already holds the lock.
+	 *
+	 * Refuses to reopen a terminal entry: a child that finished, or that a report
+	 * already settled, is not renamed by a stop that arrived late. Returns `undefined`
+	 * when the entry is already terminal, so the caller reports the existing verdict
+	 * instead of the one it wanted.
+	 */
+	async #settleFromParent(
+		sessionId: SessionId,
+		status: "cancelled" | "failed",
+		detail: string,
+	): Promise<ChildSessionRecord | undefined> {
+		const record = this.#records.get(sessionId);
+		if (!record) return undefined;
+		if (isTerminalSessionStatus(record.node.status)) return record;
+		const next = this.#put({
+			...record,
+			node: { ...record.node, status },
+			statusDetail: detail,
+			updatedAt: this.#now(),
+		});
+		await this.#persist(next);
+		return next;
+	}
 
 	async #ensureLoaded(): Promise<void> {
 		this.#loaded ??= (async () => {
@@ -557,12 +690,13 @@ export class SessionTreeManager {
 		return record;
 	}
 
+	/**
+	 * Persist one entry. The caller holds the ledger lock, so writes are already
+	 * ordered against every other mutation; a failure belongs to that caller alone
+	 * and must not be carried into the next write.
+	 */
 	#persist(record: ChildSessionRecord): Promise<void> {
-		const next = this.#writes.then(() => this.#store.save(record));
-		// Keep the chain alive after a failed write, so one failure cannot make every
-		// later ledger write reject with the previous error.
-		this.#writes = next.catch(() => {});
-		return next;
+		return this.#store.save(record);
 	}
 
 	/** Move the ledger to whatever the supervisor now says, for every child it still holds. */

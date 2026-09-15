@@ -206,18 +206,37 @@ export interface ReconcilePlan {
 }
 
 /**
- * Decide the fate of every ledger entry after a restart.
+ * What the parent can still see about its own children.
  *
- * `livePids` is the set of processes the broker still shows registered under
- * this parent. Matching is by the pid the parent recorded, never by name: a
- * session name can be reused, a pid that is registered *and* was ours is
- * evidence.
+ * Two independent sources, because they answer different questions and neither
+ * subsumes the other:
+ */
+export interface ReconcileLiveness {
+	/**
+	 * Pids the broker still shows registered as children of this parent — the only
+	 * evidence that outlives the parent process. Matched against the pid recorded
+	 * per child; never against a name, which can be reused.
+	 */
+	livePids: ReadonlySet<number>;
+	/**
+	 * Sessions this process owns *right now*: supervising them, or launching them.
+	 *
+	 * A child that has not been spawned yet (queued for a slot) or is mid-handshake
+	 * has no pid to match, and a launching child declared an orphan would kill a
+	 * delegation that is still in flight. After a restart this set is empty, which
+	 * is exactly when the broker has to answer instead.
+	 */
+	ownedSessionIds: ReadonlySet<SessionId>;
+}
+
+/**
+ * Decide the fate of every ledger entry after a restart.
  *
  * An orphan is reported `failed`, not `completed` and not left `running`. Both
  * alternatives lie: the first claims a result nobody produced, the second leaves
  * a child that will never be heard from again looking like live work.
  */
-export function planReconcile(records: readonly ChildSessionRecord[], livePids: ReadonlySet<number>): ReconcilePlan {
+export function planReconcile(records: readonly ChildSessionRecord[], liveness: ReconcileLiveness): ReconcilePlan {
 	const decisions: ReconcileDecision[] = [];
 	for (const record of records) {
 		const sessionId = record.node.sessionId;
@@ -230,8 +249,17 @@ export function planReconcile(records: readonly ChildSessionRecord[], livePids: 
 			});
 			continue;
 		}
+		if (liveness.ownedSessionIds.has(sessionId)) {
+			decisions.push({
+				sessionId,
+				disposition: "adopted",
+				status: record.node.status,
+				reason: "this process is still supervising or launching this child",
+			});
+			continue;
+		}
 		const pid = record.lastPid;
-		if (pid !== undefined && livePids.has(pid)) {
+		if (pid !== undefined && liveness.livePids.has(pid)) {
 			decisions.push({
 				sessionId,
 				disposition: "adopted",
