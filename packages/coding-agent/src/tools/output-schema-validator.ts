@@ -10,6 +10,8 @@
  * completion is an acceptable fallback.
  */
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
+import { dereferenceJsonSchema } from "@cornfield/ai/utils/schema";
+import { isRecord } from "@cornfield/utils";
 import { jtdToJsonSchema, normalizeSchema } from "./jtd-to-json-schema";
 
 /**
@@ -115,6 +117,85 @@ export function buildOutputValidator(schema: unknown): OutputSchemaValidation {
 function toResult(validate: ValidateFunction, value: unknown): SchemaValidationResult {
 	if (validate(value)) return { valid: true, issues: [] };
 	return { valid: false, issues: toIssues(validate.errors) };
+}
+
+/**
+ * Top-level `properties` of the schema's object form, or `undefined` when the
+ * declaration names no properties (absent, loose, boolean, or not an object).
+ *
+ * `undefined` is not "no section is known": it means there is nothing to check
+ * a label against, so callers must not reject labels on its account.
+ */
+function topLevelProperties(schema: unknown): { properties: Record<string, unknown>; closed: boolean } | undefined {
+	const { jsonSchema } = buildOutputValidator(schema);
+	if (jsonSchema === undefined) return undefined;
+	const dereferenced = dereferenceJsonSchema(jsonSchema);
+	const object = isRecord(dereferenced) ? dereferenced : isRecord(jsonSchema) ? jsonSchema : undefined;
+	if (object === undefined) return undefined;
+	const properties = object.properties;
+	if (!isRecord(properties)) return undefined;
+	return { properties, closed: object.additionalProperties === false };
+}
+
+/** What an output schema says about incremental `yield` sections. */
+export interface SectionMetadata {
+	/** Top-level labels the schema declares; `undefined` when it declares no properties. */
+	labels?: ReadonlySet<string>;
+	/**
+	 * True when the top-level schema is closed (`additionalProperties: false`).
+	 * Only then is an undeclared label impossible to assemble into a valid
+	 * result — an open schema can still carry one, so rejecting it there would
+	 * forbid sections the schema tolerates.
+	 */
+	closed: boolean;
+}
+
+/**
+ * Read what the schema declares about sections. Best-effort by construction: a
+ * declaration whose shape defeats conversion (circular, pathologically deep)
+ * reports "declares nothing" instead of throwing, because every caller treats
+ * that as "nothing to check" — and a tool that cannot be constructed because of
+ * an exotic schema is a worse failure than a missed label check.
+ */
+export function sectionMetadata(schema: unknown): SectionMetadata {
+	try {
+		const top = topLevelProperties(schema);
+		if (top === undefined) return { closed: false };
+		return { labels: new Set(Object.keys(top.properties)), closed: top.closed };
+	} catch {
+		return { closed: false };
+	}
+}
+
+/**
+ * Validate one section payload.
+ *
+ * An array-typed property validates the payload against its `items` schema,
+ * because each section submission contributes exactly one element of that list
+ * (the caller accumulates the elements). Scalar properties validate against the
+ * property schema itself. Returns `undefined` when the schema declares no
+ * subschema for `label`, or when that subschema cannot be compiled — there is no
+ * verdict to give, and the caller decides whether an undeclared label is an error.
+ */
+export function validateSection(
+	schema: unknown,
+	label: string,
+	value: unknown,
+): SchemaValidationResult | undefined {
+	try {
+		const sub = topLevelProperties(schema)?.properties[label];
+		if (sub === undefined || sub === null) return undefined;
+		// An array-typed property receives the payload as one element of that list,
+		// so it is judged by the element schema — not by the list shape, which the
+		// caller builds.
+		const record = isRecord(sub) ? sub : undefined;
+		const elementSchema = record?.type === "array" && record.items != null ? record.items : sub;
+		const compilation = compileJsonSchema(elementSchema);
+		if (!compilation.ok) return undefined;
+		return toResult(compilation.validate, value);
+	} catch {
+		return undefined;
+	}
 }
 
 function toIssues(errors: ErrorObject[] | null | undefined): SchemaValidationIssue[] {

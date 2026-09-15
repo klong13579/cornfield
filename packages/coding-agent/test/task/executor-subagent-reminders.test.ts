@@ -355,4 +355,76 @@ describe("runSubprocess yield reminders", () => {
 		expect(result.abortReason).toBe("Cancelled before start");
 		expect(result.stderr).toBe("Cancelled before start");
 	});
+
+	it("keeps the run alive through incremental sections and closes it on the terminal submission", async () => {
+		const prompts: string[] = [];
+		const session = createMockSession(({ text, promptIndex, emit }) => {
+			prompts.push(text);
+			if (promptIndex < 3) {
+				emit({
+					type: "tool_execution_end",
+					toolCallId: `section-${promptIndex}`,
+					toolName: "yield",
+					result: {
+						content: [{ type: "text", text: "Section submitted: findings." }],
+						details: { status: "success", data: { id: promptIndex }, type: ["findings"] },
+					},
+					isError: false,
+				});
+				return;
+			}
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "terminal",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { summary: "done" } },
+				},
+				isError: false,
+			});
+		});
+
+		mockCreateAgentSession(session);
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-incremental",
+			outputSchema: {
+				type: "object",
+				properties: { findings: { type: "array", items: { type: "object" } }, summary: { type: "string" } },
+			},
+		});
+
+		// Two sections kept the run going — a section must not count as "yielded" —
+		// and only the terminal submission closed it.
+		expect(prompts.length).toBeGreaterThanOrEqual(3);
+		expect(result.output).toContain('"summary": "done"');
+	});
+
+	it("reports accumulated sections when the run never submits a terminal result", async () => {
+		const session = createMockSession(({ promptIndex, emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: `section-${promptIndex}`,
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Section submitted: findings." }],
+					details: { status: "success", data: { id: promptIndex }, type: ["findings"] },
+				},
+				isError: false,
+			});
+		});
+
+		mockCreateAgentSession(session);
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-sections-only",
+			outputSchema: { type: "object", properties: { findings: { type: "array", items: { type: "object" } } } },
+		});
+
+		expect(result.output).toContain('"findings"');
+		expect(result.output).toContain('"id"');
+	});
 });

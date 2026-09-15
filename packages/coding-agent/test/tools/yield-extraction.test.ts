@@ -31,4 +31,30 @@ describe("yield subprocess extraction", () => {
 		});
 		expect(data).toBeUndefined();
 	});
+
+	it("terminates on a terminal submission and keeps running on an incremental section", () => {
+		const event = (details: unknown, isError = false) => ({
+			toolName: "yield",
+			toolCallId: "call-3",
+			result: { content: [{ type: "text", text: "" }], details },
+			isError,
+		});
+		expect(handler?.shouldTerminate?.(event({ status: "success", data: { ok: true } }))).toBe(true);
+		expect(handler?.shouldTerminate?.(event({ status: "success", data: 1, type: "result" }))).toBe(true);
+		expect(handler?.shouldTerminate?.(event({ status: "success", data: 1, type: ["findings"] }))).toBe(false);
+		expect(handler?.shouldTerminate?.(event({ status: "success", data: 1 }, true))).toBe(false);
+	});
+
+	it("carries the section labels through extraction", () => {
+		const data = handler?.extractData?.({
+			toolName: "yield",
+			toolCallId: "call-4",
+			result: {
+				content: [{ type: "text", text: "Section submitted: findings." }],
+				details: { status: "success", data: { id: 1 }, type: ["findings"] },
+			},
+			isError: false,
+		});
+		expect(data).toEqual({ status: "success", data: { id: 1 }, error: undefined, type: ["findings"] });
+	});
 });

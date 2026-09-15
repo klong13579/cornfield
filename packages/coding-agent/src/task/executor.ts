@@ -30,6 +30,7 @@ import { truncateTail } from "../session/streaming-output";
 import type { ContextFileEntry } from "../tools";
 import { normalizeSchema } from "../tools/jtd-to-json-schema";
 import { buildOutputValidator } from "../tools/output-schema-validator";
+import { arrayValuedLabels, assembleYieldResult, isIncrementalYieldType } from "./yield-assembly";
 import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
@@ -228,6 +229,8 @@ export interface YieldItem {
 	data?: unknown;
 	status?: "success" | "aborted";
 	error?: string;
+	/** Non-empty `string[]` = incremental section labels; a string (or absent) = terminal submission. */
+	type?: string | string[];
 }
 
 interface FinalizeSubprocessOutputArgs {
@@ -260,18 +263,21 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 	const hasYield = Array.isArray(yieldItems) && yieldItems.length > 0;
 
 	if (hasYield) {
-		const lastYield = yieldItems[yieldItems.length - 1];
-		if (lastYield?.status === "aborted") {
+		// Sections and the terminal submission fold into one payload. A run that only
+		// ever reported sections still has a result — the assembled sections — and a
+		// run that submitted one untyped result keeps the historical "last wins".
+		const assembled = assembleYieldResult(yieldItems, arrayValuedLabels(outputSchema));
+		if (assembled?.terminalStatus === "aborted") {
 			abortedViaYield = true;
 			exitCode = 0;
-			stderr = lastYield.error || "Subagent aborted task";
+			stderr = assembled.terminalError || "Subagent aborted task";
 			try {
-				rawOutput = JSON.stringify({ aborted: true, error: lastYield.error }, null, 2);
+				rawOutput = JSON.stringify({ aborted: true, error: assembled.terminalError }, null, 2);
 			} catch {
-				rawOutput = `{"aborted":true,"error":"${lastYield.error || "Unknown error"}"}`;
+				rawOutput = `{"aborted":true,"error":"${assembled.terminalError || "Unknown error"}"}`;
 			}
 		} else {
-			const submitData = lastYield?.data;
+			const submitData = assembled?.data;
 			if (submitData === null || submitData === undefined) {
 				rawOutput = rawOutput ? `${SUBAGENT_WARNING_NULL_YIELD}\n\n${rawOutput}` : SUBAGENT_WARNING_NULL_YIELD;
 			} else {
@@ -791,7 +797,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 								existing.push(data);
 							}
 							progress.extractedToolData[event.toolName] = existing;
-							if (event.toolName === "yield") {
+							if (event.toolName === "yield" && !isIncrementalYieldType((data as { type?: unknown } | undefined)?.type)) {
+								// Only a terminal submission closes the run. An incremental section
+								// reports a part of the result, so ending the loop here would cut the
+								// subagent off mid-result and lose everything it had left to send.
 								yieldCalled = true;
 							}
 						}
@@ -1236,9 +1245,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	rawOutput = finalized.rawOutput;
 	exitCode = finalized.exitCode;
 	stderr = finalized.stderr;
-	const lastYield = yieldItems?.[yieldItems.length - 1];
-	const yieldAbortReason = lastYield?.status === "aborted" ? lastYield.error || "Subagent aborted task" : undefined;
 	const { abortedViaYield, hasYield } = finalized;
+	// The terminal submission decides an abort, and its error is already in
+	// `stderr` — the last item in the list may be a section reported after it.
+	const yieldAbortReason = abortedViaYield ? stderr || "Subagent aborted task" : undefined;
 	const { content: truncatedOutput, truncated } = truncateTail(rawOutput, {
 		maxBytes: MAX_OUTPUT_BYTES,
 		maxLines: MAX_OUTPUT_LINES,
