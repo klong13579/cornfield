@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import type { AgentMessage, AgentToolResult } from "@cornfield/agent";
 import type { TextContent } from "@cornfield/ai";
 import { Settings } from "@cornfield/coding-agent/config/settings";
-import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
 import type { SessionEntry } from "@cornfield/coding-agent/session/session-manager";
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import {
@@ -18,8 +17,9 @@ import {
 	type TodoWriteToolDetails,
 	todoWriteToolRenderer,
 } from "@cornfield/coding-agent/tools";
-import { replaceTabs, TRUNCATE_LENGTHS } from "@cornfield/coding-agent/tools/render-utils";
-import { sanitizeText } from "@cornfield/natives";
+import { TRUNCATE_LENGTHS } from "@cornfield/coding-agent/tools/render-utils";
+import type { Component } from "@cornfield/tui";
+import { createRenderSurface } from "./helpers/render-assert";
 
 // =============================================================================
 // Fixtures
@@ -321,11 +321,26 @@ describe("todo blocker markdown round-trip", () => {
 // Panel rendering
 // =============================================================================
 
+/**
+ * The panel collects `formatTodoLine` rows and renders them as its own component
+ * (`interactive-mode.ts` pushes the same strings into the Todo panel's rows), so a test
+ * puts one row through the shared render surface the same way the panel does.
+ *
+ * No width assertion: a row's content is clamped to `TRUNCATE_LENGTHS.CONTENT` and then
+ * carries the status annotation, so a long reason may legitimately exceed the viewport.
+ */
+function asPanelRows(rows: string[]): Component {
+	return {
+		render: () => rows,
+		// The rows are handed in ready-made, so there is no cached state to drop.
+		invalidate: () => {},
+	};
+}
+
 describe("todo blocked rendering", () => {
 	it("paints a blocked row in a different color than pending and shows the reason", async () => {
-		const theme = await getThemeByName("dark");
-		expect(theme).toBeDefined();
-		const uiTheme = theme!;
+		const surface = await createRenderSurface();
+		const uiTheme = surface.theme;
 
 		const blocked = formatTodoLine(
 			{ content: "Deploy", status: "blocked", blocker: "waiting on the API key" },
@@ -339,26 +354,26 @@ describe("todo blocked rendering", () => {
 		expect(firstEscape(blocked)).toBe(firstEscape(uiTheme.fg("warning", "x")));
 		expect(firstEscape(pending)).not.toBe(firstEscape(blocked));
 
-		const clean = sanitizeText(blocked);
+		const clean = surface.text(asPanelRows([blocked]));
 		expect(clean).toContain("Deploy");
 		expect(clean).toContain("(blocked: waiting on the API key)");
 
 		// No reason recorded still reads as blocked, not as pending.
 		const noReason = formatTodoLine({ content: "Deploy", status: "blocked" }, "", uiTheme);
-		expect(sanitizeText(noReason)).toContain("(blocked)");
+		expect(surface.text(asPanelRows([noReason]))).toContain("(blocked)");
 		expect(firstEscape(noReason)).toBe(firstEscape(uiTheme.fg("warning", "x")));
 	});
 
 	it("strips escape sequences and bounds an oversized reason on the panel line", async () => {
-		const theme = await getThemeByName("dark");
-		const uiTheme = theme!;
+		const surface = await createRenderSurface();
+		const uiTheme = surface.theme;
 		const hostile = `\u001b[31mred\u001b[0m\t${"x".repeat(4000)}`;
 
 		const line = formatTodoLine({ content: "Deploy", status: "blocked", blocker: hostile }, "", uiTheme);
 
 		// Model-supplied SGR never reaches the terminal; the theme's own escapes stay.
 		expect(line).not.toContain("\u001b[31m");
-		expect(sanitizeText(line)).toContain("red");
+		expect(surface.text(asPanelRows([line]))).toContain("red");
 		expect(line).not.toContain("\t");
 		// Display is clamped; the model still gets the whole reason (see below).
 		expect(formatBlockerAnnotation(hostile).length).toBeLessThanOrEqual(
@@ -379,8 +394,8 @@ describe("todo blocked rendering", () => {
 	});
 
 	it("renders the blocked row through the tool result panel", async () => {
-		const theme = await getThemeByName("dark");
-		const uiTheme = theme!;
+		const surface = await createRenderSurface();
+		const uiTheme = surface.theme;
 		const harness = createHarness();
 		const tool = new TodoWriteTool(harness.session);
 		await tool.execute("init", { ops: [{ op: "init", list: [{ phase: "Work", items: ["First", "Second"] }] }] });
@@ -393,8 +408,8 @@ describe("todo blocked rendering", () => {
 			{ expanded: true, isPartial: false },
 			uiTheme,
 		);
-		const raw = component.render(80).join("\n");
-		const plain = sanitizeText(raw);
+		const raw = surface.lines(component).join("\n");
+		const plain = surface.text(component);
 
 		// The reason reaches the panel verbatim, painted in the warning color that no
 		// other status uses.
@@ -404,16 +419,12 @@ describe("todo blocked rendering", () => {
 
 		// The same rows without the blocker look like ordinary pending work.
 		const withoutBlock = await tool.execute("unblock", { ops: [{ op: "unblock", task: "First" }] });
-		const plainWithout = sanitizeText(
-			todoWriteToolRenderer
-				.renderResult(
-					{ content: withoutBlock.content, details: withoutBlock.details },
-					{ expanded: true, isPartial: false },
-					uiTheme,
-				)
-				.render(80)
-				.map(line => replaceTabs(line))
-				.join("\n"),
+		const plainWithout = surface.text(
+			todoWriteToolRenderer.renderResult(
+				{ content: withoutBlock.content, details: withoutBlock.details },
+				{ expanded: true, isPartial: false },
+				uiTheme,
+			),
 		);
 		expect(plainWithout).not.toContain("(blocked");
 	});
