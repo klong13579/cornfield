@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { sanitizeText } from "@cornfield/natives";
 import { getThemeByName } from "../../src/modes/theme/theme";
-import type { GhToolDetails } from "../../src/tools/gh";
 import { githubToolRenderer } from "../../src/tools/gh-renderer";
+import type { GhToolDetails } from "../../src/tools/gh-types";
 import { toolRenderers } from "../../src/tools/renderers";
 
 describe("githubToolRenderer", () => {
@@ -120,5 +120,127 @@ describe("githubToolRenderer", () => {
 		expect(rendered).toContain("zeta");
 		expect(rendered).not.toContain("alpha");
 		expect(rendered).toContain("more log lines");
+	});
+});
+
+/**
+ * Non-watch ops render through the shared status line plus the LLM-visible text.
+ * These assertions pin the title, the target metadata, and byte stability at a
+ * fixed width so a rendering change has to be deliberate.
+ */
+describe("githubToolRenderer non-watch ops", () => {
+	const renderOptions = { expanded: false, isPartial: false };
+
+	it("names the op and its target on the call line", async () => {
+		const uiTheme = (await getThemeByName("dark"))!;
+
+		const fileCall = sanitizeText(
+			githubToolRenderer
+				.renderCall({ op: "file_read", repo: "owner/repo", path: "docs/logo.png" }, renderOptions, uiTheme)
+				.render(120)
+				.join("\n"),
+		);
+		expect(fileCall).toContain("GitHub File");
+		expect(fileCall).toContain("owner/repo");
+		expect(fileCall).toContain("docs/logo.png");
+		expect(fileCall).not.toContain("Run Watch");
+
+		const searchCall = sanitizeText(
+			githubToolRenderer
+				.renderCall({ op: "search_code", query: "requireNonEmpty", repo: "owner/repo" }, renderOptions, uiTheme)
+				.render(120)
+				.join("\n"),
+		);
+		expect(searchCall).toContain("GitHub Search Code");
+		expect(searchCall).toContain("requireNonEmpty");
+		expect(searchCall).toContain("owner/repo");
+	});
+
+	it("keeps the op title off the run-watch title for search results", async () => {
+		const uiTheme = (await getThemeByName("dark"))!;
+		const result = {
+			content: [{ type: "text", text: "# GitHub code search\n\nQuery: needle\n\n- src/a.ts" }],
+		};
+
+		const component = githubToolRenderer.renderResult(result, renderOptions, uiTheme, {
+			op: "search_code",
+			query: "needle",
+		});
+		const rendered = sanitizeText(component.render(80).join("\n"));
+
+		expect(rendered).toContain("GitHub Search Code");
+		expect(rendered).toContain("needle");
+		expect(rendered).toContain("# GitHub code search");
+		expect(rendered).toContain("src/a.ts");
+		expect(rendered).not.toContain("Run Watch");
+	});
+
+	it("is byte-stable for the same input at the same width", async () => {
+		const uiTheme = (await getThemeByName("dark"))!;
+		const result = {
+			content: [{ type: "text", text: "line one\n\tline two with a tab\nline three" }],
+		};
+		const args = { op: "file_read", repo: "owner/repo", path: "README.md" };
+
+		const first = sanitizeText(
+			githubToolRenderer.renderResult(result, renderOptions, uiTheme, args).render(40).join("\n"),
+		);
+		const second = sanitizeText(
+			githubToolRenderer.renderResult(result, renderOptions, uiTheme, args).render(40).join("\n"),
+		);
+
+		expect(second).toBe(first);
+		expect(first).toContain("GitHub File");
+		// Tabs never reach the terminal.
+		expect(first).not.toContain("\t");
+		expect(first).toContain("line one");
+	});
+
+	it("renders a failed op with the error header and its message", async () => {
+		const uiTheme = (await getThemeByName("dark"))!;
+		const result = {
+			content: [{ type: "text", text: "GitHub file read failed for 'owner/repo@HEAD:missing.md': 404" }],
+			isError: true,
+		};
+
+		const rendered = sanitizeText(
+			githubToolRenderer
+				.renderResult(result, renderOptions, uiTheme, {
+					op: "file_read",
+					repo: "owner/repo",
+					path: "missing.md",
+				})
+				.render(80)
+				.join("\n"),
+		);
+
+		expect(rendered).toContain("GitHub File");
+		expect(rendered).toContain("missing.md");
+		expect(rendered).toContain("GitHub file read failed");
+	});
+
+	it("renders an image attachment result through its text part", async () => {
+		const uiTheme = (await getThemeByName("dark"))!;
+		const result = {
+			content: [
+				{ type: "text", text: "Image file: docs/logo.png\nMIME: image/png\nSize: 26B\nDimensions: 3x2" },
+				{ type: "image", data: "AAAA", mimeType: "image/png" },
+			],
+		};
+
+		const rendered = sanitizeText(
+			githubToolRenderer
+				.renderResult(result, renderOptions, uiTheme, {
+					op: "file_read",
+					repo: "owner/repo",
+					path: "docs/logo.png",
+				})
+				.render(80)
+				.join("\n"),
+		);
+
+		expect(rendered).toContain("Image file: docs/logo.png");
+		expect(rendered).toContain("MIME: image/png");
+		expect(rendered).toContain("Dimensions: 3x2");
 	});
 });
