@@ -22,7 +22,8 @@ Returns output and exit code.
 </output>
 
 <critical>
-- Use specialized tools (read/grep/glob/edit/write) instead of bash for file/string ops — the interceptor blocks and redirects when you type the wrong command.
+- Use specialized tools (read/grep/glob/edit/write) instead of bash for file/string ops — the interceptor checks every segment, so it blocks that work wherever it sits in the command (`ls && grep foo f` is blocked at `grep`).
+- A segment that reads stdin is not a file operation and is left alone (`printf x | grep x`, `cat <<'EOF'`); a heredoc that writes a file (`cat > f <<'EOF'`) is still blocked — use `write`.
 - You **MUST NOT** use `2>&1` or `2>/dev/null` — stdout and stderr are already merged.
 - You **MUST NOT** read line ranges with `sed -n 'A,Bp'`, `awk 'NR≥A && NR≤B'` — use `read` with `offset`/`limit`.
 </critical>
