@@ -4,7 +4,7 @@
  * 验证：
  *   1. get_stats 返回 DashboardStats 形状（overall/byModel/byFolder/timeSeries 等键齐全）
  *   2. 不依赖任何 attached session（不定向，直接 registry 级可得）
- *   3. 与 `omp stats --json` 同源：内部 syncAllSessions 后聚合，失败时 ok:false 不崩
+ *   3. 与 `cornfield stats --json` 同源：内部 syncAllSessions 后聚合，失败时 ok:false 不崩
  *   4. W3 D2：optional period 时间窗口 + priceCatalog 单价目录（models.json）
  *   5. W3 D2 小卡：list_sessions 每条带 source（cli=default 根 / agent=registry agent）
  *

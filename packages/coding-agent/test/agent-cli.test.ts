@@ -1,5 +1,5 @@
 /**
- * Tests for `omp agent` subcommand handlers.
+ * Tests for `cornfield agent` subcommand handlers.
  *
  * Covers:
  *   - init: creates a fresh agentDir, rejects bad names, supports --dir
@@ -36,7 +36,7 @@ beforeEach(async () => {
 	// runAgentReconcile's auto-register) call registerAgent as a side effect.
 	// Without isolation, `bun test` writes to the user's real registry and
 	// leaves dead entries pointing at temp dirs that the OS later cleans —
-	// surfacing as "zombie agents" in `omp agent list`.
+	// surfacing as "zombie agents" in `cornfield agent list`.
 	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-registry-iso-"));
 	process.env.HOME = isolatedHome;
 });
@@ -553,7 +553,7 @@ describe("runAgentValidate — MECE rules", () => {
 	});
 });
 
-describe("omp agent register / unregister / reconcile", () => {
+describe("cornfield agent register / unregister / reconcile", () => {
 	// HOME isolation is provided by the file-level beforeEach/afterEach so
 	// every test in this file is sandboxed.
 
