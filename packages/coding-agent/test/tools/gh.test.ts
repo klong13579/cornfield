@@ -7,9 +7,12 @@ import { Settings } from "@cornfield/coding-agent/config/settings";
 import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { GithubTool } from "@cornfield/coding-agent/tools/gh";
+import { githubToolRenderer } from "@cornfield/coding-agent/tools/gh-renderer";
 import { wrapToolWithMetaNotice } from "@cornfield/coding-agent/tools/output-meta";
+import { ToolError } from "@cornfield/coding-agent/tools/tool-errors";
 import * as git from "@cornfield/coding-agent/utils/git";
 import { getAgentDir, setAgentDir } from "@cornfield/utils";
+import { createRenderSurface } from "../helpers/render-assert";
 
 function createSession(
 	cwd: string = "/tmp/test",
@@ -139,17 +142,92 @@ async function setupTempHome(): Promise<{ home: string; cleanup: () => Promise<v
 }
 
 /**
+ * The auto-derived worktree path for a given primary repo root and local
+ * branch, exactly as `pr_checkout` computes it before resolving symlinks.
+ */
+function rawWorktreePath(home: string, primaryRoot: string, localBranch: string): string {
+	const encoded = path
+		.resolve(primaryRoot)
+		.replace(/^[/\\]/, "")
+		.replace(/[/\\:]/g, "-");
+	return path.join(home, ".cornfield", "wt", encoded, localBranch);
+}
+
+/**
  * Compute the auto-derived worktree path for a given primary repo root and
  * local branch name, mirroring the encoding used by `pr_checkout`. Resolves
  * symlinks (matches the production `fs.realpath` step) so assertions match
  * the value rendered into the tool result.
  */
 async function expectedWorktreePath(home: string, primaryRoot: string, localBranch: string): Promise<string> {
-	const encoded = path
-		.resolve(primaryRoot)
-		.replace(/^[/\\]/, "")
-		.replace(/[/\\:]/g, "-");
-	return fs.realpath(path.join(home, ".cornfield", "wt", encoded, localBranch));
+	return fs.realpath(rawWorktreePath(home, primaryRoot, localBranch));
+}
+
+/** Concatenated text parts of a tool result. */
+function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
+	return result.content
+		.filter(part => part.type === "text")
+		.map(part => part.text ?? "")
+		.join("\n");
+}
+
+/** gh's Actions run payload for a run in a given state. */
+function actionsRunPayload(id: number, status: string, conclusion?: string): Record<string, unknown> {
+	return {
+		id,
+		name: "CI",
+		display_title: "PR checks",
+		status,
+		conclusion,
+		head_branch: "main",
+		head_sha: "abc123def456",
+		created_at: "2026-04-01T08:00:00Z",
+		updated_at: "2026-04-01T08:06:00Z",
+		html_url: `https://github.com/owner/repo/actions/runs/${id}`,
+	};
+}
+
+/** gh's Actions job payload. */
+function actionsJobPayload(id: number, name: string, conclusion: string): Record<string, unknown> {
+	return {
+		id,
+		name,
+		status: "completed",
+		conclusion,
+		started_at: "2026-04-01T08:00:00Z",
+		completed_at: "2026-04-01T08:02:00Z",
+		html_url: `https://github.com/owner/repo/actions/runs/77/job/${id}`,
+	};
+}
+
+/**
+ * Drain microtasks until the run-watch loop is parked on its next sleep.
+ *
+ * Timers are faked, so a `setTimeout`-backed `abortableSleep` only completes on
+ * an explicit `advanceTimersByTime`; a pending timer is therefore the signal
+ * that the loop reached its sleep and the clock can be moved. Counting
+ * microtask turns instead would couple every test to the loop's await depth.
+ */
+async function runToNextSleep(): Promise<void> {
+	for (let round = 0; round < 500 && vi.getTimerCount() === 0; round += 1) {
+		await Promise.resolve();
+	}
+}
+
+/** Advance the faked clock one poll at a time, letting the loop work between ticks. */
+async function advanceWatch(steps: number, ms: number): Promise<void> {
+	for (let step = 0; step < steps; step += 1) {
+		await runToNextSleep();
+		vi.advanceTimersByTime(ms);
+	}
+	await runToNextSleep();
+}
+
+/** Let queued microtasks run without moving the clock. */
+async function flushMicrotasks(rounds = 10): Promise<void> {
+	for (let round = 0; round < rounds; round += 1) {
+		await Promise.resolve();
+	}
 }
 
 describe("github tool", () => {
@@ -788,5 +866,459 @@ describe("github tool", () => {
 		} finally {
 			await fs.rm(artifactsDir, { recursive: true, force: true });
 		}
+	});
+
+	it("backs off and retries a rate-limited run_watch poll instead of failing the watch", async () => {
+		vi.useFakeTimers();
+		try {
+			let runAttempts = 0;
+			vi.spyOn(git.github, "json").mockImplementation(async (_cwd, args) => {
+				if (args.includes("/repos/owner/repo/actions/runs/77")) {
+					runAttempts += 1;
+					if (runAttempts === 1) {
+						throw new ToolError("HTTP 403: API rate limit exceeded for user ID 1.");
+					}
+					return actionsRunPayload(77, "completed", "success") as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs/77/jobs")) {
+					return { total_count: 1, jobs: [actionsJobPayload(201, "build", "success")] } as never;
+				}
+				throw new Error(`unexpected gh call: ${args.join(" ")}`);
+			});
+
+			const tool = new GithubTool(createSession());
+			let settled = false;
+			const pending = tool
+				.execute("run-watch", { op: "run_watch", run: "https://github.com/owner/repo/actions/runs/77" })
+				.finally(() => {
+					settled = true;
+				});
+
+			await runToNextSleep();
+			expect(runAttempts).toBe(1);
+			// The rate limit did not end the watch: it is waiting out the backoff.
+			expect(settled).toBe(false);
+
+			vi.advanceTimersByTime(14_000);
+			await flushMicrotasks();
+			expect(runAttempts).toBe(1);
+
+			vi.advanceTimersByTime(1_000);
+			const result = await pending;
+			expect(runAttempts).toBe(2);
+			expect(textOf(result)).toContain("All jobs passed.");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("fails a run_watch once the rate-limit retry budget is spent", async () => {
+		vi.useFakeTimers();
+		try {
+			let runAttempts = 0;
+			vi.spyOn(git.github, "json").mockImplementation(async (_cwd, args) => {
+				if (args.includes("/repos/owner/repo/actions/runs/77")) {
+					runAttempts += 1;
+				}
+				throw new ToolError("You have exceeded a secondary rate limit for this endpoint.");
+			});
+
+			const tool = new GithubTool(createSession());
+			let settled = false;
+			let failure: unknown;
+			const pending = tool.execute("run-watch", {
+				op: "run_watch",
+				run: "https://github.com/owner/repo/actions/runs/77",
+			});
+			void pending.then(
+				() => {
+					settled = true;
+				},
+				error => {
+					settled = true;
+					failure = error;
+				},
+			);
+
+			// Five bounded retries, each paying the slow-cadence backoff.
+			for (let step = 0; step < 10 && !settled; step += 1) {
+				await runToNextSleep();
+				vi.advanceTimersByTime(15_000);
+			}
+			await flushMicrotasks();
+
+			expect(settled).toBe(true);
+			expect(failure).toBeInstanceOf(Error);
+			expect((failure as Error).message).toMatch(/secondary rate limit/);
+			// The sixth consecutive failure is the one that ends the watch.
+			expect(runAttempts).toBe(6);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("gives up with a reason when a watched commit never produces a workflow run", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.spyOn(git.github, "text").mockResolvedValue("owner/repo");
+			let listCalls = 0;
+			vi.spyOn(git.github, "json").mockImplementation(async (_cwd, args) => {
+				if (args.includes("/repos/owner/repo/branches/main")) {
+					return { commit: { sha: "abc123def456" } } as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs")) {
+					listCalls += 1;
+					return { workflow_runs: [] } as never;
+				}
+				throw new Error(`unexpected gh call: ${args.join(" ")}`);
+			});
+
+			const tool = new GithubTool(createSession());
+			let settled = false;
+			const pending = tool.execute("run-watch", { op: "run_watch", branch: "main" });
+			pending.then(
+				() => {
+					settled = true;
+				},
+				() => {
+					settled = true;
+				},
+			);
+
+			for (let step = 0; step < 45 && !settled; step += 1) {
+				await runToNextSleep();
+				vi.advanceTimersByTime(3_000);
+			}
+
+			const result = await pending;
+			const text = textOf(result);
+			const watch = result.details?.watch;
+
+			expect(text).toContain("No workflow runs found for owner/repo@abc123def456");
+			expect(text).toContain("Actions may be disabled");
+			expect(watch?.mode).toBe("commit");
+			expect(watch?.state).toBe("completed");
+			expect(watch?.note).toContain("No workflow runs found");
+			// 21 fast polls cover the first 60s, then 15s polls: the watch both
+			// switched cadence and stopped on its own instead of polling forever.
+			expect(watch?.pollCount).toBeGreaterThanOrEqual(21);
+			expect(watch?.pollCount).toBeLessThanOrEqual(25);
+			expect(listCalls).toBe(watch?.pollCount ?? 0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("confirms a settled commit watch on the fast cadence while the watch is young", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.spyOn(git.github, "text").mockResolvedValue("owner/repo");
+			vi.spyOn(git.github, "json").mockImplementation(async (_cwd, args) => {
+				if (args.includes("/repos/owner/repo/branches/main")) {
+					return { commit: { sha: "abc123def456" } } as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs/77/jobs")) {
+					return { total_count: 1, jobs: [actionsJobPayload(201, "build", "success")] } as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs")) {
+					return { workflow_runs: [actionsRunPayload(77, "completed", "success")] } as never;
+				}
+				throw new Error(`unexpected gh call: ${args.join(" ")}`);
+			});
+
+			const updates: string[] = [];
+			const tool = new GithubTool(createSession());
+			const pending = tool.execute("run-watch", { op: "run_watch", branch: "main" }, undefined, update => {
+				for (const part of update.content) {
+					if (part.type === "text" && part.text) updates.push(part.text);
+				}
+			});
+
+			await advanceWatch(2, 3_000);
+			const result = await pending;
+
+			expect(updates.join("\n")).toContain("Waiting 3s to ensure no additional runs appear");
+			expect(textOf(result)).toContain("All workflow runs for this commit passed.");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("switches a commit watch to the slow cadence once it runs past the fast window", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.spyOn(git.github, "text").mockResolvedValue("owner/repo");
+			let listCalls = 0;
+			let releaseRuns = false;
+			vi.spyOn(git.github, "json").mockImplementation(async (_cwd, args) => {
+				if (args.includes("/repos/owner/repo/branches/main")) {
+					return { commit: { sha: "abc123def456" } } as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs/77/jobs")) {
+					return { total_count: 1, jobs: [actionsJobPayload(201, "build", "success")] } as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs")) {
+					listCalls += 1;
+					return {
+						workflow_runs: releaseRuns ? [actionsRunPayload(77, "completed", "success")] : [],
+					} as never;
+				}
+				throw new Error(`unexpected gh call: ${args.join(" ")}`);
+			});
+
+			const updates: string[] = [];
+			const tool = new GithubTool(createSession());
+			const pending = tool.execute("run-watch", { op: "run_watch", branch: "main" }, undefined, update => {
+				for (const part of update.content) {
+					if (part.type === "text" && part.text) updates.push(part.text);
+				}
+			});
+
+			// 63s of empty polls on the fast tier: one list call per 3s tick.
+			await advanceWatch(21, 3_000);
+			expect(listCalls).toBeGreaterThanOrEqual(20);
+
+			releaseRuns = true;
+			// The sleep scheduled after the 60s poll is a 15s one, so the next two
+			// polls land at 75s and 90s.
+			await advanceWatch(9, 3_000);
+			const result = await pending;
+
+			expect(updates.join("\n")).toContain("Waiting 15s to ensure no additional runs appear");
+			expect(listCalls).toBe(23);
+			expect(textOf(result)).toContain("All workflow runs for this commit passed.");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("serves completed-run jobs from cache and refetches them after a re-run", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.spyOn(git.github, "text").mockResolvedValue("owner/repo");
+			let listCalls = 0;
+			let jobsFetches = 0;
+			vi.spyOn(git.github, "json").mockImplementation(async (_cwd, args) => {
+				if (args.includes("/repos/owner/repo/branches/main")) {
+					return { commit: { sha: "abc123def456" } } as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs/77/jobs")) {
+					jobsFetches += 1;
+					return {
+						total_count: 1,
+						jobs: [actionsJobPayload(201, `job-${jobsFetches}`, "success")],
+					} as never;
+				}
+				if (args.includes("/repos/owner/repo/actions/runs")) {
+					listCalls += 1;
+					// Poll 3 is an auto-retry: the run flips back off "completed",
+					// which must evict the cached job list for run 77.
+					const completed = listCalls === 2 || listCalls >= 4;
+					return {
+						workflow_runs: [
+							actionsRunPayload(77, completed ? "completed" : "in_progress", completed ? "success" : undefined),
+						],
+					} as never;
+				}
+				throw new Error(`unexpected gh call: ${args.join(" ")}`);
+			});
+
+			const tool = new GithubTool(createSession());
+			const pending = tool.execute("run-watch", { op: "run_watch", branch: "main" });
+
+			await advanceWatch(5, 3_000);
+			const result = await pending;
+			const text = textOf(result);
+
+			expect(listCalls).toBe(5);
+			// Polls 1-4 each fetch jobs (in-progress, completed, re-run, completed);
+			// poll 5 confirms the settled run and reuses poll 4's result.
+			expect(jobsFetches).toBe(4);
+			expect(text).toContain("job-4");
+			expect(text).not.toContain("job-2");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("checks a pull request out beside a stale worktree directory instead of failing", async () => {
+		const fixture = await createPrFixture();
+		const tempHome = await setupTempHome();
+		try {
+			vi.spyOn(git.github, "json")
+				.mockResolvedValueOnce({
+					number: 123,
+					title: "Contributor fix",
+					url: "https://github.com/base/repo/pull/123",
+					baseRefName: "main",
+					headRefName: fixture.headRefName,
+					headRefOid: fixture.headRefOid,
+					headRepository: { nameWithOwner: "contrib/repo" },
+					headRepositoryOwner: { login: "contrib" },
+					isCrossRepository: true,
+					maintainerCanModify: true,
+				})
+				.mockResolvedValueOnce({
+					nameWithOwner: "contrib/repo",
+					sshUrl: fixture.forkBare,
+					url: fixture.forkBare,
+				});
+
+			const primaryRoot = (await git.repo.primaryRoot(fixture.repoRoot)) ?? fixture.repoRoot;
+			// A stale directory from an interrupted `git worktree add`, plus its
+			// first disambiguation candidate, both taken.
+			const occupiedPath = rawWorktreePath(tempHome.home, primaryRoot, "pr-123");
+			await fs.mkdir(occupiedPath, { recursive: true });
+			await fs.writeFile(path.join(occupiedPath, "leftover.txt"), "stale\n");
+			await fs.mkdir(`${occupiedPath}-2`, { recursive: true });
+
+			const tool = new GithubTool(createSession(fixture.repoRoot));
+			const result = await tool.execute("pr-checkout", { op: "pr_checkout", pr: "123" });
+			const expectedPath = await fs.realpath(`${occupiedPath}-3`);
+
+			expect(textOf(result)).toContain(`Checked Out Pull Request #123`);
+			expect(textOf(result)).toContain(`Worktree: ${expectedPath}`);
+			expect(runGit(fixture.repoRoot, ["worktree", "list", "--porcelain"])).toContain(`worktree ${expectedPath}`);
+			expect(runGit(expectedPath, ["branch", "--show-current"])).toBe("pr-123");
+
+			// The path the agent sees is the rendered one, not a pre-resolution guess.
+			const surface = await createRenderSurface({ width: 200 });
+			const rendered = surface.expectWithinWidth(
+				githubToolRenderer.renderResult(result, { expanded: false, isPartial: false }, surface.theme, {
+					op: "pr_checkout",
+					pr: "123",
+				}),
+			);
+			expect(rendered).toContain("GitHub PR Checkout");
+			expect(rendered).toContain(expectedPath);
+		} finally {
+			await tempHome.cleanup();
+			await fs.rm(fixture.baseDir, { recursive: true, force: true });
+		}
+	});
+
+	it("steps past a worktree path git still has registered when its directory is gone", async () => {
+		const fixture = await createPrFixture();
+		const tempHome = await setupTempHome();
+		try {
+			vi.spyOn(git.github, "json")
+				.mockResolvedValueOnce({
+					number: 123,
+					title: "Contributor fix",
+					url: "https://github.com/base/repo/pull/123",
+					baseRefName: "main",
+					headRefName: fixture.headRefName,
+					headRefOid: fixture.headRefOid,
+					headRepository: { nameWithOwner: "contrib/repo" },
+					headRepositoryOwner: { login: "contrib" },
+					isCrossRepository: true,
+					maintainerCanModify: true,
+				})
+				.mockResolvedValueOnce({
+					nameWithOwner: "contrib/repo",
+					sshUrl: fixture.forkBare,
+					url: fixture.forkBare,
+				});
+
+			const primaryRoot = (await git.repo.primaryRoot(fixture.repoRoot)) ?? fixture.repoRoot;
+			const occupiedPath = rawWorktreePath(tempHome.home, primaryRoot, "pr-123");
+			await fs.mkdir(path.dirname(occupiedPath), { recursive: true });
+			runGit(fixture.repoRoot, ["worktree", "add", "--detach", occupiedPath]);
+			// The directory is gone but git still registers it: creating it again
+			// would fail with "already registered", so the resolver must step aside.
+			await fs.rm(occupiedPath, { recursive: true, force: true });
+
+			const tool = new GithubTool(createSession(fixture.repoRoot));
+			const result = await tool.execute("pr-checkout", { op: "pr_checkout", pr: "123" });
+			const expectedPath = await fs.realpath(`${occupiedPath}-2`);
+
+			expect(textOf(result)).toContain(`Worktree: ${expectedPath}`);
+			expect(runGit(expectedPath, ["branch", "--show-current"])).toBe("pr-123");
+		} finally {
+			await tempHome.cleanup();
+			await fs.rm(fixture.baseDir, { recursive: true, force: true });
+		}
+	});
+
+	it("retries gh issue view without stateReason when the CLI does not know the field", async () => {
+		const jsonSpy = vi
+			.spyOn(git.github, "json")
+			.mockRejectedValueOnce(new ToolError('Unknown JSON field: "stateReason"'))
+			.mockResolvedValueOnce({
+				number: 42,
+				title: "Example issue",
+				state: "OPEN",
+				author: { login: "octocat" },
+				body: "Issue body",
+				createdAt: "2026-04-01T09:00:00Z",
+				updatedAt: "2026-04-01T10:00:00Z",
+				url: "https://github.com/cli/cli/issues/42",
+				comments: [],
+			} as never);
+
+		const tool = new GithubTool(createSession());
+		const result = await tool.execute("issue-view", {
+			op: "issue_view",
+			issue: "42",
+			repo: "cli/cli",
+			comments: false,
+		});
+
+		const firstArgs = (jsonSpy.mock.calls[0]?.[1] ?? []).join(",");
+		const retryArgs = (jsonSpy.mock.calls[1]?.[1] ?? []).join(",");
+		expect(firstArgs).toContain("stateReason");
+		expect(retryArgs).not.toContain("stateReason");
+		// Only the unsupported field is dropped from the retry.
+		expect(retryArgs).toContain("number");
+
+		const text = textOf(result);
+		expect(text).toContain("# Issue #42: Example issue");
+		expect(text).not.toContain("State reason");
+
+		const surface = await createRenderSurface({ width: 100 });
+		const rendered = surface.expectWithinWidth(
+			githubToolRenderer.renderResult(result, { expanded: false, isPartial: false }, surface.theme, {
+				op: "issue_view",
+				repo: "cli/cli",
+			}),
+		);
+		expect(rendered).toContain("GitHub Issue");
+		expect(rendered).toContain("# Issue #42: Example issue");
+		expect(rendered).not.toContain("State reason");
+	});
+
+	it("renders an issue response with no stateReason field without throwing", async () => {
+		vi.spyOn(git.github, "json").mockResolvedValue({
+			number: 7,
+			title: "No reason",
+			state: "OPEN",
+			author: { login: "octocat" },
+			body: "Issue body",
+			url: "https://github.com/cli/cli/issues/7",
+			comments: [],
+		} as never);
+
+		const tool = new GithubTool(createSession());
+		const result = await tool.execute("issue-view", {
+			op: "issue_view",
+			issue: "7",
+			repo: "cli/cli",
+			comments: false,
+		});
+		const text = textOf(result);
+
+		expect(text).toContain("# Issue #7: No reason");
+		expect(text).toContain("State: OPEN");
+		expect(text).not.toContain("State reason");
+	});
+
+	it("does not retry an issue view that failed for a reason other than the unknown field", async () => {
+		const jsonSpy = vi.spyOn(git.github, "json").mockRejectedValue(new ToolError("HTTP 404: Not Found"));
+
+		const tool = new GithubTool(createSession());
+		await expect(
+			tool.execute("issue-view", { op: "issue_view", issue: "42", repo: "cli/cli", comments: false }),
+		).rejects.toThrow(/404/);
+		expect(jsonSpy).toHaveBeenCalledTimes(1);
 	});
 });
