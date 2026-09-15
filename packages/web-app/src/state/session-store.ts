@@ -641,8 +641,12 @@ export class SessionStore {
 		this.#projectAttributionKey = undefined;
 		this.#currentProjectId = undefined;
 		this.#projectsPending = true;
+		// 错误也是上一次请求的判决，与归属同属一份被作废的结果：留着它，新身份在 pending 期间
+		// 会继续挂在旧会话身上显示「读不出来」—— 一个我们已经宣告作废的请求的结论。
+		this.#projectsError = undefined;
 		view.currentProjectId = undefined;
 		view.projectsPending = true;
+		view.projectsError = undefined;
 	}
 
 	/** 归属对应的会话身份：焦点 agent + 会话文件（未知用空串）。一个概念一处定义。 */

@@ -421,6 +421,39 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 		expect(view.currentProjectId).toBe("dtc");
 		expect(view.projects?.map(p => p.projectId)).toEqual(["cornfield", "dtc"]);
 	});
+
+	it("上一个会话的错误不残留：切换 / newSession 后的 pending 期间显示「读取中」", async () => {
+		const { store } = await createConnectedStore();
+
+		// hr：归属请求失败
+		pushSnapshot("hr", "/sessions/hr-live.jsonl");
+		await Bun.sleep(0);
+		respondError("list_projects failed: Project store at ... is not valid JSON");
+		await Bun.sleep(0);
+		expect(store.getSnapshot().projectsError).toContain("not valid JSON");
+
+		// 切走：旧错误与归属一起作废，窗口期是「还不知道」，不是「读不出来」
+		store.switchSession("sw");
+		await Bun.sleep(0);
+		const duringSwitch = store.getSnapshot();
+		expect(duringSwitch.projectsError).toBeUndefined();
+		expect(duringSwitch.projectsPending).toBe(true);
+		expect(projectLabelOf(duringSwitch).label).toBe("…");
+
+		// sw 也失败（存储还是坏的），然后开新会话
+		pushSnapshot("sw", "/sessions/sw.jsonl");
+		await Bun.sleep(0);
+		respondError("list_projects failed: Project store at ... is not valid JSON");
+		await Bun.sleep(0);
+		expect(store.getSnapshot().projectsError).toBeDefined();
+
+		store.newSession();
+		await Bun.sleep(0);
+		const duringNew = store.getSnapshot();
+		expect(duringNew.projectsError).toBeUndefined();
+		expect(duringNew.projectsPending).toBe(true);
+		expect(projectLabelOf(duringNew).label).toBe("…");
+	});
 });
 
 describe("projectLabelOf", () => {
