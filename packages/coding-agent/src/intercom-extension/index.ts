@@ -3,6 +3,10 @@ import * as path from "node:path";
 import { resolve as resolvePath } from "node:path";
 import { StringEnum } from "@cornfield/ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@cornfield/coding-agent";
+import {
+	type ChildSessionReport,
+	formatChildSessionReport,
+} from "@cornfield/coding-agent/session/child-session-report";
 import { type AutocompleteItem, Text } from "@cornfield/tui";
 import { getAgentDir, isEnoent } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
@@ -57,8 +61,9 @@ const STABLE_INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_STABLE_ID";
 const NAME_POLL_MS_ENV = "PI_INTERCOM_NAME_POLL_MS";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
 const SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV = "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR";
-const SUBAGENT_COMPLETION_REPORT_MIN_INTERVAL_MS = 5_000;
+const SUBAGENT_REPORT_MIN_INTERVAL_MS = 5_000;
 const SUBAGENT_COMPLETION_REPORT_TEXT = "Task round completed. The child session is idle and available for follow-up.";
+const SUBAGENT_FAILURE_REPORT_TEXT = "Task round ended with an error. The parent decides whether to retry.";
 
 interface ChildOrchestratorMetadata {
 	orchestratorTarget: string;
@@ -99,6 +104,25 @@ interface SupervisorInterviewRequest extends Record<string, unknown> {
 
 interface SupervisorInterviewReply {
 	responses: Array<{ id: string; value: unknown }>;
+}
+
+/**
+ * Did the round end in an error?
+ *
+ * The marker is the last assistant message's `stopReason`. A tool error the model
+ * recovered from leaves a later assistant message after it; an unrecovered one is
+ * what the loop ended on. Structural, so this does not depend on the message
+ * union's shape here — only on the two fields the marker lives in.
+ */
+function roundEndedInError(messages: readonly unknown[]): boolean {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (typeof message !== "object" || message === null) continue;
+		const record = message as { role?: unknown; stopReason?: unknown };
+		if (record.role !== "assistant") continue;
+		return record.stopReason === "error";
+	}
+	return false;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -145,9 +169,10 @@ function readChildOrchestratorMetadata(): ChildOrchestratorMetadata | null {
 	};
 }
 function formatChildOrchestratorMessage(
-	kind: "ask" | "update" | "interview" | "complete",
+	kind: "ask" | "update" | "interview" | "complete" | "failed",
 	metadata: ChildOrchestratorMetadata,
 	message: string,
+	extras: { resultRef?: string } = {},
 ): string {
 	const heading =
 		kind === "ask"
@@ -156,8 +181,10 @@ function formatChildOrchestratorMessage(
 				? "Subagent requests a structured supervisor interview."
 				: kind === "complete"
 					? "Subagent completed its task round."
-					: "Subagent progress update.";
-	return [
+					: kind === "failed"
+						? "Subagent task round failed."
+						: "Subagent progress update.";
+	const body = [
 		heading,
 		`Run: ${metadata.runId}`,
 		`Agent: ${metadata.agent}`,
@@ -168,6 +195,36 @@ function formatChildOrchestratorMessage(
 	]
 		.filter((line): line is string => line !== undefined)
 		.join("\n");
+	// The envelope above the prose is what the parent's session tree reads; the
+	// prose below is what its model reads. One message, because they describe one
+	// event, and two messages would be two things to keep in step.
+	return formatChildSessionReport(childSessionReportFor(kind, metadata, extras), body);
+}
+
+/**
+ * The lifecycle a report kind carries. Total over the kinds, so a new kind
+ * cannot be added without stating which session status it means.
+ */
+function childSessionReportFor(
+	kind: "ask" | "update" | "interview" | "complete" | "failed",
+	metadata: ChildOrchestratorMetadata,
+	extras: { resultRef?: string },
+): ChildSessionReport {
+	switch (kind) {
+		case "complete":
+			return {
+				runId: metadata.runId,
+				lifecycle: "completed",
+				...(extras.resultRef ? { result: extras.resultRef } : {}),
+			};
+		case "failed":
+			return { runId: metadata.runId, lifecycle: "failed" };
+		case "update":
+			return { runId: metadata.runId, lifecycle: "progress" };
+		case "ask":
+		case "interview":
+			return { runId: metadata.runId, lifecycle: "waiting", blocking: "ask" };
+	}
 }
 
 function validateSupervisorInterviewRequest(
@@ -764,8 +821,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 	const activeTools = new Map<string, string>();
 	/** Parent-side: live child sessions (sessions whose parentId matches this session). */
 	const childSessions = new Map<string, SessionInfo>();
-	/** Child-side: last automatic completion report timestamp (debounce). */
+	/** Child-side: last automatic report timestamp, per kind (debounce). */
 	let lastCompletionReportAt = 0;
+	let lastStartedReportAt = 0;
 	const replyTracker = new ReplyTracker();
 	const seenInboundMessages = new Map<string, number>();
 	const latestOutboundReceipts = new Map<
@@ -1288,6 +1346,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 					for (const namespace of localExtensions.keys()) {
 						emitLocalExtensionEvent(namespace, { type: "connection", connected: true, supported });
 					}
+					// Child mode: the edge is live, so the parent may know it.
+					void reportChildSessionStarted(nextClient);
 					break;
 				}
 				case "extension_owner": {
@@ -1577,17 +1637,32 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 	}
 	/**
+	 * The live session's own log file — the artifact a delegated round produces.
+	 *
+	 * `undefined` when the session is not on disk yet: a result reference that could
+	 * not be produced must be absent, not a placeholder path that fails to read
+	 * later on the parent side.
+	 */
+	function currentSessionFile(): string | undefined {
+		try {
+			const file = getLiveContext()?.sessionManager.getSessionFile();
+			return typeof file === "string" && file.trim() !== "" ? file : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+	/**
 	 * Child-side automatic completion report: after each task round (agent_end),
 	 * notify the parent. Fire-and-forget and debounced so a noisy agent_end
 	 * sequence can never flood the parent or break the child's own turn.
 	 */
-	async function reportSubagentCompletion(): Promise<void> {
+	async function reportSubagentCompletion(failed: boolean): Promise<void> {
 		const metadata = childOrchestratorMetadata;
 		if (!metadata) {
 			return;
 		}
 		const now = Date.now();
-		if (now - lastCompletionReportAt < SUBAGENT_COMPLETION_REPORT_MIN_INTERVAL_MS) {
+		if (now - lastCompletionReportAt < SUBAGENT_REPORT_MIN_INTERVAL_MS) {
 			return;
 		}
 		lastCompletionReportAt = now;
@@ -1614,14 +1689,22 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		if (!target || currentSessionTargetMatches(metadata.orchestratorTarget, target, activeClient)) {
 			return;
 		}
+		const reportText = failed ? SUBAGENT_FAILURE_REPORT_TEXT : SUBAGENT_COMPLETION_REPORT_TEXT;
+		const reportKind = failed ? "failed" : "complete";
 		try {
 			const result = await activeClient.send(target, {
-				text: formatChildOrchestratorMessage("complete", metadata, SUBAGENT_COMPLETION_REPORT_TEXT),
+				// The result of a delegated round is the child's own session log: it is the
+				// artifact the round produced, and it is what a parent reads to see what the
+				// child actually did. A failed round points at nothing — there is no result
+				// to bring back.
+				text: formatChildOrchestratorMessage(reportKind, metadata, reportText, {
+					...(failed ? {} : { resultRef: currentSessionFile() }),
+				}),
 			});
 			if (result.delivered) {
 				pi.appendEntry("intercom_sent", {
 					to: metadata.orchestratorTarget,
-					message: { text: SUBAGENT_COMPLETION_REPORT_TEXT, kind: "complete" },
+					message: { text: reportText, kind: reportKind },
 					messageId: result.id,
 					timestamp: Date.now(),
 					subagent: {
@@ -1635,6 +1718,45 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			// Best-effort: a completion report must never break the child's own turn.
 		}
 	}
+
+	/**
+	 * Child-side: announce that this session is up and registered on the broker.
+	 *
+	 * The parent's supervisor already knows it launched a process, but only the
+	 * child knows it reached the broker — and after a reconnect the parent would
+	 * otherwise never learn the child is reachable again. Best-effort: a child that
+	 * cannot announce itself is still launched, and the parent's own registration
+	 * gate already refuses to call it started before the edge lands.
+	 */
+	async function reportChildSessionStarted(activeClient: IntercomClient): Promise<void> {
+		const metadata = childOrchestratorMetadata;
+		if (!metadata) {
+			return;
+		}
+		const now = Date.now();
+		if (now - lastStartedReportAt < SUBAGENT_REPORT_MIN_INTERVAL_MS) {
+			return;
+		}
+		lastStartedReportAt = now;
+		try {
+			const target = await resolveSupervisorTarget(activeClient, metadata);
+			if (!target) {
+				return;
+			}
+			await activeClient.send(target, {
+				// The prose matters here: this message can start a turn in the parent
+				// session, so it must say something a reader can act on rather than
+				// leaving them with a JSON line and no idea what it means.
+				text: formatChildSessionReport(
+					{ runId: metadata.runId, lifecycle: "started" },
+					`Child session started: ${metadata.agent}`,
+				),
+			});
+		} catch {
+			// Best-effort, like every other child-to-parent report.
+		}
+	}
+
 	/**
 	 * Parent-side: metadata injected into every child omp this session spawns via
 	 * a Herdr project pane, so the child registers with this session as parent
@@ -1946,7 +2068,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		activeTools.delete(event.toolCallId);
 		syncPresenceStatus();
 	});
-	pi.on("agent_end", () => {
+	pi.on("agent_end", event => {
 		if (!getLiveContext()) {
 			return;
 		}
@@ -1957,7 +2079,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		// and debounced; the parent sees a structured "Subagent completed its task
 		// round." message with run metadata instead of relying on the child to
 		// remember to call send/contact_supervisor manually.
-		void reportSubagentCompletion();
+		void reportSubagentCompletion(roundEndedInError(event.messages));
 	});
 	pi.on("turn_start", (_event, ctx) => {
 		const sessionId = ctx.sessionManager.getSessionId();

@@ -91,6 +91,13 @@ Child sessions behave differently toward you automatically:
 - **Completion reports**: a child sends a structured `Subagent completed its
   task round.` message to you after each task round (run id + agent + child
   index). Treat it as a status update, not an ask.
+
+  Every child-to-parent report also opens with one machine-readable line:
+  `[child-session] {"runId":"…","lifecycle":"…"}`. It is the same message, not a
+  second one — read it as the envelope and the prose below it as the content.
+  A formal Child Session's `lifecycle` (`started` / `progress` / `waiting` /
+  `completed` / `failed`) is what a parent session's session tree records; for a
+  session that is not hosting a tree, it is safe to ignore and read the prose.
 - **Ask without `to`**: a child's `intercom({action:"ask", message:"..."})`
   with no `to`/`cwd` routes to you by default. Reply the same way you reply
   to any ask.
