@@ -44,6 +44,12 @@ export interface FakeChildOptions {
 	crashAfterMs?: number;
 	/** Exit code used by the crash behaviours. */
 	crashCode?: number;
+	/**
+	 * Leak guard: exit on its own after this many ms (0 = never). Off by default;
+	 * `eof-blind` uses it so a child that walks away from the stop ladder cannot
+	 * outlive the test run.
+	 */
+	selfExitMs?: number;
 }
 
 export interface FakeChild {
@@ -55,10 +61,28 @@ export interface FakeChild {
 	receivedRequests(): Promise<string[]>;
 	/** Every entry the child wrote to its log, in order. */
 	events(): Promise<Array<Record<string, unknown>>>;
-	/** True when the child recorded surviving a SIGTERM — only SIGKILL could follow. */
+	/** True when the child recorded surviving a SIGTERM. */
 	survivedSigterm(): Promise<boolean>;
 	/** The child's own pid, as recorded by the child. */
 	recordedPid(): Promise<number | null>;
+	/**
+	 * Ask the child to exit through its own control channel.
+	 *
+	 * Cleanup must never SIGKILL: the whole point of this suite is that a child is
+	 * never destroyed, and the product deliberately declines to do it. So a child
+	 * that walked away from the stop ladder is asked to leave the way any other
+	 * cooperating process would — out of band from the wire protocol it ignored.
+	 */
+	requestExit(): Promise<void>;
+	/** Wait, bounded, until the child process is gone. Returns false if it outlasts the budget. */
+	awaitExit(timeoutMs?: number): Promise<boolean>;
+	/**
+	 * True when the child left because it was ASKED to, via the control channel.
+	 *
+	 * Distinguishes the intended path from the bounded self-exit backstop, so a
+	 * broken control channel cannot pass as a clean teardown.
+	 */
+	exitedViaControl(): Promise<boolean>;
 	cleanup(): Promise<void>;
 }
 
@@ -78,6 +102,26 @@ const log = (entry) => {
 	} catch {}
 };
 
+// Out-of-band control channel. The supervisor never force-kills, so a behaviour
+// that ignores stdin EOF and SIGTERM needs a way to leave that is not a signal:
+// the test writes the control file and this process exits on its own.
+const controlPath = process.env.FAKE_CHILD_CONTROL;
+if (controlPath) {
+	setInterval(() => {
+		try {
+			if (readFileSync(controlPath, "utf8").includes('"action":"exit"')) {
+				log({ event: "control-exit" });
+				process.exit(0);
+			}
+		} catch {}
+	}, 50);
+}
+
+// Leak guard: a bounded lifetime, so a child that ignores everything still
+// cannot outlive the test run.
+const selfExitMs = Number(process.env.FAKE_CHILD_SELF_EXIT_MS ?? 0);
+if (selfExitMs > 0) setTimeout(() => process.exit(0), selfExitMs);
+
 const emit = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
 
 // A relaunch is a fresh process; the log is what tells it this is not the first boot.
@@ -93,7 +137,9 @@ const isRelaunch = () => {
 /** True on a crash-first-boot incarnation that dies without answering anything. */
 let doomed = false;
 
-// eof-blind must also survive SIGTERM, so the supervisor has to escalate to SIGKILL.
+// eof-blind walks away from the whole ladder: EOF and SIGTERM are both ignored,
+// so the supervisor has to report a stop it could not complete. It leaves only
+// via the control channel or the bounded self-exit — never because it was killed.
 if (behavior === "eof-blind") process.on("SIGTERM", () => log({ event: "sigterm-ignored" }));
 
 function crashSoon() {
@@ -157,6 +203,8 @@ for await (const chunk of Bun.stdin.stream()) {
 handleLine(buffered);
 
 log({ event: "stdin-eof" });
+// eof-blind ignores EOF and SIGTERM on purpose; it leaves via the control channel
+// or the bounded self-exit, never because something killed it.
 if (behavior === "eof-blind") setInterval(() => {}, 1000);
 else process.exit(0);
 `;
@@ -171,8 +219,22 @@ export async function createFakeChildSession(options: FakeChildOptions = {}): Pr
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-fake-child-"));
 	const scriptPath = path.join(dir, "fake-child");
 	const logPath = path.join(dir, "received.jsonl");
+	const controlPath = path.join(dir, "control.json");
 	await fs.writeFile(scriptPath, SCRIPT, { mode: 0o755 });
 	await fs.writeFile(logPath, "");
+	// eof-blind ignores everything the stop ladder can send, so it gets the bounded
+	// self-exit as a leak guard; every other behaviour exits on stdin EOF. The guard
+	// is far longer than any cleanup budget, so a passing test can only be the
+	// control channel doing the work.
+	const selfExitMs = options.selfExitMs ?? (options.behavior === "eof-blind" ? 30_000 : 0);
+	// A local closure rather than `this`: the methods below are handed out as a
+	// plain object, and reaching through `this` makes the handle's own type depend
+	// on how it was built.
+	const recordedPid = async (): Promise<number | null> => {
+		const entries = await readLog(logPath);
+		const ready = entries.find(entry => entry.event === "ready");
+		return ready ? Number(ready.pid) : null;
+	};
 
 	return {
 		path: scriptPath,
@@ -181,6 +243,8 @@ export async function createFakeChildSession(options: FakeChildOptions = {}): Pr
 			FAKE_CHILD_CRASH_MS: String(options.crashAfterMs ?? 50),
 			FAKE_CHILD_CRASH_CODE: String(options.crashCode ?? 7),
 			FAKE_CHILD_LOG: logPath,
+			FAKE_CHILD_CONTROL: controlPath,
+			FAKE_CHILD_SELF_EXIT_MS: String(selfExitMs),
 		},
 		async receivedRequests(): Promise<string[]> {
 			const entries = await readLog(logPath);
@@ -193,15 +257,37 @@ export async function createFakeChildSession(options: FakeChildOptions = {}): Pr
 			const entries = await readLog(logPath);
 			return entries.some(entry => entry.event === "sigterm-ignored");
 		},
-		async recordedPid(): Promise<number | null> {
+		recordedPid,
+		async requestExit(): Promise<void> {
+			await fs.writeFile(controlPath, JSON.stringify({ action: "exit" }));
+		},
+		async awaitExit(timeoutMs = 8_000): Promise<boolean> {
+			const pid = await recordedPid();
+			if (pid === null) return true;
+			const deadline = Date.now() + timeoutMs;
+			while (Date.now() < deadline) {
+				if (!isProcessAlive(pid)) return true;
+				await Bun.sleep(20);
+			}
+			return false;
+		},
+		async exitedViaControl(): Promise<boolean> {
 			const entries = await readLog(logPath);
-			const ready = entries.find(entry => entry.event === "ready");
-			return ready ? Number(ready.pid) : null;
+			return entries.some(entry => entry.event === "control-exit");
 		},
 		async cleanup(): Promise<void> {
 			await fs.rm(dir, { recursive: true, force: true });
 		},
 	};
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function readLog(logPath: string): Promise<Array<Record<string, unknown>>> {

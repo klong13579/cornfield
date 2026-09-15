@@ -63,22 +63,23 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<voi
 }
 
 afterEach(async () => {
+	// Cleanup never SIGKILLs. A child that walked away from the stop ladder is left
+	// running by design, so the test asks it to exit through its own control channel
+	// and waits, bounded, for it to go — the same "do not destroy, ask and report"
+	// rule the product follows.
 	for (const child of children.splice(0)) {
 		try {
 			await child.stop();
-		} catch {
-			// A child that walked away from the whole stop ladder is left running by
-			// design, so the test must not leak it. Cleaning up here is the *operator's*
-			// last resort — the test standing in for the human, never the supervisor.
-			const pid = child.pid;
-			if (pid !== undefined) {
-				try {
-					process.kill(pid, "SIGKILL");
-				} catch {}
-			}
-		}
+		} catch {}
 	}
-	for (const fixture of fixtures.splice(0)) await fixture.cleanup();
+	for (const fixture of fixtures.splice(0)) {
+		await fixture.requestExit();
+		const gone = await fixture.awaitExit();
+		if (!gone) {
+			throw new Error(`fixture child ${await fixture.recordedPid()} outlived its control channel`);
+		}
+		await fixture.cleanup();
+	}
 });
 
 describe("ChildSessionProcess.start", () => {
@@ -240,8 +241,11 @@ describe("ChildSessionProcess.stop", () => {
 		expect(child.state).toBe("stopping");
 		expect(() => process.kill(pid, 0)).not.toThrow();
 
-		// Only the operator's call removes it (the afterEach cleanup).
-		process.kill(pid, "SIGKILL");
+		// It leaves when it is asked to, through its own channel — not because
+		// anything killed it (the supervisor declined to, and so does this test).
+		await fixture.requestExit();
+		expect(await fixture.awaitExit()).toBe(true);
+		expect(await fixture.exitedViaControl()).toBe(true);
 	});
 
 	test("is idempotent on an already-exited process", async () => {
@@ -270,7 +274,10 @@ describe("ChildSessionProcess.stop", () => {
 		expect((await second).name).toBe("ChildSessionStopTimeoutError");
 		// One ladder ran, so the child saw the abort exactly once.
 		expect(await fixture.receivedRequests()).toEqual(["abort"]);
-		process.kill(pid, "SIGKILL");
+		expect(() => process.kill(pid, 0)).not.toThrow();
+		await fixture.requestExit();
+		expect(await fixture.awaitExit()).toBe(true);
+		expect(await fixture.exitedViaControl()).toBe(true);
 	});
 
 	test("is a no-op before the first start", async () => {

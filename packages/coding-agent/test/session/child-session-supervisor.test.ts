@@ -103,8 +103,17 @@ function isAlive(pid: number): boolean {
 }
 
 afterEach(async () => {
+	// Cleanup never SIGKILLs: a child that refused the stop ladder is asked to exit
+	// through its own control channel, and the test waits for it to go.
 	for (const supervisor of supervisors.splice(0)) await supervisor.stopAll();
-	for (const fixture of fixtures.splice(0)) await fixture.cleanup();
+	for (const fixture of fixtures.splice(0)) {
+		await fixture.requestExit();
+		const gone = await fixture.awaitExit();
+		if (!gone) {
+			throw new Error(`fixture child ${await fixture.recordedPid()} outlived its control channel`);
+		}
+		await fixture.cleanup();
+	}
 });
 
 describe("ChildSessionSupervisor.start", () => {
@@ -512,10 +521,12 @@ describe("ChildSessionSupervisor terminal states", () => {
 		expect(isAlive(pid)).toBe(true);
 		expect(supervisor.concurrency()).toMatchObject({ active: 1, limit: 1 });
 
-		// The operator decides; the supervisor never force-kills. Once the process is
-		// actually gone, the capacity it was really using comes back.
-		process.kill(pid, "SIGKILL");
+		// The supervisor never force-kills; the child leaves when it is asked to
+		// through its own channel. Only then does the capacity come back — which is
+		// the point: a live process must not be counted as free capacity.
+		await fixture.requestExit();
 		await waitFor(() => !isAlive(pid));
+		expect(await fixture.exitedViaControl()).toBe(true);
 		await waitFor(() => supervisor.concurrency().active === 0);
 	});
 
