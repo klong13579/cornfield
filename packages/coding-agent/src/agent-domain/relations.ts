@@ -377,26 +377,30 @@ function describeId(id: string | undefined): string {
 }
 
 /**
- * Walk the ancestor chain; returns a canonical cycle key when the chain does not
- * terminate at a root within the number of known sessions. Deterministic so one
- * cycle is reported once, keyed by its smallest member.
+ * Walk the ancestor chain and return a canonical key for the cycle it runs into.
+ *
+ * The key contains the cycle members only: a tail chain that merely leads into the
+ * cycle must not become part of the key, otherwise every tail node re-reports the
+ * same cycle under a different key (`c → a → b → a` vs `a → b → a`). The key is the
+ * walk suffix starting at the repeated node, sorted for determinism.
+ *
+ * Returns `null` when the chain reaches a root, or leaves the snapshot (the missing
+ * parent is reported by the caller).
  */
 function findCycle(start: SessionNode, byId: ReadonlyMap<SessionId, SessionNode>): string | null {
-	const seen = new Set<SessionId>([start.sessionId]);
+	const path: SessionId[] = [start.sessionId];
 	let current = start;
-	for (let step = 0; step < byId.size; step++) {
+	for (let step = 0; step <= byId.size; step++) {
 		const parentId = current.parentSessionId;
 		if (parentId === undefined) return null;
 		const parent = byId.get(parentId);
 		if (!parent) return null;
-		if (seen.has(parent.sessionId)) {
-			const members = [...seen].sort();
-			return members.join("|");
-		}
-		seen.add(parent.sessionId);
+		const cycleStart = path.indexOf(parent.sessionId);
+		if (cycleStart !== -1) return [...path.slice(cycleStart)].sort().join("|");
+		path.push(parent.sessionId);
 		current = parent;
 	}
-	return [...seen].sort().join("|");
+	return [...path].sort().join("|");
 }
 
 /**

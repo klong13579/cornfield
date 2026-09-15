@@ -67,7 +67,7 @@
 | `session.parent-project-mismatch` | 父子同 Project（子会话不换业务上下文） |
 | `session.depth-mismatch` | `depth = 父 depth + 1` |
 | `session.root-mismatch` | 子与父的 `rootSessionId` 一致 |
-| `session.cycle` | 父链必须终止于 root（每个环只报一次，遍历有界不会挂死） |
+| `session.cycle` | 父链必须终止于 root；canonical key 只由**环成员**构成（引入环的尾链不计入），所以同一个环只报一次，遍历有界不会挂死 |
 | `session.delegated-root` | 带 `delegationRole` 的只能是子会话：Worker 永远是 child（§6） |
 | `session.result-not-ready` | `resultBroughtBackAt` 必须先有 `resultRef`：ready 和 brought-back 是两件事（§6） |
 | `workspace.agent-missing` / `-disabled` | WorkspaceContext 必须有有效 Agent |
@@ -97,4 +97,15 @@
 - 不建 Project / AgentTodo / session-tree 的存储（分别属 WP4 / WP10 / WP7-WP8）。
 - 不迁移任何 TODO 文件，不决定 AgentTodo 是 Markdown 板还是结构化存储（§37 明确另行决策）。
 - 不改 `todo` 工具、`project-todo` skill、gateway scheduler、session manager 的任何现有行为。
-- 不把契约加进 `packages/coding-agent/package.json` 的 exports（package.json 不在本任务 scope 内）。包内按相对路径 `../agent-domain` 引用；跨包（未来 web-app / gateway UI）要引用时，需要新增 `"./agent-domain"` 出口条目——留给 WP2 或集成时一并处理。
+
+## 7. 引用路径
+
+契约已加入 `packages/coding-agent/package.json` 的 exports：
+
+```json
+"./agent-domain":   "src/agent-domain/index.ts"   // barrel
+"./agent-domain/*": "src/agent-domain/*.ts"       // 单文件
+```
+
+- 包内：相对路径 `../agent-domain`。
+- 跨包：`@cornfield/coding-agent/agent-domain`（已在 packages/gateway 实测解析成功）。

@@ -186,6 +186,22 @@ describe("validateSessionTree", () => {
 		expect(violations.filter(violation => violation.rule === "session.cycle")).toHaveLength(1);
 	});
 
+	test("reports one cycle once when a tail chain leads into it", () => {
+		const snapshot = makeSnapshot({
+			sessions: [
+				makeChildSession({ sessionId: "s-c", parentSessionId: "s-a", rootSessionId: "s-c", depth: 1 }),
+				makeChildSession({ sessionId: "s-a", parentSessionId: "s-b", rootSessionId: "s-c", depth: 2 }),
+				makeChildSession({ sessionId: "s-b", parentSessionId: "s-a", rootSessionId: "s-c", depth: 3 }),
+			],
+		});
+		const cycles = validateSessionTree(snapshot).filter(violation => violation.rule === "session.cycle");
+		expect(cycles).toHaveLength(1);
+		expect(cycles[0]?.subject).toBe("s-c");
+		// The cycle key holds the cycle members only — the tail node that leads in is not part of it.
+		expect(cycles[0]?.message).toContain("s-a → s-b");
+		expect(cycles[0]?.message).not.toContain("s-c");
+	});
+
 	test("rejects a depth that does not follow the parent", () => {
 		const snapshot = makeSnapshot({ sessions: [makeRootSession(), makeChildSession({ depth: 3 })] });
 		expect(rules(validateSessionTree(snapshot))).toEqual(["session.depth-mismatch"]);
