@@ -777,6 +777,36 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 		},
 	},
 	{
+		// Measured 2026-09-15 against coder.narwal.com/v1/chat/completions: the gateway
+		// rejects minimal/none (400 "Unsupported value ... Supported values are: 'low',
+		// 'medium', 'high', 'xhigh', and 'max'"), accepts image parts, and returns tool
+		// calls. The gateway publishes no pricing for this id, so cost stays 0 until a
+		// source exists — the catalog must not invent one.
+		id: "gpt-6-astra",
+		name: "GPT 6 Astra",
+		api: "openai-completions",
+		provider: "narwal-plan",
+		baseUrl: "https://coder.narwal.com/v1",
+		reasoning: true,
+		input: ["text", "image"],
+		cost: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		},
+		contextWindow: 1050000,
+		maxTokens: 128000,
+		thinking: {
+			mode: "effort",
+			minLevel: Effort.Low,
+			maxLevel: Effort.XHigh,
+		},
+		compat: {
+			supportsDeveloperRole: false,
+		},
+	},
+	{
 		id: "hunyuan-t1-vision-20250916",
 		name: "Hunyuan T1 Vision 20250916",
 		api: "openai-completions",

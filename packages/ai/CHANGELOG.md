@@ -9,6 +9,10 @@
 - **`narwal-plan/glm-5.3` 的思考等级声明补成显式集合，并把 `xhigh` 映射为上游的 `max`**（`src/provider-models/narwal-plan.ts`、`src/models.json` 重新生成、`test/model-thinking.test.ts`）：glm-5.3 是始终思考模型，上游只接受 `reasoning_effort ∈ low|high|max`；而它的 thinking 此前是推断出的连续区间（minimal..xhigh），把会话默认的 `medium` 也当成合法值原样下发 —— 每次调用 400「该模型始终思考，不支持关闭思考；请使用 low、high 或 max」。实测（2026-09-14 直打 `coder.narwal.com/v1/chat/completions`）：`low`/`high`/`max` = 200，`medium`/`xhigh` = 400。现声明 `levels: [low, high, xhigh]`（`clampThinkingLevelForModel` 把 medium/minimal 夹成 low）+ `compat.reasoningEffortMap: { xhigh: "max" }`。同族对照实测：`glm-5.3-flash` **接受** `xhigh`（200）、只拒 `medium`，故不动；`glm-5`/`glm-5.1`/`glm-5.2`/`glm-5-turbo` 接受 `medium` 与 `xhigh`（均 200），不动。这是 2026-09-11 与 2026-09-14 两次 squad 事故中同一个 400 的根源：挂在该模型上的子会话**每一个模型调用**都失败（连「切模型」指令都执行不了），父侧只能看到它「活着且 idle」。
 	同时按生成流程重跑 `bun run generate-models`：除本条改动外还带入 101 个模型条目的上游元数据漂移（amazon-bedrock 46 / openrouter 37 / kilo 7 / narwal-plan 3 / 其他 8；无条目新增或删除）。上游漂移随重新生成一并落地，属生成文件的常态。
 
+### Added
+
+- **`narwal-plan/gpt-6-astra` 静态种子**（`src/provider-models/narwal-plan.ts`、`test/narwal-plan-provider.test.ts`、`src/models.json` 重新生成）：网关 `/v1/models` 只返回裸 id 与 context/max_tokens，reasoning / vision / 思考档 / cost 四个字段没有任何来源，所以不在 `NARWAL_PLAN_STATIC_MODELS` 里的新模型一律落成占位元数据 —— gpt-6-astra 此前就是 `reasoning: false`、只收 text、没有 thinking 档（选中它等于没有思考等级、不能发图）。实测（2026-09-15 直打 `coder.narwal.com/v1/chat/completions`）：`reasoning_effort` 只接受 `low|medium|high|xhigh|max`，`minimal` 与 `none` 均 400「Unsupported value」；图片 content part 与 tools 均 200。种子按实测声明 `minLevel: low` / `maxLevel: xhigh`（会话默认 `medium` 落在区间内，不再被夹到 low），cost 保持 0 —— 上游不公布该 id 的定价，不编数。回归用例在 `test/narwal-plan-provider.test.ts`（走发现合并路径，非静态路径）：拿掉种子条目后它立刻红在 `reasoning: false`，即这次要修的线上症状。重跑 `bun run generate-models` 只带出 14 处条目变动（openrouter 10 changed / 2 added、alibaba-coding-plan 1 added，narwal-plan 1 changed 且仅键序不同），无删除。
+
 ## [1.2.3] - 2026-09-14
 
 ### Added

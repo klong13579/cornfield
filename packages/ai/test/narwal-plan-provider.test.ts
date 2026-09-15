@@ -5,6 +5,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { AuthCredentialStore, AuthStorage } from "../src/auth-storage";
+import { createModelManager } from "../src/model-manager";
+import { Effort, getSupportedEfforts } from "../src/model-thinking";
 import { getBundledModels, getBundledProviders } from "../src/models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "../src/provider-models/descriptors";
 import { NARWAL_PLAN_STATIC_MODELS } from "../src/provider-models/narwal-plan";
@@ -124,6 +126,43 @@ describe("narwal-plan provider support", () => {
 		expect(seeded).toBeDefined();
 		expect(seeded?.maxTokens).toBe(393_216);
 		expect(seeded?.cost.input).toBe(0.14);
+	});
+
+	it("merges gpt-6-astra against its seed instead of shipping placeholder metadata", async () => {
+		// The gateway returns bare ids plus limits only, so a model with no seed entry
+		// resolves as `reasoning: false` with text-only input and no thinking ladder —
+		// which is how gpt-6-astra shipped unusable-thinking until it was seeded.
+		// Effort ladder measured 2026-09-15 against /v1/chat/completions: low..max are
+		// accepted, `minimal` and `none` are 400 ("Unsupported value").
+		global.fetch = gatewayModelsFetch([
+			{
+				id: "gpt-6-astra",
+				object: "model",
+				context_window: 1_050_000,
+				context_length: 1_050_000,
+				max_output_tokens: 128_000,
+				max_tokens: 128_000,
+			},
+		]);
+
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-narwal-astra-"));
+		try {
+			const manager = createModelManager({
+				...narwalPlanModelManagerOptions({ apiKey: "sk-narwal-test" }),
+				cacheDbPath: path.join(tempDir, "models.db"),
+			});
+			const { models } = await manager.refresh("online");
+			const astra = models.find(model => model.id === "gpt-6-astra");
+
+			expect(astra).toBeDefined();
+			expect(astra?.reasoning).toBe(true);
+			expect(astra?.input).toEqual(["text", "image"]);
+			// minimal is absent: the upstream rejects it, and the harness default medium
+			// must survive unclamped rather than being pinned down to low.
+			expect(getSupportedEfforts(astra!)).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
 	});
 });
 
