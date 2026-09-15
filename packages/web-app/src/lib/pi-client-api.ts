@@ -17,6 +17,7 @@ import type {
 	ModelCatalogDto,
 	ModelSelectionDto,
 	ModelTestResultDto,
+	ProjectListDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
 	ProviderOAuthStartDto,
@@ -32,14 +33,16 @@ import type {
 } from "@cornfield/wire";
 
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
-// Session Tree DTO（T8）同样由 pi-wire 定义：消费方（会话树面板等）从本层引入，
-// 保证「一个概念一种表示」—— 前端不再自己拼一份子会话形状。
+// Session Tree / Project DTO（T8）同样由 pi-wire 定义：消费方从本层引入，
+// 保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目形状。
 export type {
 	ArtifactDto,
 	BroughtBackChildResultDto,
 	ChildSessionEscalationDto,
 	ChildSessionNodeDto,
 	ChildSessionStatusDto,
+	ProjectListDto,
+	ProjectRecordDto,
 	SessionTreeDto,
 } from "@cornfield/wire";
 
@@ -350,6 +353,15 @@ export interface PiClient {
 	 * 幂等：`firstTime:false` 表示此前已带回 —— 调用方不得重复注入同一份结果。
 	 */
 	bringBackChildResult(childSessionId: string, sessionId?: string): Promise<BroughtBackChildResultDto>;
+
+	// ── Project（T8：客户端级 Project registry 只读）──
+	/**
+	 * 已声明的 Project + 被查询会话落在哪个 Project（list_projects）。
+	 *
+	 * 读不出来（存储损坏）会招错，**不**退化成空列表 —— 调用方必须把「没声明过」与
+	 * 「声明过但读不到」分开显示。sessionId 缺省 = 只要列表，不算会话归属。
+	 */
+	listProjects(sessionId?: string): Promise<ProjectListDto>;
 
 	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
 	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }>;

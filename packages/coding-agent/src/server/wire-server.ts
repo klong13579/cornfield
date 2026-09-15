@@ -82,6 +82,7 @@ import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
+import { readProjectContext } from "./projects-wire";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
 import {
 	type AgentMeta,
@@ -388,6 +389,18 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			switch (command.type) {
 				case "list_agents": {
 					done({ agents: registry.buildSessionList(activeAgentIds()) });
+					return;
+				}
+				// ── Project（T8）：客户端级 Project registry 的只读面 ──
+				case "list_projects": {
+					try {
+						// 会话归属只看**已 attach** 的会话（不 lazy attach）：查一次项目列表不应把 agent 拉起来。
+						const attached = registry.getAttached(command.sessionId ?? ctx.activeAgentId);
+						done(await readProjectContext(attached?.session.sessionManager.getCwd()));
+					} catch (err) {
+						// 存储存在但读不出来 → ok:false（不当成「没有 Project」）
+						fail(`list_projects failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
 					return;
 				}
 				case "attach": {

@@ -108,6 +108,10 @@ type _AssertBringBackChildResult = _BringBackChildResult extends {
 	: never;
 const _bringBackChildResultShape: _AssertBringBackChildResult = true;
 
+type _ListProjects = WireCommandOfType<"list_projects">;
+type _AssertListProjects = _ListProjects extends { type: "list_projects"; sessionId?: string } ? true : never;
+const _listProjectsShape: _AssertListProjects = true;
+
 // ── 运行时命令清单快照 ──
 
 const COMMAND_TYPES = [
@@ -244,6 +248,8 @@ const COMMAND_TYPES = [
 	// Session Tree（T8）：父会话对被委派子会话的账本读取与结果带回
 	"get_session_tree",
 	"bring_back_child_result",
+	// Project（T8）：客户端级 Project registry 只读
+	"list_projects",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */

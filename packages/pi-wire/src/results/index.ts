@@ -10,6 +10,7 @@ export * from "./diagnosis";
 export * from "./events";
 export * from "./memory";
 export * from "./models";
+export * from "./projects";
 export * from "./providers";
 export * from "./session";
 export * from "./session-tree";

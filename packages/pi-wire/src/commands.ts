@@ -216,7 +216,19 @@ export type MultiplexCommand =
 	 * 幂等：重复带回不报错，但 `firstTime:false`，且**不再**注入 —— 同一条结果注入两次
 	 * 就是把同一次工作算两遍。读取失败（结果指针不可读）整条命令 ok:false，不返回半份内容。
 	 */
-	| { id?: string; type: "bring_back_child_result"; sessionId?: string; childSessionId: string };
+	| { id?: string; type: "bring_back_child_result"; sessionId?: string; childSessionId: string }
+	// Project（T8）：客户端级 Project registry 的只读面
+	/**
+	 * 列出已声明的 Project，并给出被查询会话落在哪个 Project 里（ProjectListDto）。
+	 *
+	 * Project registry 是客户端 scope（跨 Agent 共享的业务边界），本身不依赖某个会话；
+	 * `sessionId` 可选，只用来算 `currentProjectId`（用已 attach 会话的 cwd 按 WP4 的 root
+	 * 匹配规则算，不 lazy attach）。不传 = 只要列表。
+	 *
+	 * 存储文件不存在 = 明确空集（projects: []）；文件在但读不出来 = ok:false，
+	 * **不得**退化成空列表 —— 「没声明过」与「声明过但坏了」是两件事。
+	 */
+	| { id?: string; type: "list_projects"; sessionId?: string };
 
 /** 多端专属命令（rpc-types 没有，wire 层新增）。 */
 export type WireExtensionCommand =

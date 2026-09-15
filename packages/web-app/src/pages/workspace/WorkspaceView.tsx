@@ -1,10 +1,11 @@
 import { Bot, Folder, Menu, MessagesSquare, PanelRight, Smartphone } from "lucide-react";
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ProjectCell } from "../../components/ProjectContext";
 import { QueueCard } from "../../components/QueueCard";
 import { DevicePreview } from "../../layout/DevicePreview";
 import { FloatingCardHost } from "../../render/FloatingCardHost";
-import { activeAgentOf } from "../../state/agent-context";
+import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
@@ -23,6 +24,13 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 	const ui = useUiState();
 	const [searchParams, setSearchParams] = useSearchParams();
 	const initialQuery = (searchParams.get("q") ?? "").trim();
+
+	// Project registry：连上后读一次（读到就不重复读；失败留给首页的刷新钮重试）。
+	useEffect(() => {
+		if (!view.connected) return;
+		if (view.projects !== undefined || view.projectsError !== undefined) return;
+		void store.refreshProjects(activeAgentIdOf(view));
+	}, [store, view, view.connected, view.projects, view.projectsError]);
 
 	// 顶栏工作区：跟随当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录；agent = agentDir）；
 	// 未点击/未识别时回落进程仓库（env.repos）
@@ -97,6 +105,8 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 						<b>{workspaceLabel}</b>
 						{view.env ? ` · ${view.env.branch}` : ""}
 					</span>
+					<span className="text-[12px] text-ink-faint">/</span>
+					<ProjectCell view={view} />
 					<span className="text-[12px] text-ink-faint">/</span>
 					<span className="chip" title={view.sessionFile ?? undefined}>
 						<MessagesSquare size={13} strokeWidth={1.5} />

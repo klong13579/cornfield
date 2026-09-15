@@ -19,6 +19,7 @@ import type {
 	ModelSelectionDto,
 	ModelTestResultDto,
 	ProgressEventDto,
+	ProjectListDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
 	ProviderOAuthStartDto,
@@ -543,13 +544,23 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<SessionTreeDto>({ type: "get_session_tree", ...(sessionId ? { sessionId } : {}) });
 	}
 
-	/** 把子会话结果带回父会话（bring_back_child_result）；幂等门闩是结果里的 firstTime。 */
+	/** 把子会话结果带回父会话（bring_back_child_result）；幂等门阀是结果里的 firstTime。 */
 	bringBackChildResult(childSessionId: string, sessionId?: string): Promise<BroughtBackChildResultDto> {
 		return this.#req<BroughtBackChildResultDto>({
 			type: "bring_back_child_result",
 			childSessionId,
 			...(sessionId ? { sessionId } : {}),
 		});
+	}
+
+	/**
+	 * 已声明的 Project（list_projects）。
+	 *
+	 * 不捕获错误：读不到（存储损坏）必须原样到 store 显示成错误态 —— 捕获后返回空数组
+	 * 就是把「声明过但读坏了」显示成「没声明过」。
+	 */
+	listProjects(sessionId?: string): Promise<ProjectListDto> {
+		return this.#req<ProjectListDto>({ type: "list_projects", ...(sessionId ? { sessionId } : {}) });
 	}
 
 	async diagnoseSession(

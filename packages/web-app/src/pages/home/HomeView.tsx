@@ -2,6 +2,7 @@ import { ArrowRight, Bot, CalendarDays, Cpu, History, Mic, Send } from "lucide-r
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Orb } from "../../components/Orb";
+import { ProjectSection, projectLabelOf } from "../../components/ProjectContext";
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -99,7 +100,15 @@ export function HomeView(): React.JSX.Element {
 		return () => clearTimeout(t);
 	}, []);
 
+	// Project registry：连上后读一次（读到就不重复读；失败留给刷新钮重试）。
+	useEffect(() => {
+		if (!view.connected) return;
+		if (view.projects !== undefined || view.projectsError !== undefined) return;
+		void store.refreshProjects(agentId);
+	}, [store, view.connected, view.projects, view.projectsError, agentId]);
+
 	const exchange = useMemo(() => lastExchange(view), [view]);
+	const project = useMemo(() => projectLabelOf(view), [view]);
 	const canSend = view.connected && !view.isStreaming && query.trim().length > 0;
 
 	/** 切到某个 Agent：serve 侧焦点 + 权威快照一起过来（不是前端滤镜）。 */
@@ -189,6 +198,10 @@ export function HomeView(): React.JSX.Element {
 							Agent <b className="font-medium text-ink-muted">{agent?.name ?? "未选择"}</b>
 						</span>
 						<span className="text-ink-faint">/</span>
+						<span title={project.title}>
+							Project <b className="font-medium text-ink-muted">{project.label}</b>
+						</span>
+						<span className="text-ink-faint">/</span>
 						<span>
 							工作区{" "}
 							<b className="font-medium text-ink-muted">{view.activeWorkspace ?? view.env?.repos ?? "—"}</b>
@@ -268,6 +281,9 @@ export function HomeView(): React.JSX.Element {
 						</button>
 					</div>
 				</section>
+
+				{/* Project registry（真实读数：列表 / 空态 / 读取失败态） */}
+				<ProjectSection view={view} onRefresh={() => void store.refreshProjects(agentId)} />
 
 				{/* Suggestions：错峰入场 */}
 				<div className="flex flex-wrap items-center justify-center gap-2.5">

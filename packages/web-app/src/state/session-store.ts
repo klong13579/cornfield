@@ -19,6 +19,7 @@ import type {
 	ModelTestResultDto,
 	PermissionRequestDto,
 	ProgressEventDto,
+	ProjectRecordDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
 	ProviderOAuthStartDto,
@@ -125,6 +126,14 @@ export interface SessionView {
 	sessionTreeLoading: boolean;
 	/** 会话树查不到的原因（读失败 ≠ 没有子会话，面板必须分开显示）。 */
 	sessionTreeError?: string;
+	/**
+	 * 已声明的 Project（list_projects）。`undefined` = 还没查过；`[]` = 查了，确实没声明过。
+	 */
+	projects?: ProjectRecordDto[];
+	/** 被查询会话落在哪个 Project（serve 按 WP4 的 root 规则算）；缺省 = 没有归属。 */
+	currentProjectId?: string;
+	/** Project 读不到的原因（存储损坏）。读失败 ≠ 没声明过。 */
+	projectsError?: string;
 }
 
 /** B7-1：回合收尾通知——有错误消息走出错告警（errors 开关），否则走完成（agentDone 开关）。 */
@@ -175,6 +184,13 @@ export class SessionStore {
 	#sessionTree: SessionTreeDto | undefined;
 	#sessionTreeLoading = false;
 	#sessionTreeError: string | undefined;
+	/**
+	 * 已声明的 Project。**不随会话变**（客户端 scope 的 registry，跨 Agent 共享），所以不在
+	 * 切会话时清空；只有归属 `#currentProjectId` 是会话级的。
+	 */
+	#projects: ProjectRecordDto[] | undefined;
+	#currentProjectId: string | undefined;
+	#projectsError: string | undefined;
 
 	init(client: PiClient): void {
 		this.#client = client;
@@ -558,6 +574,8 @@ export class SessionStore {
 		// 挂在当前会话下）；等下一次 refreshSessionTree 给出真实答案。
 		this.#sessionTree = undefined;
 		this.#sessionTreeError = undefined;
+		// Project 归属同样是会话级的（列表本身不是）。
+		this.#currentProjectId = undefined;
 		const view = cloneView(this.getSnapshot());
 		// view.sessionId 是 serve 推来的焦点（agent 注册名）：它与目标不同，说明手上这批消息
 		// 属于**另一个 Agent**。留着它就是让 A 的工作显示在 B 的上下文里，等新快照到达再
@@ -575,6 +593,7 @@ export class SessionStore {
 		view.activeWorkspace = workspace;
 		view.sessionTree = undefined;
 		view.sessionTreeError = undefined;
+		view.currentProjectId = undefined;
 		this.#view = view;
 		this.#notify();
 	}
@@ -732,6 +751,32 @@ export class SessionStore {
 		const result = await this.#client.bringBackChildResult(childSessionId, agentId);
 		await this.refreshSessionTree(agentId);
 		return result;
+	}
+
+	/**
+	 * 读客户端级 Project registry（list_projects），并让 serve 算一次当前会话的归属。
+	 *
+	 * 失败不降级为空列表：存储损坏是错误，与「没声明过任何 Project」必须分开显示，
+	 * 否则用户会以为自己的项目消失。
+	 */
+	async refreshProjects(agentId?: string): Promise<void> {
+		try {
+			const result = await this.#client.listProjects(agentId);
+			this.#projects = result.projects;
+			this.#currentProjectId = result.currentProjectId;
+			this.#projectsError = undefined;
+		} catch (err) {
+			this.#projects = undefined;
+			this.#currentProjectId = undefined;
+			this.#projectsError = errorMessageOf(err);
+		} finally {
+			const view = cloneView(this.getSnapshot());
+			view.projects = this.#projects;
+			view.currentProjectId = this.#currentProjectId;
+			view.projectsError = this.#projectsError;
+			this.#view = view;
+			this.#notify();
+		}
 	}
 
 	/** 列出 agent workspace 目录（fs_list，代理到 pi-client）。 */
@@ -1107,6 +1152,9 @@ export class SessionStore {
 				sessionTree: this.#sessionTree,
 				sessionTreeLoading: this.#sessionTreeLoading,
 				sessionTreeError: this.#sessionTreeError,
+				projects: this.#projects,
+				currentProjectId: this.#currentProjectId,
+				projectsError: this.#projectsError,
 			};
 		}
 		return {
@@ -1143,6 +1191,9 @@ export class SessionStore {
 			sessionTree: this.#sessionTree,
 			sessionTreeLoading: this.#sessionTreeLoading,
 			sessionTreeError: this.#sessionTreeError,
+			projects: this.#projects,
+			currentProjectId: this.#currentProjectId,
+			projectsError: this.#projectsError,
 		};
 	}
 
