@@ -56,6 +56,7 @@ import {
 	getTableSchema,
 	isSqliteFile,
 	listTables,
+	MAX_RAW_QUERY_ROWS,
 	parseSqlitePathCandidates,
 	parseSqliteSelector,
 	queryRows,
@@ -982,6 +983,11 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				}
 				case "raw": {
 					const result = executeReadQuery(db, selector.sql);
+					// The true row count is unknown once the cap bites, so the table reports
+					// what it shows and the notice states the cap explicitly.
+					const capped = result.truncated
+						? `\n\n[Output capped at ${MAX_RAW_QUERY_ROWS} rows; add a LIMIT/OFFSET clause to the query to page through more]`
+						: "";
 					return toolResult<ReadToolDetails>(details)
 						.text(
 							prependSuffixResolutionNotice(
@@ -991,7 +997,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 									limit: result.rows.length || DEFAULT_MAX_LINES,
 									table: "query",
 									dbPath: resolvedSqlitePath.absolutePath,
-								}),
+								}) + capped,
 								resolvedSqlitePath.suffixResolution,
 							),
 						)

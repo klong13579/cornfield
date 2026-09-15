@@ -21,10 +21,14 @@ export type ToolWithTimeout = keyof typeof TOOL_TIMEOUTS;
 
 /**
  * Clamp a raw timeout to the allowed range for a tool.
- * If rawTimeout is undefined, returns the tool's default.
+ *
+ * `maxTimeout` is the session's global ceiling (`tools.maxTimeout`); it governs the
+ * tool's own default too, so it also caps a call that omits `timeout`.
+ * If rawTimeout is undefined, returns the tool's default (still capped).
  */
-export function clampTimeout(tool: ToolWithTimeout, rawTimeout?: number): number {
+export function clampTimeout(tool: ToolWithTimeout, rawTimeout?: number, maxTimeout?: number): number {
 	const config = TOOL_TIMEOUTS[tool];
 	const timeout = rawTimeout ?? config.default;
-	return Math.max(config.min, Math.min(config.max, timeout));
+	const capped = maxTimeout !== undefined && maxTimeout > 0 ? Math.min(timeout, maxTimeout) : timeout;
+	return Math.max(config.min, Math.min(config.max, capped));
 }

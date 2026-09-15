@@ -6254,7 +6254,7 @@ export class AgentSession {
 				onChunk,
 				signal: abortController.signal,
 				sessionKey: this.sessionId,
-				timeout: clampTimeout("bash") * 1000,
+				timeout: clampTimeout("bash", undefined, this.settings.get("tools.maxTimeout")) * 1000,
 				onMinimizedSave: originalText => this.#saveBashOriginalArtifact(originalText),
 			});
 

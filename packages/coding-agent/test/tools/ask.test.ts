@@ -758,6 +758,55 @@ describe("AskTool multi-question navigation", () => {
 	});
 });
 
+/**
+ * The answer must come back as the label the caller wrote. The UI appends
+ * " (Recommended)" for display, so the mapping back has to be by identity —
+ * stripping the suffix unconditionally erases a label that already ends with it.
+ */
+describe("AskTool option label round-trip", () => {
+	async function ask(options: Array<{ label: string }>, recommended: number | undefined, choice: string) {
+		const select = vi.fn(async () => choice);
+		return await new AskTool(createSession()).execute(
+			"call-labels",
+			{
+				questions: [
+					{
+						id: "q",
+						question: "Ship?",
+						options,
+						...(recommended === undefined ? {} : { recommended }),
+					},
+				],
+			},
+			undefined,
+			undefined,
+			createContext({ select }),
+		);
+	}
+
+	it("returns the caller's label for a recommended option", async () => {
+		const result = await ask([{ label: "Ship it" }, { label: "Wait" }], 0, "Ship it (Recommended)");
+
+		expect(result.details?.selectedOptions).toEqual(["Ship it"]);
+	});
+
+	it("keeps a suffix the caller wrote itself", async () => {
+		const result = await ask(
+			[{ label: "Ship it (Recommended)" }, { label: "Wait" }],
+			undefined,
+			"Ship it (Recommended)",
+		);
+
+		expect(result.details?.selectedOptions).toEqual(["Ship it (Recommended)"]);
+	});
+
+	it("rejects a label the UI reserves", async () => {
+		expect(ask([{ label: "Other (type your own)" }, { label: "Wait" }], undefined, "Wait")).rejects.toThrow(
+			/reserved by the ask UI/,
+		);
+	});
+});
+
 describe("AskTool.createIf gate", () => {
 	it("returns null when ask.enabled is false", () => {
 		const session = createSession({ settings: Settings.isolated({ "ask.enabled": false }) });

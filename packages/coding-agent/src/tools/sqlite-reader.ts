@@ -9,6 +9,12 @@ const SQLITE_PATH_PATTERN = /\.(?:sqlite3?|db3?)(?=(?::|\?|$))/gi;
 const DEFAULT_QUERY_LIMIT = 20;
 const DEFAULT_SCHEMA_SAMPLE_LIMIT = 5;
 const MAX_QUERY_LIMIT = 500;
+/**
+ * Row cap for a raw `?q=SELECT ...`. Without it a `SELECT *` on a large table is
+ * read into memory and rendered in full, blocking the JS thread and flooding the
+ * caller's context with no sign that anything was cut.
+ */
+export const MAX_RAW_QUERY_ROWS = 1000;
 const MAX_RENDER_WIDTH = 120;
 const MAX_COLUMN_WIDTH = 40;
 const MIN_COLUMN_WIDTH = 1;
@@ -590,15 +596,25 @@ export function getRowByRowId(db: Database, table: string, key: string): Record<
 		.get(binding);
 }
 
-export function executeReadQuery(db: Database, sql: string): { columns: string[]; rows: Record<string, unknown>[] } {
+export function executeReadQuery(
+	db: Database,
+	sql: string,
+): { columns: string[]; rows: Record<string, unknown>[]; truncated: boolean } {
 	const statement = db.prepare<SqliteRow, []>(sql);
 	if (statement.paramsCount > 0) {
 		throw new ToolError("SQLite raw queries do not support bound parameters");
 	}
-	return {
-		columns: [...statement.columnNames],
-		rows: statement.all(),
-	};
+	const columns = [...statement.columnNames];
+	const rows: Record<string, unknown>[] = [];
+	let truncated = false;
+	for (const row of statement.iterate()) {
+		if (rows.length >= MAX_RAW_QUERY_ROWS) {
+			truncated = true;
+			break;
+		}
+		rows.push(row);
+	}
+	return { columns, rows, truncated };
 }
 
 export function insertRow(db: Database, table: string, data: Record<string, unknown>): void {

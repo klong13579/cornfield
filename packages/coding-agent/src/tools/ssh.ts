@@ -158,7 +158,7 @@ export class SshTool implements AgentTool<typeof sshSchema, SSHToolDetails> {
 		const remoteCommand = buildRemoteCommand(command, cwd, hostInfo);
 
 		// Clamp to reasonable range: 1s - 3600s (1 hour)
-		const timeoutSec = clampTimeout("ssh", rawTimeout);
+		const timeoutSec = clampTimeout("ssh", rawTimeout, this.session.settings.get("tools.maxTimeout"));
 		const timeoutMs = timeoutSec * 1000;
 
 		const tailBuffer = new TailBuffer(DEFAULT_MAX_BYTES);

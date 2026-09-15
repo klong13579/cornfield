@@ -287,7 +287,8 @@ export async function runInteractiveBashPty(
 	options: {
 		command: string;
 		cwd: string;
-		timeoutMs: number;
+		/** Command deadline in ms. `undefined` (timeout 0) leaves the session unbounded. */
+		timeoutMs?: number;
 		signal?: AbortSignal;
 		env?: Record<string, string>;
 		artifactPath?: string;

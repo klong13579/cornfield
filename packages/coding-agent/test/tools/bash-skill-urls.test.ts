@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import type { Skill } from "../../src/extensibility/skills";
 import { resolveLocalUrlToPath } from "../../src/internal-urls";
-import { expandInternalUrls, expandSkillUrls } from "../../src/tools/bash-skill-urls";
+import { expandInternalUrls, expandSkillUrls, resolveSkillUrlToPath } from "../../src/tools/bash-skill-urls";
 import { ToolError } from "../../src/tools/tool-errors";
 
 function shellEscape(p: string): string {
@@ -328,5 +328,32 @@ describe("expandInternalUrls", () => {
 			getSessionId: () => "session-1",
 		};
 		await expect(expandInternalUrls(command, { skills: [], localOptions })).resolves.toBe(command);
+	});
+});
+
+/**
+ * `cwd: "skill://<name>"` means the skill directory. Resolving a bare skill URL to
+ * SKILL.md is right for command text (the URL names a file there), but as a working
+ * directory it made the call fail against a path that is never a directory.
+ */
+describe("skill:// as a working directory", () => {
+	const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
+
+	it("resolves a bare skill URL to the skill directory when one is asked for", () => {
+		expect(resolveSkillUrlToPath("skill://valid-skill", skills, { forDirectory: true })).toBe(skills[0]!.baseDir);
+	});
+
+	it("still resolves a bare skill URL to SKILL.md by default", () => {
+		expect(resolveSkillUrlToPath("skill://valid-skill", skills)).toBe(skills[0]!.filePath);
+	});
+
+	it("expands a cwd skill URL through expandInternalUrls", async () => {
+		const expanded = await expandInternalUrls("skill://valid-skill", {
+			skills,
+			noEscape: true,
+			skillUrlForDirectory: true,
+		});
+
+		expect(expanded).toBe(skills[0]!.baseDir);
 	});
 });

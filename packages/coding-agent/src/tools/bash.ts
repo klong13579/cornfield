@@ -80,7 +80,12 @@ const bashSchemaBase = Type.Object({
 			description: "extra env vars",
 		}),
 	),
-	timeout: Type.Optional(Type.Number({ description: "timeout in seconds", default: 300 })),
+	timeout: Type.Optional(
+		Type.Number({
+			description: `timeout in seconds; 0 disables the command deadline; other values are clamped to ${TOOL_TIMEOUTS.bash.min}-${TOOL_TIMEOUTS.bash.max}`,
+			default: 300,
+		}),
+	),
 	cwd: Type.Optional(Type.String({ description: "working directory", examples: ["src/", "/tmp"] })),
 	head: Type.Optional(Type.Number({ description: "first n lines of output" })),
 	tail: Type.Optional(Type.Number({ description: "last n lines of output" })),
@@ -254,7 +259,14 @@ function extractPartialBashEnv(partialJson: string | undefined): Record<string, 
 	return Object.keys(env).length > 0 ? env : undefined;
 }
 
-function formatTimeoutClampNotice(requestedTimeoutSec: number, effectiveTimeoutSec: number): string | undefined {
+function formatTimeoutClampNotice(
+	requestedTimeoutSec: number | undefined,
+	effectiveTimeoutSec: number | undefined,
+): string | undefined {
+	if (requestedTimeoutSec === undefined) return undefined;
+	if (effectiveTimeoutSec === undefined) {
+		return `Command deadline disabled (requested timeout ${requestedTimeoutSec}).`;
+	}
 	return requestedTimeoutSec !== effectiveTimeoutSec
 		? `Timeout clamped to ${effectiveTimeoutSec}s (requested ${requestedTimeoutSec}s; allowed range ${TOOL_TIMEOUTS.bash.min}-${TOOL_TIMEOUTS.bash.max}s).`
 		: undefined;
@@ -311,12 +323,19 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		return outputText;
 	}
 
-	#buildResultText(result: BashResult | BashInteractiveResult, timeoutSec: number, outputText: string): string {
+	#buildResultText(
+		result: BashResult | BashInteractiveResult,
+		timeoutSec: number | undefined,
+		outputText: string,
+	): string {
 		if (result.cancelled) {
 			throw new ToolError(normalizeResultOutput(result) || "Command aborted");
 		}
 		if (isInteractiveResult(result) && result.timedOut) {
-			throw new ToolError(normalizeResultOutput(result) || `Command timed out after ${timeoutSec} seconds`);
+			throw new ToolError(
+				normalizeResultOutput(result) ||
+					(timeoutSec === undefined ? "Command timed out" : `Command timed out after ${timeoutSec} seconds`),
+			);
 		}
 		if (result.exitCode === undefined) {
 			throw new ToolError(`${outputText}\n\nCommand failed: missing exit status`);
@@ -329,7 +348,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 
 	#buildCompletedResult(
 		result: BashResult | BashInteractiveResult,
-		timeoutSec: number,
+		timeoutSec: number | undefined,
 		headLines?: number,
 		tailLines?: number,
 		options: { requestedTimeoutSec?: number; notices?: string[] } = {},
@@ -338,7 +357,10 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const notices = options.notices?.filter(Boolean) ?? [];
 		if (notices.length > 0) outputLines.push("", ...notices);
 		const outputText = outputLines.join("\n");
-		const details: BashToolDetails = { timeoutSeconds: timeoutSec };
+		const details: BashToolDetails = {};
+		if (timeoutSec !== undefined) {
+			details.timeoutSeconds = timeoutSec;
+		}
 		if (options.requestedTimeoutSec !== undefined && options.requestedTimeoutSec !== timeoutSec) {
 			details.requestedTimeoutSeconds = options.requestedTimeoutSec;
 		}
@@ -351,13 +373,15 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		jobId: string,
 		label: string,
 		previewText: string,
-		timeoutSec: number,
+		timeoutSec: number | undefined,
 		options: { requestedTimeoutSec?: number; notices?: string[] } = {},
 	): AgentToolResult<BashToolDetails> {
 		const details: BashToolDetails = {
-			timeoutSeconds: timeoutSec,
 			async: { state: "running", jobId, type: "bash" },
 		};
+		if (timeoutSec !== undefined) {
+			details.timeoutSeconds = timeoutSec;
+		}
 		if (options.requestedTimeoutSec !== undefined && options.requestedTimeoutSec !== timeoutSec) {
 			details.requestedTimeoutSeconds = options.requestedTimeoutSec;
 		}
@@ -385,8 +409,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 	#startManagedBashJob(options: {
 		command: string;
 		commandCwd: string;
-		timeoutMs: number;
-		timeoutSec: number;
+		timeoutMs: number | undefined;
+		timeoutSec: number | undefined;
 		requestedTimeoutSec?: number;
 		timeoutClampNotice?: string;
 		headLines?: number;
@@ -501,8 +525,11 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		}
 	}
 
-	#resolveAutoBackgroundWaitMs(timeoutMs: number): number {
+	#resolveAutoBackgroundWaitMs(timeoutMs: number | undefined): number {
 		if (this.#autoBackgroundThresholdMs <= 0) return 0;
+		// No deadline: the backgrounding threshold alone decides when the call moves
+		// to the background.
+		if (timeoutMs === undefined) return this.#autoBackgroundThresholdMs;
 		const timeoutBufferMs = 1_000;
 		return Math.max(0, Math.min(this.#autoBackgroundThresholdMs, timeoutMs - timeoutBufferMs));
 	}
@@ -584,7 +611,9 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 
 		// Resolve protocol URLs (skill://, agent://, etc.) in extracted cwd.
 		if (cwd?.includes("://") || cwd?.includes("local:/")) {
-			cwd = await expandInternalUrls(cwd, { ...internalUrlOptions, noEscape: true });
+			// `cwd: "skill://<name>"` means the skill directory; the file path (default
+			// for command text) is not a directory and the call could only fail.
+			cwd = await expandInternalUrls(cwd, { ...internalUrlOptions, noEscape: true, skillUrlForDirectory: true });
 		}
 
 		const commandCwd = cwd ? resolveToCwd(cwd, this.session.cwd) : this.session.cwd;
@@ -601,10 +630,15 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			throw new ToolError(`Working directory is not a directory: ${commandCwd}`);
 		}
 
-		// Clamp to reasonable range: 1s - 3600s (1 hour)
+		// `timeout: 0` is an explicit "no deadline" contract; every other value is clamped
+		// to the allowed range. Clamping 0 to the 1s minimum silently killed commands the
+		// caller had asked to leave unbounded.
 		const requestedTimeoutSec = rawTimeout;
-		const timeoutSec = clampTimeout("bash", requestedTimeoutSec);
-		const timeoutMs = timeoutSec * 1000;
+		const timeoutDisabled = requestedTimeoutSec === 0;
+		const timeoutSec = timeoutDisabled
+			? undefined
+			: clampTimeout("bash", requestedTimeoutSec, this.session.settings.get("tools.maxTimeout"));
+		const timeoutMs = timeoutSec === undefined ? undefined : timeoutSec * 1000;
 		const timeoutClampNotice = formatTimeoutClampNotice(requestedTimeoutSec, timeoutSec);
 
 		// Pre-check inline Python scripts for syntax errors
@@ -683,6 +717,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const { path: artifactPath, id: artifactId } = (await this.session.allocateOutputArtifact?.("bash")) ?? {};
 
 		const usePty = pty && $env.PI_NO_PTY !== "1" && ctx?.hasUI === true && ctx.ui !== undefined;
+		// A pty request that cannot be honoured is stated out loud: the caller asked
+		// for a terminal and would otherwise believe it got one.
+		const ptyNotice =
+			pty === true && !usePty
+				? "pty requested but unavailable in this environment; ran without a terminal"
+				: undefined;
 		const result: BashResult | BashInteractiveResult = usePty
 			? await runInteractiveBashPty(ctx.ui!, {
 					command,
@@ -711,11 +751,14 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			throw new ToolError(normalizeResultOutput(result) || "Command aborted");
 		}
 		if (isInteractiveResult(result) && result.timedOut) {
-			throw new ToolError(normalizeResultOutput(result) || `Command timed out after ${timeoutSec} seconds`);
+			throw new ToolError(
+				normalizeResultOutput(result) ||
+					(timeoutSec === undefined ? "Command timed out" : `Command timed out after ${timeoutSec} seconds`),
+			);
 		}
 		return this.#buildCompletedResult(result, timeoutSec, headLines, tailLines, {
 			requestedTimeoutSec,
-			notices: [timeoutClampNotice].filter((notice): notice is string => Boolean(notice)),
+			notices: [timeoutClampNotice, ptyNotice].filter((notice): notice is string => Boolean(notice)),
 		});
 	}
 }

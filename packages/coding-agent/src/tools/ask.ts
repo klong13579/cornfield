@@ -24,7 +24,7 @@ import askDescription from "../prompts/tools/ask.md" with { type: "text" };
 import { renderStatusLine } from "../tui";
 import type { ToolSession } from ".";
 import { formatErrorMessage, formatMeta, formatTitle } from "./render-utils";
-import { ToolAbortError } from "./tool-errors";
+import { ToolAbortError, ToolError } from "./tool-errors";
 
 // =============================================================================
 // Types
@@ -150,6 +150,15 @@ async function askSingleQuestion(
 ): Promise<SelectionResult> {
 	const { recommended, signal, initialSelection, navigation } = options;
 	const doneLabel = getDoneOptionLabel();
+	// A label the UI appends itself cannot also come from the caller: in single
+	// select the model's row and the UI's row would render identically, and the
+	// model's row would be unreachable.
+	const reservedLabel = optionLabels.find(label => label === OTHER_OPTION || label === doneLabel);
+	if (reservedLabel !== undefined) {
+		throw new ToolError(
+			`Option label "${reservedLabel}" is reserved by the ask UI; use different wording for that option.`,
+		);
+	}
 	let selectedOptions = [...(initialSelection?.selectedOptions ?? [])];
 	let customInput = initialSelection?.customInput;
 
@@ -295,7 +304,15 @@ async function askSingleQuestion(
 			}
 			// If editor was dismissed (undefined), keep prior selectedOptions/customInput intact
 		} else {
-			selectedOptions = [stripRecommendedSuffix(choice)];
+			// Map the displayed label back to the model's own text. The display adds
+			// " (Recommended)", so stripping it unconditionally would erase a suffix the
+			// model wrote itself and return a label nobody supplied.
+			const displayIndex = optionsWithNavigation.indexOf(choice);
+			selectedOptions = [
+				displayIndex >= 0 && displayIndex < optionLabels.length
+					? (optionLabels[displayIndex] ?? stripRecommendedSuffix(choice))
+					: stripRecommendedSuffix(choice),
+			];
 			customInput = undefined;
 		}
 		if (navigation?.allowForward) {

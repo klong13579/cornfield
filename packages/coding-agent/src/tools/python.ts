@@ -185,7 +185,7 @@ export class PythonTool implements AgentTool<typeof pythonSchema> {
 
 		const { cells, timeout: rawTimeout = 30, reset } = params;
 		// Clamp to reasonable range: 1s - 600s (10 min)
-		const timeoutSec = clampTimeout("python", rawTimeout);
+		const timeoutSec = clampTimeout("python", rawTimeout, this.session.settings.get("tools.maxTimeout"));
 		const timeoutMs = timeoutSec * 1000;
 		const deadlineMs = Date.now() + timeoutMs;
 		const timeoutSignal = AbortSignal.timeout(Math.max(0, deadlineMs - Date.now()));

@@ -25,6 +25,12 @@ interface InternalUrlResolver {
 export interface InternalUrlExpansionOptions {
 	skills: readonly Skill[];
 	noEscape?: boolean;
+	/**
+	 * Resolve a bare `skill://<name>` to the skill directory instead of its
+	 * SKILL.md. Used for `cwd`, where the file path is never a directory and the
+	 * call could only fail.
+	 */
+	skillUrlForDirectory?: boolean;
 	internalRouter?: InternalUrlResolver;
 	localOptions?: LocalProtocolOptions;
 	ensureLocalParentDirs?: boolean;
@@ -47,7 +53,11 @@ function withToken(message: string, url: string): string {
  * Resolve a single skill:// URL to its absolute filesystem path.
  * Does NOT read file content or verify existence.
  */
-export function resolveSkillUrlToPath(url: string, skills: readonly Skill[]): string {
+export function resolveSkillUrlToPath(
+	url: string,
+	skills: readonly Skill[],
+	options?: { forDirectory?: boolean },
+): string {
 	const parsed = /^skill:\/\/([^/?#]+)(\/[^?#]*)?(?:[?#].*)?$/.exec(url);
 	if (!parsed) {
 		throw new ToolError(`Invalid skill:// URL: ${url}`);
@@ -79,7 +89,7 @@ export function resolveSkillUrlToPath(url: string, skills: readonly Skill[]): st
 	const hasRelativePath = rawPath !== "" && rawPath !== "/";
 
 	if (!hasRelativePath) {
-		return path.resolve(skill.filePath);
+		return path.resolve(options?.forDirectory === true ? skill.baseDir : skill.filePath);
 	}
 
 	let relativePath: string;
@@ -164,6 +174,7 @@ async function resolveInternalUrlToPath(
 	internalRouter?: InternalUrlResolver,
 	localOptions?: LocalProtocolOptions,
 	ensureLocalParentDirs?: boolean,
+	forDirectory?: boolean,
 ): Promise<string> {
 	const url = normalizeLocalScheme(rawUrl);
 	const scheme = extractScheme(url);
@@ -172,7 +183,7 @@ async function resolveInternalUrlToPath(
 	}
 
 	if (scheme === "skill") {
-		return resolveSkillUrlToPath(url, skills);
+		return resolveSkillUrlToPath(url, skills, { forDirectory });
 	}
 
 	if (scheme === "local") {
@@ -252,6 +263,7 @@ export async function expandInternalUrls(command: string, options: InternalUrlEx
 			options.internalRouter,
 			options.localOptions,
 			options.ensureLocalParentDirs,
+			options.skillUrlForDirectory,
 		);
 		const replacement = options.noEscape ? resolvedPath : shellEscape(resolvedPath);
 		expanded = `${expanded.slice(0, index)}${replacement}${expanded.slice(index + token.length)}`;

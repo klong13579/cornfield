@@ -962,6 +962,24 @@ async function renderUrl(
 		}
 	}
 
+	// Raw mode returns the response body verbatim. The text-shaping branches below
+	// (JSON pretty-print, feed-to-markdown, HTML rendering) must not touch it — a
+	// caller that asked for `raw` and got a reformatted or item-capped body has no
+	// way to tell. Binary branches above already ran: raw has no meaning for them.
+	if (raw) {
+		const output = finalizeOutput(rawContent);
+		return {
+			url,
+			finalUrl,
+			contentType: mime,
+			method: "raw",
+			content: output.content,
+			fetchedAt,
+			truncated: output.truncated,
+			notes,
+		};
+	}
+
 	// Step 4: Handle non-HTML text content
 	const isHtml = mime.includes("html") || mime.includes("xhtml");
 	const isJson = mime.includes("json");
@@ -1012,8 +1030,8 @@ async function renderUrl(
 		};
 	}
 
-	// Step 5: For HTML, try digestible formats first (unless raw mode)
-	if (isHtml && !raw) {
+	// Step 5: For HTML, try digestible formats first
+	if (isHtml) {
 		// 5A: Check for page-specific markdown alternate
 		const alternates = parseAlternateLinks(rawContent, finalUrl);
 		const markdownAlt = alternates.find(alt => alt.endsWith(".md") || alt.includes("markdown"));
@@ -1273,7 +1291,7 @@ async function buildReadUrlCacheEntry(
 ): Promise<ReadUrlCacheEntry> {
 	const { path: url, timeout: rawTimeout = 20, raw = false } = params;
 
-	const effectiveTimeout = clampTimeout("fetch", rawTimeout);
+	const effectiveTimeout = clampTimeout("fetch", rawTimeout, session.settings.get("tools.maxTimeout"));
 
 	if (signal?.aborted) {
 		throw new ToolAbortError();

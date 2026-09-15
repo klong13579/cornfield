@@ -5,6 +5,7 @@ Executes bash command in shell session for terminal operations like git, bun, ca
 - Quote variable expansions like `"$NAME"` to preserve exact content.
 - You **MUST** use `;` only when later commands should run regardless of earlier failures.
 - Internal URIs (`skill://`, `agent://`, etc.) auto-resolve to filesystem paths.
+- `timeout` is seconds and is clamped to 1-3600; `timeout: 0` disables the command deadline entirely (use it for long builds, not as a way to shorten the default).
 - For inline scripts >3 lines, dry-run syntax check first with `python3 -c "compile(…)"` or `node --check`.
 {{#if asyncEnabled}}
 - Use `async: true` for long-running commands. Inspect with `read jobs://`, wait with `job({poll: […]})`.

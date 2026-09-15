@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **`read <url> sel="raw"` 不再对 JSON / feed 整形**（`src/tools/fetch.ts`、`test/tools/fetch-raw-mode.test.ts`）：`renderUrl` 里的 `raw` 只守了 HTML（`isHtml && !raw`），JSON 分支与 feed 分支在它之前就把正文改了 —— JSON 被 `formatJson` 重排，RSS/Atom 被 `parseFeedToMarkdown` 转成 markdown 并**截到 10 条**，而调用者明确要的是原文。现按 upstream 的位置加早退（在二进制分支之后、文本整形之前）：raw 对所有文本 content-type 原样返回 body。回归 4 条，用真实 HTTP server 覆盖「raw 拿到逐字 JSON / 不写 raw 仍美化」与「raw 拿到全部 12 条 / 不写 raw 截到 10 条」。
+
+- **SQLite 裸查询加上限，并在被截断时说明**（`src/tools/sqlite-reader.ts`、`src/tools/read.ts`、`test/tools/sqlite.test.ts`）：`executeReadQuery` 用 `statement.all()`、无任何上限，`read db?q=SELECT * FROM big` 会把整表读进内存并全部内联返回 —— JS 主线程被同步阻塞、上下文被撑爆，且没有任何截断提示。现改为 `iterate()` + `MAX_RAW_QUERY_ROWS = 1000`，被截断时追加 `[Output capped at 1000 rows; add a LIMIT/OFFSET clause to the query to page through more]`（真实行数未知，所以只说显示了什么）。回归：1500 行的表读出 1000 行数据 + 提示。
+
+- **`bash timeout: 0` 现在是「不设 deadline」**（`src/tools/bash.ts`、`src/tools/bash-interactive.ts`、`src/prompts/tools/bash.md`、`test/tools/bash-timeout-zero.test.ts`）：`0` 原被 `clampTimeout` 钳到最小值 1s，于是调用者要求的「无限时间」变成 1 秒后被杀。现 `0` 走 upstream 语义：`timeoutSec`/`timeoutMs` 置 `undefined`（原生 `CancelToken::new(None)` 即无 deadline），提示语改为 `Command deadline disabled`。回归：`sleep 2 && echo done` 在 `timeout: 0` 下不再被杀；非零值照旧钳制。
+
+- **`tools.maxTimeout` 现在也管省略 timeout 的调用**（`src/tools/tool-timeouts.ts` 与 8 个调用点、`test/tools/bash-timeout-ceiling.test.ts`）：`clampTimeout(tool, raw)` 只钳显式传入的值，sdk 的前置钩子同样只看 `result.timeout` —— 用户设的全局上限对「省略 timeout 的调用」无效，bash 会照跑 300s。现按 upstream 补第三个参数 `maxTimeout`，8 个调用点（bash / python / ssh / fetch / browser / debug / lsp / agent-session）各自传入 `settings.get("tools.maxTimeout")`。回归 5 条：工具默认值被上限压住、显式值被压住、0 或缺省不生效、不跌破工具最小值。
+
+- **无 UI 会话里 `pty: true` 不再假装拿到了终端**（`src/tools/bash.ts`、`test/tools/bash-pty-notice.test.ts`）：`usePty` 为假时静默按普通管道执行，调用方会照着 tty 的假设读输出。现补一行 notice（upstream 同款文案），未请求 pty 时不加。
+
+- **`bash cwd: "skill://<name>"` 现在指向技能目录**（`src/tools/bash-skill-urls.ts`、`src/tools/bash.ts`、`test/tools/bash-skill-urls.test.ts`）：裸 skill URL 一律解析成 SKILL.md（命令文本里这是对的 —— 那里 URL 指文件），但作为工作目录时那个路径永远不是目录，于是 `bash({cwd: "skill://x"})` 只可能失败。现 cwd 展开传 `skillUrlForDirectory: true`，裸 URL 解析到 `baseDir`；命令文本里的行为不变。
+
+- **ask 的选项标签原样回传，保留标签会被拒绝**（`src/tools/ask.ts`、`test/tools/ask.test.ts`）：单选分支用 `stripRecommendedSuffix(choice)` 把显示标签转回原标签 —— 无条件剥后缀，于是模型自己写的 `Foo (Recommended)` 会被改成 `Foo`，回传的选项不再是它给过的任何字面量。现按显示项位置映射回 `optionLabels[i]`，只在映射不到时才剥。另：标签若与 UI 自己的保留项同名（`Other (type your own)` 或 done 标签），列表里会出现两行同文字且模型那行永远选不到 —— 现直接报错。
+
 - **`sel` 不再静默放宽：解析不了的选择器改成报错，并补上 `N-` 与逗号列表归并**（`src/tools/read.ts`、`src/tools/path-utils.ts`、`test/tools/read-selector.test.ts`）：旧实现只认 `N` / `N-M` / `N+K` / `raw`，其余一律落回 `{kind:"none"}` —— 调用者要的是一段，拿回的是整份资源，无错误也无提示。实测（560 个 session、6916 次带 sel 的 read）：355 次本地解析不了，扣掉 240 次空串后 **104 次真的丢了行区间**（`N,N` 87 次、`N-N, N-N` 12 次、`-N` 5 次、`N+` 4 次、`N-` 2 次）。现从 upstream 搬 `LineRange` + `parseLineRangeChunk` + `parseLineRanges`（`path-utils.ts`），`parseSel` 对不认识的选择器抛 `Unsupported selector`，新增 `N-`（N 行往后），逗号列表先归并（`1-2,3-5` 合成一段，照常读）。仍不支持的两种形式改成**大声拒绝**而不是静默放宽：尾选择器 `-N`、以及归并不掉的真正多段（`1-2,4-5`）。同时把 SQLite 分支提到 `parseSel` 之前 —— `sel="users?limit=5"` 是表/查询语法，不是坏的行选择器。回归 8 条，含「SQLite 选择器仍然交给 SQLite 读取器」。
 
 - **写 `.tar.gz` / `.tgz` 条目不再产出未压缩 tar**（`src/tools/write.ts`、`test/tools/write-archive-format.test.ts`）：`Bun.Archive.write(path, entries)` **不从文件名推断压缩** —— 实测同一次调用写 `probe.tgz` 得 10240B、魔数 `61 2e`（tar），带 `{ compress: "gzip" }` 才是 112B、`1f 8b`。本地 `write.md:6` 承诺支持 `.tar.gz`/`.tgz`，工具却回报 `Successfully wrote …`，磁盘上是普通 tar：外部按扩展名解压的链路（`tar -xzf`、npm、docker 层）全部读不了，而本进程内读回看不出问题（`archive-reader` 自动嗅探 gzip）。现按目标扩展名决定是否 gzip；重写既有 `.tgz` 也保持 gzip，回归里断言了容器魔数与旧条目仍在。

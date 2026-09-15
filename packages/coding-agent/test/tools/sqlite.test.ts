@@ -6,7 +6,12 @@ import * as path from "node:path";
 import "../../src/tools/renderers";
 import { Settings } from "../../src/config/settings";
 import { ReadTool } from "../../src/tools/read";
-import { parseSqlitePathCandidates, parseSqliteSelector, renderTable } from "../../src/tools/sqlite-reader";
+import {
+	MAX_RAW_QUERY_ROWS,
+	parseSqlitePathCandidates,
+	parseSqliteSelector,
+	renderTable,
+} from "../../src/tools/sqlite-reader";
 import { WriteTool } from "../../src/tools/write";
 
 type ToolTextResult = {
@@ -324,6 +329,25 @@ describe("SQLite tool support", () => {
 				path: `${sqlitePath}?q=INSERT+INTO+users+(name,email,status,created)+VALUES+('X','x@example.com','active',7)`,
 			}),
 		).rejects.toThrow(/readonly/i);
+	});
+
+	it("caps a raw query at the row limit and says so", async () => {
+		const db = new Database(sqlitePath);
+		try {
+			db.run(
+				`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1500)
+				 INSERT INTO notes (body) SELECT 'row-' || n FROM seq`,
+			);
+		} finally {
+			db.close();
+		}
+
+		const result = await readTool.execute("sqlite-raw-cap", { path: `${sqlitePath}?q=SELECT+*+FROM+notes` });
+		const text = getText(result);
+		const dataRows = text.split("\n").filter(line => line.startsWith("| ")).length - 2; // header + divider
+
+		expect(dataRows).toBe(MAX_RAW_QUERY_ROWS);
+		expect(text).toContain(`Output capped at ${MAX_RAW_QUERY_ROWS} rows`);
 	});
 
 	it("rejects table names that do not exist instead of interpolating them", async () => {
