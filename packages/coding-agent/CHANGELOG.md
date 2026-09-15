@@ -8,6 +8,16 @@
 
 - **pi-intercom skill 的四处事实错误**（`src/intercom-extension/skills/pi-intercom/SKILL.md`、`src/intercom-extension/README.md`）：这份 skill 被编进 binary、会话启动时落盘到 `<agentDir>/skills/pi-intercom/`，是 agent 读 intercom 用法的唯一来源，但四处描述与代码不符。① attachment 声称「没有独立的 `path` 字段」并教人把绝对路径塞进 `name` —— `path` 字段与这段文字是同一个 commit（`8e5b3e3d2f`）落地的，实际渲染成 `Attachment: <name> (file: <path>)`；② 「`send` 是 fire-and-forget，接收方忙时消息会丢」—— 那条丢消息路径（busy headless → `reject`）已在 `2886ec02e4`（2026-08-26）改成排队（`followUp`），`resolveInboundDeliveryMode` 不再产生 `reject`，`reject` 分支留在 `index.ts:1225-1241` 但不可达，`inbound-concurrency.test.ts` 有断言；③ 错误处理示例用 `result.delivered` / `result.reason` / `result.isError`，真实契约是 `{ content, details }` —— `if (!result.delivered)` 恒真，照抄的 agent 每次都会打印一次假失败；④ `/name` 不是 cornfield 命令（builtin registry 只有 `/rename`，全仓无 `name` 注册）。README 的同源错误（`name` = path、`/name`、send 会丢、busy 接收方走 steering 队列的描述）一并修正。skill 正文里那个孤立的代码围栏（把一段正文渲成代码块）同时修掉。
 
+- **pi-intercom SKILL.md 的覆盖缺口（batch 2）**（`src/intercom-extension/skills/pi-intercom/SKILL.md`）：补上此前一个字都没写的三块 —— ① `list-cwd` / `children` / `cancel` 三个 action（Key Differences 表原来只列 7 个）；② 全部参数（`attachments` / `replyTo` / `messageId` / `supersedes` / `retryOf` / `cwd` / `openProjectPaneIfMissing` / `focus` / `limit` / `since` / `direction`）与 `config.json` 的 7 个键（`inboundMode` / `inboundTrigger` / `confirmSend` / `stableId` / `replyHint` / `status` / `enabled`）；③ 「取代 / 重试 / 取消」一节 —— 三个能力都已上线，但语义**弱于字面**：`supersedes` 只清待回的 ask、回一条 `superseded` 回执，**不撤回已注入的消息**，所以取代必须在文本里写清「决策名 + 版本 + 显式作废前一条」。另补：单帧 **1 MiB 硬上限**（`MAX_FRAME_BYTES`，超限回 `delivery_failed` 而不是静默丢）、`send` 的启动窗口期 `Session not found`（注册传播未就绪，别循环重试）、history 的作用域（按 sessionId 匹配，重连换了 id 后按 name + cwd 匹配）。
+
+### Added
+
+- **`test/intercom-extension/skill-drift.test.ts`：把 pi-intercom 的 prose 契约钉到代码上**（新文件、`src/intercom-extension/index.ts`）：`skills/pi-intercom/SKILL.md` 编进 binary、会话启动时落盘，是 agent 读 intercom 用法的唯一来源，而它此前零测试 —— 2026-09-15 一次复核查出四处与代码不符（attachment 声称没有 `path` 字段、`send` 的「忙时会丢」前提、错误处理示例的 `result.delivered`、`/name` 不是 cornfield 命令），没有一处会自报。断言三件事：Key Differences 表的 action 集合 == `INTERCOM_ACTION_NAMES`（不多不少；负向对照验过，删掉一行即红）；schema 的 action 说明由名称表生成、不得手写第二份；已知会写错的事实（裸字段名 / 把路径塞进 `name` / `/name`）不得回潮。
+
+### Changed
+
+- **intercom 的 action 词表收成一份**（`src/intercom-extension/index.ts`）：名称此前列在三处 —— 工具参数 enum 数组、斜杠补全表 `INTERCOM_ACTIONS`、schema description 字符串。2026-09-15 发现 `children` 漏在补全表里（`/intercom chi` 补不出来，但调用是通的，因为它本来就在 enum 里）。现 `INTERCOM_ACTION_NAMES` 是唯一真源：enum 直接用、description 由它生成、补全表由它 + `Record<IntercomActionName, string>` 说明表派生（新增动作时 TS 会逼着补说明）。
+
 ## [1.2.3] - 2026-09-14
 
 ### Added

@@ -271,13 +271,42 @@ new visible project panes should go through the supervisor.
 
 | Action | Behavior | Use When |
 |--------|----------|----------|
-| `send` | Fire-and-forget; infers the sole pending ask as its reply | You don't need a response |
+| `send` | Does not block; infers the sole pending ask as its reply | You don't need a response |
 | `ask` | Blocks until reply (10 min default, configurable with `PI_INTERCOM_ASK_TIMEOUT_MS`) | You need an answer to continue |
 | `reply` | Resolves by explicit `replyTo`, or the unique pending ask; multiple pending asks fail loud and require `to`/`replyTo` | You were asked something and need to answer naturally |
 | `pending` | Lists unresolved inbound asks | You need to see who is waiting before replying |
 | `history` | Returns recently received/sent messages | You missed a `send` while busy; async recovery |
 | `list` | Returns all sessions with live status | You need to discover targets or choose an idle peer |
+| `list-cwd` | Returns sessions in one directory (default: your own cwd) | You want the peers of a specific repo/cwd |
+| `children` | Returns only YOUR child sessions (the ones that declared you as parent) | You spawned children and want their status without scanning the whole roster |
+| `cancel` | Requests cancellation of a message you sent (`messageId`) | You must withdraw an instruction you already sent |
 | `status` | Returns your connection state | Troubleshooting |
+
+## Parameters & Config
+
+Parameters beyond `action` / `to` / `message`:
+
+| Parameter | Meaning |
+|---|---|
+| `attachments` | `{ type: "file" \| "snippet" \| "context", name, content, language?, path? }` — see Pattern 5 and 长内容传输 |
+| `replyTo` | Message id to thread a reply onto |
+| `messageId` | Target of `cancel` |
+| `supersedes` / `retryOf` | See 取代 / 重试 / 取消 below |
+| `cwd` | Directory scope: target lookup for `send`/`ask`; filter for `list-cwd` |
+| `openProjectPaneIfMissing` / `focus` | Open (and focus) a visible Herdr pane for that cwd |
+| `limit` / `since` / `direction` | `history` only (`direction`: `in` \| `out` \| `both`) |
+
+`~/.cornfield/intercom/config.json` (every key optional):
+
+| Key | Default | Effect |
+|---|---|---|
+| `inboundMode` | `"queue"` | `"interrupt"` steers inbound messages at the next safe model boundary instead of waiting for the current turn to end |
+| `inboundTrigger` | `"always"` | Whether an inbound message may start a turn: `"always"` / `"replies"` (replies only) / `"never"` |
+| `confirmSend` | `false` | Confirm ordinary and inferred sends from an interactive session |
+| `stableId` | unset | Stable address across restarts (use it when others must target you by name) |
+| `replyHint` | `true` | Include the reply command in inbound messages |
+| `status` | unset | Custom suffix appended to your automatic lifecycle status |
+| `enabled` | `true` | Turn intercom off entirely |
 
 ## Visible Peer Sessions
 
@@ -312,10 +341,29 @@ if (result.details?.error === true && result.content[0].text.includes("Mutual as
 
 - **No blocking**: the sender continues immediately. Delivery is either acknowledged or reported as an explicit failure
 - **Busy recipient queues**: a busy recipient gets the message at the end of its current turn
+- **Early sends can miss**: a session that sends within the first seconds after start may get `Session not found` — the broker cannot resolve a target before its registration propagates (tens of seconds). Wait for the peer to pull you, or check `list` and try again; do not loop-retry
 - **Sole pending ask inference**: If the destination has exactly one pending inbound ask, `send` attaches its `replyTo` and reports `Reply sent to <target> (inferred from pending ask)`
 - **Ambiguity stays unthreaded**: Zero or multiple matching asks leave the send as an ordinary message
 - **Confirmation dialogs**: If `confirmSend: true` in config, interactive sessions confirm ordinary and inferred sends
 - **Explicit replies skip confirmation**: A caller-supplied `replyTo` skips the dialog
+
+### 取代 / 重试 / 取消（指令的版本化）
+
+三个能力都已上线，但语义**弱于字面** —— 用之前先看清边界：
+
+| 参数 / 动作 | 做什么 | 边界（关键） |
+|---|---|---|
+| `supersedes: "<旧 messageId>"`（随 `send`/`ask` 带出） | broker 校验「同一对收发方」后，向接收方发一条 `supersede` 控制帧 | **不撤回已注入的消息**。接收方只是清掉那条待回的 ask、回一条 `superseded` 回执；旧消息照样可能被执行。所以「取代」必须在**文本里**写清：决策名 + 版本 + 显式作废前一条 |
+| `retryOf: "<旧 messageId>"` | 标注这是人工重发，新消息带新 id | 不自动重试，也不保证顺序；只是给人和日志看的链接 |
+| `cancel` + `messageId` | 请求取消一条你发过的消息 | 已注入的消息通常只回 `cancellation_requested`（可能已经被执行），不保证撤回 |
+
+版本化取代的写法（决策名 + 版本 + 作废声明必须在**同一句**里，接收方才有依据判序）：
+
+```
+[T2] 取代上一条（模型档位 v1：cheap）：模型档位 v2 生效 —— 改 mid
+```
+
+**超时的 `ask` 不要当成「没送达」再补一发** —— 它可能已经投递，补发会让队列里同时存在两条语义相反的指令。改指令一律走上面的版本化写法。
 
 ## 长内容传输（Large Payload）
 
@@ -326,6 +374,7 @@ if (result.details?.error === true && result.content[0].text.includes("Mutual as
 ### 阈值（Threshold）
 
 - message 正文 + attachment 内容合计超过约 **1KB**：一律不直接发正文（整文件内容、长 diff、长 review、长日志都算）。
+- **硬上限：单帧 1 MiB**（`MAX_FRAME_BYTES`，读写两侧都判）。超了的消息根本进不去 —— broker 直接回 `delivery_failed`（reason 带 `frame limit`），不会静默丢。所以别把正文塞进 `content`。
 - 1KB 以下的小片段可走 inline snippet（见 Pattern 5）。
 
 ### 文件先行（File First）
@@ -382,7 +431,7 @@ attachments: [{ type: "file", name: "review.md", content: "<大段正文>" }]
 
 ## 历史消息查询（History）
 
-`send` 丢的消息不是永久丢失——broker 会持久化每条已接受的消息到 `~/.cornfield/intercom/journal.jsonl`，任意会话可通过 `history` action 查询最近的收/发记录，用于异步恢复。
+broker 会持久化每条已接受的消息到 `~/.cornfield/intercom/journal.jsonl`，任意会话可通过 `history` action 查询最近的收/发记录。**它是「我忙的时候错过了什么」的查询入口，不是「`send` 丢消息」的补救** —— `send` 不会因为对方忙而丢（见 `send` Behavior）。
 
 ```typescript
 // 查询最近 20 条发给我的消息（默认按时间倒序）
@@ -402,13 +451,13 @@ intercom({ action: "history", since: 1725180000000 })
 
 ### 何时使用
 
-- 怀疑 `send` 的消息在对方忙时丢失时
+- 你忙完一轮，想确认这期间有没有人发消息过来（消息不会因为对方忙而丢，但你可能没看见）
 - 自己完成一个长任务后，想检查其间有没有人发消息过来
 - 故障排查：`history` 比询问对方更快
 
 ### 注意事项
 
-- 仅返回当前会话（sessionId）相关的消息，不会跨会话读取
+- 只看你自己收/发的：按 sessionId 匹配；重连换了 sessionId 时按 **name + cwd** 匹配，自己的历史仍看得到（不会读到别人的）
 - 日志保留 7 天，最多 2000 条；超限时自动压缩
 - 仅记录 broker 接受的 send（被 `isFrameDeliverable` 拒绝的过大消息不会记录）
 - `queued` 标记表示消息发送时对方已离线，已进入邮箱队列

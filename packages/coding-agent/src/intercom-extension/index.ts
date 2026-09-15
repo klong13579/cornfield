@@ -619,17 +619,49 @@ function getNamePollMs(): number {
 	}
 	return 1000;
 }
-const INTERCOM_ACTIONS: Array<{ name: string; description: string }> = [
-	{ name: "list", description: "List active sessions" },
-	{ name: "list-cwd", description: "List sessions in a directory" },
-	{ name: "send", description: "Send a message" },
-	{ name: "ask", description: "Send and wait for a reply" },
-	{ name: "reply", description: "Reply to a pending ask" },
-	{ name: "pending", description: "List unresolved inbound asks" },
-	{ name: "status", description: "Show connection status" },
-	{ name: "cancel", description: "Request cancellation of a sent message" },
-	{ name: "history", description: "Read recently received/sent messages" },
-];
+/**
+ * intercom 的 action 词表 —— **唯一一份**。
+ *
+ * 工具参数的 enum、斜杠补全、skill 文档比对都从这里取。此前名称列了三处
+ * （enum 数组 / 补全表 / schema description），而 2026-09-15 发现 `children`
+ * 漏在补全表里（`/intercom chi` 补不出来，但调用是通的）—— 就是三份并列的必然结果。
+ */
+export const INTERCOM_ACTION_NAMES = [
+	"list",
+	"list-cwd",
+	"children",
+	"send",
+	"ask",
+	"reply",
+	"pending",
+	"status",
+	"cancel",
+	"history",
+] as const;
+
+type IntercomActionName = (typeof INTERCOM_ACTION_NAMES)[number];
+
+/** 每个 action 的补全说明。`Record<IntercomActionName, string>` 逼着新增动作必须补上说明。 */
+const INTERCOM_ACTION_DESCRIPTIONS: Record<IntercomActionName, string> = {
+	list: "List active sessions",
+	"list-cwd": "List sessions in a directory",
+	children: "List child sessions",
+	send: "Send a message",
+	ask: "Send and wait for a reply",
+	reply: "Reply to a pending ask",
+	pending: "List unresolved inbound asks",
+	status: "Show connection status",
+	cancel: "Request cancellation of a sent message",
+	history: "Read recently received/sent messages",
+};
+
+export const INTERCOM_ACTIONS: Array<{ name: string; description: string }> = INTERCOM_ACTION_NAMES.map(name => ({
+	name,
+	description: INTERCOM_ACTION_DESCRIPTIONS[name],
+}));
+
+/** 工具 schema 里的 action 说明（由名称表生成，不再手写一份）。 */
+export const INTERCOM_ACTION_SCHEMA_DESCRIPTION = `Action: ${INTERCOM_ACTION_NAMES.map(name => `'${name}'`).join(", ")}`;
 const INTERCOM_TARGET_ACTIONS = new Set(["send", "ask", "reply"]);
 
 /**
@@ -2355,24 +2387,9 @@ Usage:
 				"Use to coordinate with other local pi sessions: list peers, monitor child sessions, send updates, ask for help, or check intercom connectivity.",
 
 			parameters: Type.Object({
-				action: StringEnum(
-					[
-						"list",
-						"list-cwd",
-						"children",
-						"send",
-						"ask",
-						"reply",
-						"pending",
-						"status",
-						"cancel",
-						"history",
-					] as const,
-					{
-						description:
-							"Action: 'list', 'list-cwd', 'children', 'send', 'ask', 'reply', 'pending', 'status', 'cancel', or 'history'",
-					},
-				),
+				action: StringEnum(INTERCOM_ACTION_NAMES, {
+					description: INTERCOM_ACTION_SCHEMA_DESCRIPTION,
+				}),
 				to: Type.Optional(
 					Type.String({
 						description:
