@@ -1,5 +1,9 @@
 import type {
 	AgentInfoDto,
+	AgentTodoDeleteDto,
+	AgentTodoDto,
+	AgentTodoListDto,
+	AgentTodoUpsertDto,
 	ArtifactDto,
 	AvailableModelsDto,
 	BroughtBackChildResultDto,
@@ -33,9 +37,17 @@ import type {
 } from "@cornfield/wire";
 
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
-// Session Tree / Project DTO（T8）同样由 pi-wire 定义：消费方从本层引入，
-// 保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目形状。
+// Session Tree / Project DTO（T8）与 Agent Todo DTO（T10A）同样由 pi-wire 定义：消费方从本层
+// 引入，保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目/Todo 形状。
 export type {
+	AgentTodoDeleteDto,
+	AgentTodoDto,
+	AgentTodoListDto,
+	AgentTodoPriorityDto,
+	AgentTodoReminderDto,
+	AgentTodoSourceDto,
+	AgentTodoStatusDto,
+	AgentTodoUpsertDto,
 	ArtifactDto,
 	BroughtBackChildResultDto,
 	ChildSessionEscalationDto,
@@ -219,48 +231,6 @@ export interface DiagnosisDimensionDto {
 export type AgentMessageDto = MessageDto;
 
 /**
- * Agent Todo（T10A / §37 D4）。
- *
- * 形状的权威是 coding-agent 的 `agent-domain/types.ts` 的 `AgentTodo`（§37 定死的字段），
- * serve 一字不差地投影出来。这里复写一份是因为 pi-wire 的命令面尚未登记（登记要改
- * `packages/pi-wire`，不在本票 scope）—— 登记收口时应改为从 `@cornfield/wire` 引入，
- * 与 T8 的 Project DTO 同路。
- */
-export type AgentTodoStatusDto = "open" | "in_progress" | "completed" | "cancelled";
-export type AgentTodoPriorityDto = "low" | "medium" | "high";
-export type AgentTodoSourceDto = "agent" | "user" | "schedule" | "session";
-
-export interface AgentTodoDto {
-	id: string;
-	/** 必填的唯一 owner：这条 Todo 属于哪个 Agent。 */
-	agentId: string;
-	/** 可选绑定；缺省 = 通用任务（不属于任何 Project）。 */
-	projectId?: string;
-	title: string;
-	notes?: string;
-	status: AgentTodoStatusDto;
-	priority: AgentTodoPriorityDto;
-	dueAt?: number;
-	/** 推进过它的会话（只读：由推进者记录，不由 UI 写）。 */
-	sessionRefs: string[];
-	source: AgentTodoSourceDto;
-	createdAt: number;
-	updatedAt: number;
-}
-
-/**
- * 一个 Agent 的整块 Todo 板（list_agent_todos）。
- *
- * `projectIds` = 该 Agent 声明过的 Project 绑定（写面拿它当上限）。**缺省 = 无声明绑定**
- * （未约束），与「一个 Project 都不能绑」不是一回事。
- */
-export interface AgentTodoListDto {
-	agentId: string;
-	projectIds?: string[];
-	todos: AgentTodoDto[];
-}
-
-/**
  * pi-client 接口契约（Web 壳消费的唯一数据面）。
  *
  * 形态对齐 requirements.md FR-1 与 pi-wire 的 snapshot/progress 语义：
@@ -418,11 +388,11 @@ export interface PiClient {
 	 *
 	 * `createdAt` / `updatedAt` 由存储盖章、`sessionRefs` 由存储保留，所以调用方必须用返回的
 	 * 记录替换自己手上那份。owner 与 Project 绑定由 serve 校验（不属于这个 Agent 的板子、
-	 * 没声明过的 Project、绑定范围外的 Project 都会招错）。
+	 * 没声明过的 Project、绑定范围外的 Project、声明读不出来的 Agent 都会招错）。
 	 */
-	setAgentTodo(todo: AgentTodoDto, sessionId?: string): Promise<{ todo: AgentTodoDto }>;
+	setAgentTodo(todo: AgentTodoDto, sessionId?: string): Promise<AgentTodoUpsertDto>;
 	/** 删除一条 Todo（delete_agent_todo）。幂等：本来就不在板上返回 deleted:false。 */
-	deleteAgentTodo(todoId: string, sessionId?: string): Promise<{ deleted: boolean }>;
+	deleteAgentTodo(todoId: string, sessionId?: string): Promise<AgentTodoDeleteDto>;
 
 	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
 	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }>;

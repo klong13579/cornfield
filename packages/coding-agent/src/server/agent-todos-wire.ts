@@ -18,58 +18,18 @@
  * 是 A 与 B 之间的关系，需要两边同时在场，所以它属于桥（`validateAgentTodos`）。
  */
 
+import type { AgentTodoDto, AgentTodoListDto } from "@cornfield/wire";
 import { declaredProjectIds } from "../agent-domain/agent-directory";
 import { loadAgentTodos, removeAgentTodo, upsertAgentTodo } from "../agent-domain/agent-todo-store";
 import { loadProjects } from "../agent-domain/project-store";
 import { validateAgentTodos } from "../agent-domain/relations";
-import type { AgentRecord, AgentTodo, AgentTodoId, ProjectRecord } from "../agent-domain/types";
-import { loadWorkspace } from "../skeleton/workspace";
-
-/**
- * Agent Todo 的命令面。
- *
- * 这三条命令尚未登记进 pi-wire 的 `WireCommand` union —— 登记要改 `packages/pi-wire`，
- * 不属于 T10A 的 scope（web-app / coding-agent / gateway）。所以按运行期 type 分派，与
- * `list_remote_skills` 落地时的先行实现同型（pi-wire 的注释里也记了这个约定：wire 新增
- * 命令由 coding-agent 侧先行实现，登记收口另做）。登记完成后这个联合体应当消失。
- */
-export type AgentTodoCommand =
-	| { type: "list_agent_todos"; sessionId?: string }
-	| { type: "set_agent_todo"; sessionId?: string; todo: unknown }
-	| { type: "delete_agent_todo"; sessionId?: string; todoId: unknown };
-
-/** 认出一条 Agent Todo 命令，否则 null（调用方继续走原来的分派）。 */
-export function asAgentTodoCommand(command: { type: string }): AgentTodoCommand | null {
-	switch (command.type) {
-		case "list_agent_todos":
-		case "set_agent_todo":
-		case "delete_agent_todo":
-			return command as AgentTodoCommand;
-		default:
-			return null;
-	}
-}
+import type { AgentRecord, AgentTodo, ProjectRecord } from "../agent-domain/types";
+import { readWorkspaceDeclaration, workspaceFilePath } from "../skeleton/workspace";
 
 /** 一次读写针对哪个 Agent —— owner 身份与它的 home 必须一起给：缺任一个都无法判断归属。 */
 export interface AgentTodoTarget {
 	agentId: string;
 	agentDir: string;
-}
-
-/**
- * 一个 Agent 的整块 Todo 板。
- *
- * `agentId` 随板子一起回，因为「这是谁的板子」和「板子上有什么」是两件事：前端切换焦点
- * Agent 时靠它判定这次响应是不是当前 Agent 的（迟到的响应不得落进别人的视图）。
- *
- * `projectIds` 是这个 Agent 声明过的 Project 绑定（上限）：写面拿它当约束，读面拿它决定
- * 选择器里能选什么。**缺省 = 无声明绑定**（未约束），与「绑不了任何 Project」不是一回事 ——
- * 两条语义都跟 `AgentRecord.projectIds` 走。
- */
-export interface AgentTodoListDto {
-	agentId: string;
-	projectIds?: string[];
-	todos: AgentTodo[];
 }
 
 export async function listAgentTodos(target: AgentTodoTarget): Promise<AgentTodoListDto> {
@@ -86,8 +46,8 @@ export async function listAgentTodos(target: AgentTodoTarget): Promise<AgentTodo
  * 返回值即权威：`createdAt` / `updatedAt` 由存储盖章，`sessionRefs` 由存储保留，所以调用方
  * 必须用返回的记录替换自己手上那份，不能假定自己发的字段原样存下了。
  */
-export async function writeAgentTodo(target: AgentTodoTarget, todo: AgentTodo): Promise<AgentTodo> {
-	const raw = todo as Partial<AgentTodo> | null;
+export async function writeAgentTodo(target: AgentTodoTarget, todo: AgentTodoDto): Promise<AgentTodoDto> {
+	const raw: Partial<AgentTodoDto> | null = todo;
 	if (!raw || typeof raw !== "object") throw new Error("set_agent_todo requires a todo object.");
 	if (typeof raw.agentId !== "string" || raw.agentId !== target.agentId) {
 		throw new Error(
@@ -100,9 +60,9 @@ export async function writeAgentTodo(target: AgentTodoTarget, todo: AgentTodo): 
 }
 
 /** 删除一条 Todo。幂等：本来就不在板上返回 false，不是错误。 */
-export async function dropAgentTodo(target: AgentTodoTarget, todoId: unknown): Promise<boolean> {
-	if (typeof todoId !== "string" || todoId === "") throw new Error("delete_agent_todo requires a non-empty todoId.");
-	return await removeAgentTodo(target.agentDir, todoId as AgentTodoId);
+export async function dropAgentTodo(target: AgentTodoTarget, todoId: string): Promise<boolean> {
+	if (todoId === "") throw new Error("delete_agent_todo requires a non-empty todoId.");
+	return await removeAgentTodo(target.agentDir, todoId);
 }
 
 /**
@@ -116,7 +76,7 @@ export async function dropAgentTodo(target: AgentTodoTarget, todoId: unknown): P
  * 于是留下的正好是这次写入真正要过的关系：Project 必须真的声明过，且在这个 Agent 的
  * 绑定范围内（`projectIds` 缺省 = 未约束）。
  */
-async function assertRelations(target: AgentTodoTarget, todo: Partial<AgentTodo>): Promise<void> {
+async function assertRelations(target: AgentTodoTarget, todo: Partial<AgentTodoDto>): Promise<void> {
 	const projects = await loadProjects();
 	const agent: AgentRecord = {
 		agentId: target.agentId,
@@ -136,10 +96,26 @@ async function assertRelations(target: AgentTodoTarget, todo: Partial<AgentTodo>
  * 这个 agentDir 的声明绑定到哪些 Project —— 复用 `agent-directory` 的那条规则，不在这里
  * 另写一份（同一份 `projectRoot` 匹配出两个不同答案，就是两条互不一致的真相）。
  *
- * 声明读不出来（缺失 / 损坏）当「无声明绑定」：绑定是不可选的上限，不是这个 Agent 能否
- * 使用的开关，所以它不该把 Todo 板整个卡死。
+ * 声明读取的三种结果**分开处理**：
+ *   - `absent`（文件不存在）→ 确实没声明过 → 未约束，放行；
+ *   - `declared` → 按 `declaredProjectIds` 算上限；
+ *   - `invalid`（文件在但不是合法 v2 声明）→ **硬报错**。
+ *
+ * 第三条是安全边界，不是灵活性：一份读不出内容的声明*可能*正在声明绑定，把它当「未约束」
+ * 就是绕开 Project 隔离，让 Todo 落到这个 Agent 不该碰的 Project 上。宁可让整个板子报错
+ * 让人去修声明，也不要静默放大范围。其他 I/O 错误（EACCES 等）由
+ * `readWorkspaceDeclaration` 直接抛出，这里不接。
  */
 async function bindingOf(target: AgentTodoTarget, projects: readonly ProjectRecord[]): Promise<string[] | undefined> {
-	const declaration = (await loadWorkspace(target.agentDir).catch(() => null)) ?? undefined;
+	const read = await readWorkspaceDeclaration(target.agentDir);
+	if (read.state === "invalid") {
+		throw new Error(
+			`workspace declaration at "${workspaceFilePath(target.agentDir)}" is ${read.reason}; ` +
+				`which Projects this Agent is bound to cannot be determined, and reading that as "unconstrained" ` +
+				`would let a Todo bind outside the Agent's declared scope. Fix or remove the declaration ` +
+				`(a missing declaration IS unconstrained).`,
+		);
+	}
+	const declaration = read.state === "declared" ? read.declaration : undefined;
 	return declaredProjectIds(target.agentDir, declaration, projects);
 }

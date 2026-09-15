@@ -26,6 +26,7 @@ import {
 } from "../src/agent-domain/agent-todo-store";
 import type { AgentTodo } from "../src/agent-domain/types";
 import { dropAgentTodo, listAgentTodos, writeAgentTodo } from "../src/server/agent-todos-wire";
+import { workspaceFilePath } from "../src/skeleton/workspace";
 
 interface Fixture {
 	root: string;
@@ -85,9 +86,9 @@ async function writeProjects(home: string, projects: Record<string, { root: stri
 }
 
 async function writeDeclaration(agentDir: string, projectRoot: string): Promise<void> {
-	await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
+	await fs.mkdir(path.dirname(workspaceFilePath(agentDir)), { recursive: true });
 	await Bun.write(
-		path.join(agentDir, ".cornfield", "workspace.json"),
+		workspaceFilePath(agentDir),
 		JSON.stringify({ schemaVersion: 2, id: "hr", name: "HR", type: "agent", root: ".", projectRoot }, null, 2),
 	);
 }
@@ -297,5 +298,44 @@ describe("agent todo wire bridge", () => {
 		expect(await dropAgentTodo(target, "todo-1")).toBe(true);
 		expect(await dropAgentTodo(target, "todo-1")).toBe(false);
 		await expect(dropAgentTodo(target, "")).rejects.toThrow(/non-empty todoId/);
+	});
+
+	/**
+	 * 读不出内容的声明**不能**被当成「未约束」：它可能正在声明绑定，当成未约束就是绕开
+	 * Project 隔离。两种坏法（解析不了 / 解析得出来但不是 v2 声明）在同一位置失败，
+	 * 而且 list 与 write 都要硬报错 —— 读得到一半、写得进一半是最坏的结果。
+	 */
+	describe("a declaration that cannot be read is a hard error, not an unconstrained Agent", () => {
+		async function corruptDeclaration(): Promise<{ agentId: string; agentDir: string }> {
+			const dir = fixture.agentDir("hr");
+			await fs.mkdir(path.join(dir, ".cornfield"), { recursive: true });
+			await Bun.write(workspaceFilePath(dir), "{ not json");
+			return { agentId: "hr", agentDir: dir };
+		}
+
+		test("unparseable JSON: list and write both fail, naming the declaration", async () => {
+			const target = await corruptDeclaration();
+
+			await expect(listAgentTodos(target)).rejects.toThrow(/not valid JSON/);
+			await expect(writeAgentTodo(target, makeTodo())).rejects.toThrow(/not valid JSON/);
+			// 写入没有被放行，板上也就不会多出一条
+			expect(await loadAgentTodos(target.agentDir)).toEqual([]);
+		});
+
+		test("parseable but not a schema-v2 declaration: list and write both fail", async () => {
+			const target = await corruptDeclaration();
+			await Bun.write(
+				workspaceFilePath(target.agentDir),
+				JSON.stringify({ schemaVersion: 1, id: "hr", name: "HR", type: "agent", root: ".", projectRoot: "." }),
+			);
+
+			await expect(listAgentTodos(target)).rejects.toThrow(/not a schema-v2 declaration/);
+			await expect(writeAgentTodo(target, makeTodo())).rejects.toThrow(/not a schema-v2 declaration/);
+		});
+
+		test("a missing declaration stays unconstrained — the strict path only rejects what is unreadable", async () => {
+			const target = { agentId: "hr", agentDir: fixture.agentDir("nowhere") };
+			await expect(listAgentTodos(target)).resolves.toEqual({ agentId: "hr", todos: [] });
+		});
 	});
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { WireCommand, WireCommandOfType } from "../src/commands";
+import type { AgentTodoDto } from "../src/results/agent-todos";
 
 /**
  * 协议形状锁定（P0，参照 codex schema_fixtures）：
@@ -111,6 +112,30 @@ const _bringBackChildResultShape: _AssertBringBackChildResult = true;
 type _ListProjects = WireCommandOfType<"list_projects">;
 type _AssertListProjects = _ListProjects extends { type: "list_projects"; sessionId?: string } ? true : never;
 const _listProjectsShape: _AssertListProjects = true;
+
+type _ListAgentTodos = WireCommandOfType<"list_agent_todos">;
+type _AssertListAgentTodos = _ListAgentTodos extends { type: "list_agent_todos"; sessionId?: string } ? true : never;
+const _listAgentTodosShape: _AssertListAgentTodos = true;
+
+type _SetAgentTodo = WireCommandOfType<"set_agent_todo">;
+type _AssertSetAgentTodo = _SetAgentTodo extends {
+	type: "set_agent_todo";
+	sessionId?: string;
+	todo: AgentTodoDto;
+}
+	? true
+	: never;
+const _setAgentTodoShape: _AssertSetAgentTodo = true;
+
+type _DeleteAgentTodo = WireCommandOfType<"delete_agent_todo">;
+type _AssertDeleteAgentTodo = _DeleteAgentTodo extends {
+	type: "delete_agent_todo";
+	sessionId?: string;
+	todoId: string;
+}
+	? true
+	: never;
+const _deleteAgentTodoShape: _AssertDeleteAgentTodo = true;
 
 // ── 运行时命令清单快照 ──
 
@@ -250,6 +275,10 @@ const COMMAND_TYPES = [
 	"bring_back_child_result",
 	// Project（T8）：客户端级 Project registry 只读
 	"list_projects",
+	// Agent Todo（T10A）：Agent 级 Todo 板
+	"list_agent_todos",
+	"set_agent_todo",
+	"delete_agent_todo",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */
@@ -270,5 +299,6 @@ describe("WireCommand shape lock", () => {
 		expect(COMMAND_TYPES).toContain("set_mcp_server");
 		expect(COMMAND_TYPES).toContain("list_remote_skills");
 		expect(COMMAND_TYPES).toContain("listen_list");
+		expect(COMMAND_TYPES).toContain("set_agent_todo");
 	});
 });

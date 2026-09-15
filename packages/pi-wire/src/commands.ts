@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent } from "@cornfield/ai";
+import type { AgentTodoDto } from "./results/agent-todos";
 
 /**
  * Wire 命令面 (multiplex 子集)。
@@ -228,7 +229,33 @@ export type MultiplexCommand =
 	 * 存储文件不存在 = 明确空集（projects: []）；文件在但读不出来 = ok:false，
 	 * **不得**退化成空列表 —— 「没声明过」与「声明过但坏了」是两件事。
 	 */
-	| { id?: string; type: "list_projects"; sessionId?: string };
+	| { id?: string; type: "list_projects"; sessionId?: string }
+	// Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）
+	/**
+	 * 列出一个 Agent 的整块 Todo 板（AgentTodoListDto）。
+	 *
+	 * 板子归属 Agent，不是会话：`sessionId` 定向注册表里的 agent，缺省 = 本连接当前焦点。
+	 * 只读该 agent 的 `<agentDir>/.cornfield/agent-todos.json`，不 lazy attach（列一块板不该
+	 * 把 agent 拉起来）。目标 agent 未注册 → ok:false，不拿别人的板子冒充。
+	 *
+	 * 存储文件不存在 = 明确的空板；文件在但读不出来（损坏 / 版本不符 / 记录形状不对）或该
+	 * Agent 的 workspace 声明读不出内容 = ok:false，**不得**退化成空板 —— 「没记过」与
+	 * 「记过但坏了」是两件事。
+	 */
+	| { id?: string; type: "list_agent_todos"; sessionId?: string }
+	/**
+	 * 新建或更新一条 Todo（AgentTodoUpsertDto；按 `todo.id` upsert）。
+	 *
+	 * `id` 由调用方给（重试同一份记录更新同一条，而不是多出一条任务），`agentId` 必填且必须
+	 * 等于目标 Agent —— 一个 Agent 只能写自己的板子。`createdAt` / `updatedAt` / `sessionRefs`
+	 * 由存储拥有：前两者写入时盖章，后者只允许原样送回读到的值。
+	 *
+	 * ok:false 的几种情况都是真错误，不是「已忽略」：owner 不匹配、`projectId` 没声明过、
+	 * 超出该 Agent 的声明绑定范围、生命周期非法（终态不可重开）、存储坏了。
+	 */
+	| { id?: string; type: "set_agent_todo"; sessionId?: string; todo: AgentTodoDto }
+	/** 删除一条 Todo（AgentTodoDeleteDto）。幂等：本来就不在板上返回 deleted:false。 */
+	| { id?: string; type: "delete_agent_todo"; sessionId?: string; todoId: string };
 
 /** 多端专属命令（rpc-types 没有，wire 层新增）。 */
 export type WireExtensionCommand =

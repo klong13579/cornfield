@@ -83,28 +83,57 @@ export function workspaceFilePath(agentDir: string): string {
 }
 
 /**
+ * What reading an agentDir's declaration found, with **three** cases kept apart.
+ *
+ * "No declaration" and "a declaration I cannot read" are different facts, and a caller
+ * that decides something from the declaration (`declaredProjectIds`, model config,
+ * knowledge paths) must not treat the second as the first: a declaration that exists but
+ * cannot be interpreted may well be declaring something.
+ */
+export type WorkspaceDeclarationRead =
+	| { state: "declared"; declaration: WorkspaceDeclaration }
+	| { state: "absent" }
+	| { state: "invalid"; reason: string };
+
+/**
+ * Read `agentDir/.cornfield/workspace.json` without collapsing its outcomes.
+ *
+ * ENOENT → `absent`. A file that is not a schema-v2 declaration (bad JSON, wrong
+ * `schemaVersion`, no `id`) → `invalid` with the reason. Any other I/O error propagates:
+ * "I could not look" is not an answer about the declaration's contents.
+ */
+export async function readWorkspaceDeclaration(agentDir: string): Promise<WorkspaceDeclarationRead> {
+	let parsed: unknown;
+	try {
+		parsed = await Bun.file(workspaceFilePath(agentDir)).json();
+	} catch (err) {
+		if (isEnoent(err)) return { state: "absent" };
+		if (err instanceof SyntaxError) return { state: "invalid", reason: `not valid JSON: ${err.message}` };
+		throw err;
+	}
+	if (
+		parsed &&
+		typeof parsed === "object" &&
+		typeof (parsed as WorkspaceDeclaration).id === "string" &&
+		(parsed as WorkspaceDeclaration).schemaVersion === WORKSPACE_SCHEMA_VERSION
+	) {
+		return { state: "declared", declaration: parsed as WorkspaceDeclaration };
+	}
+	return { state: "invalid", reason: `not a schema-v${WORKSPACE_SCHEMA_VERSION} declaration` };
+}
+
+/**
  * Load the declaration from `agentDir/.cornfield/workspace.json`.
  * Returns null when missing or not a valid v2 declaration (never throws for
  * missing files — callers fall back to registry cache / defaults).
+ *
+ * The tolerant reading, for metadata whose absence needs no repair. Callers that make a
+ * decision *from* the declaration use {@link readWorkspaceDeclaration} instead, so
+ * "could not read it" stops looking like "nothing declared".
  */
 export async function loadWorkspace(agentDir: string): Promise<WorkspaceDeclaration | null> {
-	try {
-		const parsed = await Bun.file(workspaceFilePath(agentDir)).json();
-		if (
-			parsed &&
-			typeof parsed === "object" &&
-			typeof (parsed as WorkspaceDeclaration).id === "string" &&
-			(parsed as WorkspaceDeclaration).schemaVersion === WORKSPACE_SCHEMA_VERSION
-		) {
-			return parsed as WorkspaceDeclaration;
-		}
-		return null;
-	} catch (err) {
-		if (isEnoent(err)) return null;
-		// Corrupt declaration: treat as absent (optional metadata), never throw.
-		if (err instanceof SyntaxError) return null;
-		throw err;
-	}
+	const read = await readWorkspaceDeclaration(agentDir);
+	return read.state === "declared" ? read.declaration : null;
 }
 
 /**
