@@ -3,7 +3,7 @@
 - 日期：2026-09-16
 - 上游：`can1357/oh-my-pi` @ `c5a8e0e`（快照 `/tmp/omp-upstream`）
 - 本地基线：`main` @ `3d9ddde0`
-- 状态：设计（分批实施中）
+- 状态：分批实施中 —— **第 1 波（第 1–4 条能力 + 渲染断言基线）已并入 `main` @ `da0c8a6993`**；第 2 波待拆票
 - 范围：**两棵树都有的 Tool，其能力差**（含行为、TUI 渲染、prompt）
 
 与另两篇的分工（禁止分叉）：
@@ -20,10 +20,10 @@
 
 | # | 能力 | 上游证据 | 本地现状 | 尺寸 | 波次 |
 |---|---|---|---|---|---|
-| 1 | bash 拦截器逐段判定 + 保守 shell 分词器（含 cd 提取） | `tools/shell-tokenize.ts:14,217,369,501`、`bash-interceptor.ts:119` | 部分：`bash-interceptor.ts:42` 只 trim+正则（`^` 锚导致"单独跑被拦、脚本里放过"）；`bash.ts:557` 脆弱 cd 正则 `[复核]` | S | 1 |
-| 2 | GitHub 补 5 个 op：`file_read`、`pr_create`、`search_code`、`search_commits`、`search_repos` | `gh.ts:261-361`、`gh-search.ts:458-523`、`gh-types.ts`、`gh-common.ts` | 本地 9 op（`gh.ts:132-143` `[复核]`） | S | 1 |
-| 3 | edit auto-repair：hunk 隔离（singles→pairs→贪心剥）+ reference 文本 + realign + blackbox 语料 | `edit/auto-repair.ts:110-133,183-202,229-266`、`edit/blackbox.ts` | 部分：`edit/post-write.ts:283-292` 用线性 diff 范围 `[复核]` | M | 1 |
-| 4 | todo：`blocked` 状态 + `blocker` + `block`/`unblock`/`view` | `tools/todo.ts:21-29,126-128` | 缺：`todo-write.ts:21` 四状态 `[复核]` | S | 1 |
+| 1 | bash 拦截器逐段判定 + 保守 shell 分词器（含 cd 提取） | `tools/shell-tokenize.ts:14,217,369,501`、`bash-interceptor.ts:119` | 部分：`bash-interceptor.ts:42` 只 trim+正则（`^` 锚导致"单独跑被拦、脚本里放过"）；`bash.ts:557` 脆弱 cd 正则 `[复核]` | S | 1 已交付 |
+| 2 | GitHub 补 5 个 op：`file_read`、`pr_create`、`search_code`、`search_commits`、`search_repos` | `gh.ts:261-361`、`gh-search.ts:458-523`、`gh-types.ts`、`gh-common.ts` | 本地 9 op（`gh.ts:132-143` `[复核]`） | S | 1 已交付 |
+| 3 | edit auto-repair：hunk 隔离（singles→pairs→贪心剥）+ reference 文本 + realign + blackbox 语料 | `edit/auto-repair.ts:110-133,183-202,229-266`、`edit/blackbox.ts` | 部分：`edit/post-write.ts:283-292` 用线性 diff 范围 `[复核]` | M | 1 已交付 |
+| 4 | todo：`blocked` 状态 + `blocker` + `block`/`unblock`/`view` | `tools/todo.ts:21-29,126-128` | 缺：`todo-write.ts:21` 四状态 `[复核]` | S | 1 已交付 |
 | 5 | read：tail 选择器 `-N` + 多段选择器渲染 | `read-selector.ts`、`read-format.ts` | 缺：本地对 `-N` 与不相邻多段直接报错 | M | 2 |
 | 6 | 未解决 git 合并冲突浮出 + `conflict://N` 读写解决 | `tools/conflict-detect.ts:1-500` | 缺 | M | 2 |
 | 7 | PDF 读取（Chromium 渲染单页） | `read-pdf.ts` | 缺（本地 PDF 走文本抽取） | M | 2 |
@@ -33,6 +33,8 @@
 | 11 | 输出 schema 校验统一（yield 与 executor 共用）+ 增量 yield 的 section 校验 | `tools/output-schema-validator.ts:1-307` | 部分：`yield.ts:82-100` 自 compile AJV `[复核]`，executor 另有一套；yield 当前无测试 | M | 2 |
 | 12 | 终端屏幕读取（把虚拟终端行导出为可重放样式） | `tools/terminal-output.ts` | 缺；**本地已有 `@xterm/headless` + `bash-interactive.ts:215` 读屏** `[复核]`，零新依赖 | S | 3 |
 | 13 | memory `reflect`（对长期记忆做 LLM 综合回答） | `tools/memory-reflect.ts:1-90` | 缺；本地有 `write_memory` + `query_episodic_memory`（`self-evolution/src/tools.ts:23-38` `[复核]`），只返回列表 | M | 3（受前作「记忆后端」决策阻塞） |
+
+「1 已交付」= 已并入 `main`。第 1 波的落地形状与第 2 波的拆票依据见 `docs/upstream-tool-capability-port.md` 本节与 `.scratch/upstream-tool-port/issues/`（`.scratch` 不入库）。
 
 渲染面（上游有的 TUI 渲染）**不单独成票**：它属于哪条能力的可见性，就并进那条票的验收（read 徽章→5/6/7，gh 结果渲染→2/8，edit 结果渲染→3，todo 的 blocked 标记→4）。
 
