@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import type { Skill } from "../../src/extensibility/skills";
 import { resolveLocalUrlToPath } from "../../src/internal-urls";
-import { expandInternalUrls, expandSkillUrls, resolveSkillUrlToPath } from "../../src/tools/bash-skill-urls";
+import { expandInternalUrls, resolveSkillUrlToPath } from "../../src/tools/bash-skill-urls";
 import { ToolError } from "../../src/tools/tool-errors";
 
 function shellEscape(p: string): string {
@@ -46,16 +46,16 @@ function createInternalRouter(resources: Record<string, { sourcePath?: string; e
 	};
 }
 
-describe("expandSkillUrls", () => {
-	it("expands a basic skill:// URI to an absolute path", () => {
+describe("skill:// resolution through expandInternalUrls", () => {
+	it("expands a basic skill:// URI to an absolute path", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 		const command = "python skill://valid-skill/scripts/init.py";
 		const expectedPath = path.join(skills[0].baseDir, "scripts/init.py");
 
-		expect(expandSkillUrls(command, skills)).toBe(`python ${shellEscape(expectedPath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`python ${shellEscape(expectedPath)}`);
 	});
 
-	it("expands multiple skill:// URIs in one command", () => {
+	it("expands multiple skill:// URIs in one command", async () => {
 		const skills = [
 			createSkill("first-skill", "/tmp/skills/first-skill"),
 			createSkill("second-skill", "/tmp/skills/second-skill"),
@@ -64,101 +64,101 @@ describe("expandSkillUrls", () => {
 		const firstPath = path.join(skills[0].baseDir, "a.txt");
 		const secondPath = path.join(skills[1].baseDir, "b.txt");
 
-		expect(expandSkillUrls(command, skills)).toBe(`cp ${shellEscape(firstPath)} ${shellEscape(secondPath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(
+			`cp ${shellEscape(firstPath)} ${shellEscape(secondPath)}`,
+		);
 	});
 
-	it("throws ToolError for unknown skills with available names", () => {
+	it("throws ToolError for unknown skills with available names", async () => {
 		const skills = [
 			createSkill("first-skill", "/tmp/skills/first-skill"),
 			createSkill("second-skill", "/tmp/skills/second-skill"),
 		];
 
-		expect(() => expandSkillUrls("python skill://missing/run.py", skills)).toThrow(
+		await expect(expandInternalUrls("python skill://missing/run.py", { skills })).rejects.toThrow(
 			"Unknown skill: missing. Available: first-skill, second-skill",
 		);
 	});
 
-	it("throws ToolError for path traversal attempts", () => {
+	it("throws ToolError for path traversal attempts", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 
-		expect(() => expandSkillUrls("cat skill://valid-skill/../../../etc/passwd", skills)).toThrow(
+		await expect(expandInternalUrls("cat skill://valid-skill/../../../etc/passwd", { skills })).rejects.toThrow(
 			"Path traversal (..) is not allowed in skill:// URLs",
 		);
 	});
 
-	it("returns command unchanged when there are no skill:// tokens", () => {
+	it("returns command unchanged when there are no skill:// tokens", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 		const command = "git status";
 
-		expect(expandSkillUrls(command, skills)).toBe(command);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
 	});
 
-	it("does not expand non-skill internal URIs", () => {
-		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
-		const command = "echo agent://1 artifact://abc rule://security";
-
-		expect(expandSkillUrls(command, skills)).toBe(command);
-	});
-
-	it("expands URI in double quotes", () => {
+	it("expands URI in double quotes", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 		const command = 'python "skill://valid-skill/scripts/init.py"';
 		const expectedPath = path.join(skills[0].baseDir, "scripts/init.py");
 
-		expect(expandSkillUrls(command, skills)).toBe(`python ${shellEscape(expectedPath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`python ${shellEscape(expectedPath)}`);
 	});
 
-	it("expands URI in single quotes", () => {
+	it("expands URI in single quotes", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 		const command = "python 'skill://valid-skill/scripts/init.py'";
 		const expectedPath = path.join(skills[0].baseDir, "scripts/init.py");
 
-		expect(expandSkillUrls(command, skills)).toBe(`python ${shellEscape(expectedPath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`python ${shellEscape(expectedPath)}`);
 	});
 
-	it("shell-escapes paths with spaces", () => {
+	it("shell-escapes paths with spaces", async () => {
 		const skills = [createSkill("space-skill", "/tmp/skills/with space")];
 		const command = "python skill://space-skill/scripts/my%20file.py";
 		const expectedPath = path.join(skills[0].baseDir, "scripts/my file.py");
 
-		expect(expandSkillUrls(command, skills)).toBe(`python ${shellEscape(expectedPath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`python ${shellEscape(expectedPath)}`);
 	});
 
-	it("shell-escapes paths containing single quotes", () => {
+	it("shell-escapes paths containing single quotes", async () => {
 		const skills = [createSkill("quote-skill", "/tmp/skills/with'quote")];
 		const command = "python skill://quote-skill/scripts/init.py";
 		const expectedPath = path.join(skills[0].baseDir, "scripts/init.py");
 
-		expect(expandSkillUrls(command, skills)).toBe(`python ${shellEscape(expectedPath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`python ${shellEscape(expectedPath)}`);
 	});
 
-	it("resolves skill://name with no relative path to SKILL.md", () => {
+	it("resolves skill://name with no relative path to SKILL.md", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 		const command = "cat skill://valid-skill";
 
-		expect(expandSkillUrls(command, skills)).toBe(`cat ${shellEscape(skills[0].filePath)}`);
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`cat ${shellEscape(skills[0].filePath)}`);
 	});
 
-	it("returns command unchanged when no skills are loaded", () => {
-		const command = "python skill://valid-skill/scripts/init.py";
-		expect(expandSkillUrls(command, [])).toBe(command);
+	it("tells the caller there are no skills instead of passing the URI through", async () => {
+		await expect(expandInternalUrls("python skill://valid-skill/scripts/init.py", { skills: [] })).rejects.toThrow(
+			"Unknown skill: valid-skill. Available: none",
+		);
 	});
 
-	it("throws ToolError when traversal is attempted with encoded segments", () => {
+	it("throws ToolError when traversal is attempted with encoded segments", async () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
-		expect(() => expandSkillUrls("cat skill://valid-skill/%2E%2E/%2E%2E/etc/passwd", skills)).toThrow(ToolError);
+		await expect(expandInternalUrls("cat skill://valid-skill/%2E%2E/%2E%2E/etc/passwd", { skills })).rejects.toThrow(
+			ToolError,
+		);
 	});
 
-	it("names the offending token when resolution fails", () => {
-		// 为什么要有 token：bash tool 在 shell 执行前替换命令里的每一处内部 URI（引号内也替换），
+	it("names the offending token when resolution fails", async () => {
+		// 为什么要有 token：bash tool 在 shell 执行前替换命令里的每一处内部 URI，
 		// 所以失败可能来自命令中与本次操作无关的一段文本 —— 2026-09-15：commit message 里的字面
 		// skill:// 路径触发了 traversal 报错，而旧错误文本里没有任何指向它的信息。
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 
-		expect(() => expandSkillUrls("cat skill://valid-skill/../../../etc/passwd", skills)).toThrow(
+		await expect(expandInternalUrls("cat skill://valid-skill/../../../etc/passwd", { skills })).rejects.toThrow(
 			/token: skill:\/\/valid-skill\/\.\.\/\.\.\/\.\.\/etc\/passwd/,
 		);
-		expect(() => expandSkillUrls("cat skill://missing/run.py", skills)).toThrow(/token: skill:\/\/missing\/run\.py/);
+		await expect(expandInternalUrls("cat skill://missing/run.py", { skills })).rejects.toThrow(
+			/token: skill:\/\/missing\/run\.py/,
+		);
 	});
 });
 
@@ -355,5 +355,95 @@ describe("skill:// as a working directory", () => {
 		});
 
 		expect(expanded).toBe(skills[0]!.baseDir);
+	});
+});
+
+/**
+ * The expansion rewrites text, so there has to be a way to say "this is text".
+ * A quoted heredoc body is the shell's own way of saying it; a leading backslash is
+ * ours for every other position.
+ */
+describe("internal URIs as data rather than paths", () => {
+	const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
+	const uri = "skill://valid-skill/scripts/init.py";
+	const resolvedPath = path.join(skills[0].baseDir, "scripts/init.py");
+
+	it("keeps a URI in a single-quoted heredoc body exactly as written", async () => {
+		const command = `python3 - <<'PY'\nopen("t.ts", "w").write("import x from "${uri}"")\nPY`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
+	});
+
+	it("keeps a URI in a double-quoted heredoc body exactly as written", async () => {
+		const command = `cat <<"EOF" > notes.md\nsee ${uri}\nEOF`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
+	});
+
+	it("keeps a URI in a tab-stripped heredoc body exactly as written", async () => {
+		const command = `cat <<-'EOF'\n\tsee ${uri}\n\tEOF`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
+	});
+
+	it("protects an unterminated quoted heredoc to the end of the command", async () => {
+		const command = `cat <<'EOF'\nsee ${uri}`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(command);
+	});
+
+	it("resolves after the body while the body stays literal", async () => {
+		const command = `python3 - <<'PY'\nprint("${uri}")\nPY\ncat ${uri}`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(
+			`python3 - <<'PY'\nprint("${uri}")\nPY\ncat ${shellEscape(resolvedPath)}`,
+		);
+	});
+
+	it("still resolves inside an unquoted heredoc body", async () => {
+		// POSIX expands inside `<<EOF`; a URI there is command text like any other.
+		const command = `cat <<EOF\n${uri}\nEOF`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(
+			`cat <<EOF\n${shellEscape(resolvedPath)}\nEOF`,
+		);
+	});
+
+	it("treats <<< as a here-string, not a heredoc", async () => {
+		const command = `cat <<< ${uri}`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(`cat <<< ${shellEscape(resolvedPath)}`);
+	});
+
+	it("consumes two heredoc bodies in order when one line opens both", async () => {
+		const command = `cat <<'A' <<B\n${uri}\nA\n${uri}\nB\ncat ${uri}`;
+
+		await expect(expandInternalUrls(command, { skills })).resolves.toBe(
+			`cat <<'A' <<B\n${uri}\nA\n${shellEscape(resolvedPath)}\nB\ncat ${shellEscape(resolvedPath)}`,
+		);
+	});
+
+	it("keeps an escaped URI literal and drops the backslash", async () => {
+		await expect(expandInternalUrls("echo \\skill://valid-skill/scripts/init.py", { skills })).resolves.toBe(
+			"echo skill://valid-skill/scripts/init.py",
+		);
+	});
+
+	it("keeps an escaped URI literal inside quotes", async () => {
+		await expect(expandInternalUrls('echo "\\skill://valid-skill/x"', { skills })).resolves.toBe(
+			'echo "skill://valid-skill/x"',
+		);
+	});
+
+	it("does not fail on an escaped URI whose target does not exist", async () => {
+		await expect(expandInternalUrls("git commit -m 'see \\skill://missing'", { skills })).resolves.toBe(
+			"git commit -m 'see skill://missing'",
+		);
+	});
+
+	it("leaves an even number of backslashes alone and resolves the URI", async () => {
+		await expect(expandInternalUrls("echo \\\\skill://valid-skill/scripts/init.py", { skills })).resolves.toBe(
+			`echo \\\\${shellEscape(resolvedPath)}`,
+		);
 	});
 });

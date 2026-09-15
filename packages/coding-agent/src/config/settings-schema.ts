@@ -1,7 +1,7 @@
 import { THINKING_EFFORTS } from "@cornfield/ai";
 import { TASK_SIMPLE_MODES } from "../task/simple-mode";
 import { EDIT_MODES } from "../utils/edit-mode";
-import { MODEL_ROLE_IDS } from "./model-registry";
+import { MODEL_ROLE_IDS } from "./model-role-ids";
 import type { ModelRoleRoute } from "./model-routes";
 
 /** Unified settings schema - single source of truth for all settings.

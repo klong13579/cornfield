@@ -16,7 +16,7 @@ Internal URLs:
 - `mcp://<resource-uri>` — MCP resource
 - `pi://..` — internal CornField documentation; do **NOT** read unless the user asks about CornField/PI itself
 
-In `bash`, URIs auto-resolve to filesystem paths.
+In `bash`, URIs auto-resolve to filesystem paths; a leading backslash (`\skill://…`) keeps one literal, and a quoted heredoc body (`<<'EOF'`) is never expanded.
 Internal URLs are read, not globbed: `glob`/`grep` take exact internal paths only — a glob pattern aimed at `skill://…` or `agent://…` is rejected. List the resource with `read` first.
 
 Skills:
