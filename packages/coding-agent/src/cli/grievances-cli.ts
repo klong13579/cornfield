@@ -8,22 +8,9 @@
  *   clean            — delete rows by id, by tool, or all of them
  */
 import type { Database } from "bun:sqlite";
+import { writeStdout } from "@cornfield/utils/cli";
 import chalk from "chalk";
 import { closeAutoQaDb, openAutoQaDb, openAutoQaDbReadonly } from "../tools/report-tool-issue";
-
-/**
- * Write one line (or one payload) of command output.
- *
- * Deliberately not `console.log`: with winston loaded — it is, wherever the
- * logger is imported — a single `console.log` larger than the pipe buffer is
- * cut at 64 KiB when stdout is a pipe, and the tail is lost before the process
- * exits. Measured on this command: `-n 500 -j | wc -c` returned 65536 bytes of
- * the 174467 the same run writes to a file. `process.stdout.write` delivers the
- * whole payload, so every line this command prints goes through here.
- */
-function writeStdout(text: string): void {
-	process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
-}
 
 interface GrievanceRow {
 	id: number;

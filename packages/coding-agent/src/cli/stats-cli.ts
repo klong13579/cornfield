@@ -5,6 +5,7 @@
  */
 
 import { APP_NAME, formatDuration, formatNumber, formatPercent } from "@cornfield/utils";
+import { writeStdout } from "@cornfield/utils/cli";
 import chalk from "chalk";
 import { openPath } from "../utils/open";
 
@@ -81,7 +82,7 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
 
 	if (cmd.json) {
 		const stats = await getDashboardStats();
-		console.log(JSON.stringify(stats, null, 2));
+		writeStdout(JSON.stringify(stats, null, 2));
 		return;
 	}
 

@@ -12,6 +12,31 @@
 import { parseArgs as nodeParseArgs } from "node:util";
 
 // ---------------------------------------------------------------------------
+// Command output
+// ---------------------------------------------------------------------------
+
+/**
+ * Write one line (or one document) of command output to stdout, appending a
+ * newline when the text does not already end with one.
+ *
+ * This is the single stdout exit for CLI command output. Deliberately not
+ * `console.log`: with winston loaded — it is loaded wherever the logger is
+ * imported — a single `console.log` payload larger than the pipe buffer writes
+ * only up to a 64 KiB boundary when stdout is a pipe. The tail is dropped
+ * before the process exits and the exit code still reads 0, so `omp x | jq`
+ * silently parses a truncated document. `process.stdout.write` delivers the
+ * whole payload.
+ *
+ * Measured on this build (payload written to a file → same run into a pipe):
+ * `config get <array-key> -j` 236086 → 65536, `agent show <fat-agent> -j`
+ * 296180 → 65536, `agent validate -j` 1215695 → 196608, `plugin list -j`
+ * 213429 → 65536.
+ */
+export function writeStdout(text = ""): void {
+	process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+}
+
+// ---------------------------------------------------------------------------
 // Flag & Arg descriptors
 // ---------------------------------------------------------------------------
 

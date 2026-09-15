@@ -3,6 +3,7 @@
  */
 import { type Api, getSupportedEfforts, type Model, probeAccessibleModels } from "@cornfield/ai";
 import { formatNumber } from "@cornfield/utils";
+import { writeStdout } from "@cornfield/utils/cli";
 import type { ModelRegistry } from "../config/model-registry";
 import { fuzzyFilter } from "../utils/fuzzy";
 
@@ -15,10 +16,6 @@ interface ProviderRow {
 	images: string;
 }
 
-function writeLine(line = ""): void {
-	process.stdout.write(`${line}\n`);
-}
-
 function renderTable<T extends Record<string, string>>(rows: T[], headers: T): void {
 	const widths = Object.fromEntries(
 		Object.keys(headers).map(key => [key, Math.max(headers[key]!.length, ...rows.map(row => row[key]!.length))]),
@@ -27,13 +24,13 @@ function renderTable<T extends Record<string, string>>(rows: T[], headers: T): v
 	const headerLine = Object.keys(headers)
 		.map(key => headers[key as keyof T]!.padEnd(widths[key as keyof T]))
 		.join("  ");
-	writeLine(headerLine);
+	writeStdout(headerLine);
 
 	for (const row of rows) {
 		const line = Object.keys(headers)
 			.map(key => row[key as keyof T]!.padEnd(widths[key as keyof T]))
 			.join("  ");
-		writeLine(line);
+		writeStdout(line);
 	}
 }
 
@@ -81,7 +78,7 @@ export async function listModels(
 	let filteredModels = collectVerifiedModels(modelRegistry, enabledModelIds);
 
 	if (filteredModels.length === 0) {
-		writeLine(
+		writeStdout(
 			enabledModelIds?.size ? "No models available." : "No models available. Set API keys in environment variables.",
 		);
 		return;
@@ -91,14 +88,14 @@ export async function listModels(
 		const before = filteredModels.length;
 		filteredModels = [...(await probeAccessibleModels(filteredModels, p => modelRegistry.getApiKeyForProvider(p)))];
 		if (filteredModels.length < before) {
-			writeLine(`[probe] ${before} -> ${filteredModels.length} accessible models`);
+			writeStdout(`[probe] ${before} -> ${filteredModels.length} accessible models`);
 		}
 	}
 
 	if (searchPattern) {
 		filteredModels = fuzzyFilter(filteredModels, searchPattern, model => `${model.provider} ${model.id}`);
 		if (filteredModels.length === 0) {
-			writeLine(`No models matching "${searchPattern}"`);
+			writeStdout(`No models matching "${searchPattern}"`);
 			return;
 		}
 	}

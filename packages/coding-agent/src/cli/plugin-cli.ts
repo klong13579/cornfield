@@ -5,6 +5,7 @@
  */
 
 import { APP_NAME, getProjectDir } from "@cornfield/utils";
+import { writeStdout } from "@cornfield/utils/cli";
 import chalk from "chalk";
 import { resolveOrDefaultProjectRegistryPath } from "../discovery/helpers";
 import { PluginManager, parseSettingValue, validateSetting } from "../extensibility/plugins";
@@ -216,7 +217,7 @@ async function handleMarketplace(args: string[], _flags: PluginCommandArgs["flag
 			}
 			try {
 				await manager.addMarketplace(source);
-				console.log(chalk.green(`${theme.status.success} Added marketplace: ${source}`));
+				writeStdout(chalk.green(`${theme.status.success} Added marketplace: ${source}`));
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to add marketplace: ${err}`));
 				process.exit(1);
@@ -232,7 +233,7 @@ async function handleMarketplace(args: string[], _flags: PluginCommandArgs["flag
 			}
 			try {
 				await manager.removeMarketplace(name);
-				console.log(chalk.green(`${theme.status.success} Removed marketplace: ${name}`));
+				writeStdout(chalk.green(`${theme.status.success} Removed marketplace: ${name}`));
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to remove marketplace: ${err}`));
 				process.exit(1);
@@ -244,10 +245,10 @@ async function handleMarketplace(args: string[], _flags: PluginCommandArgs["flag
 				const name = args[1];
 				if (name) {
 					await manager.updateMarketplace(name);
-					console.log(chalk.green(`${theme.status.success} Updated marketplace: ${name}`));
+					writeStdout(chalk.green(`${theme.status.success} Updated marketplace: ${name}`));
 				} else {
 					const results = await manager.updateAllMarketplaces();
-					console.log(chalk.green(`${theme.status.success} Updated ${results.length} marketplace(s)`));
+					writeStdout(chalk.green(`${theme.status.success} Updated ${results.length} marketplace(s)`));
 				}
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to update marketplace: ${err}`));
@@ -264,13 +265,13 @@ async function handleMarketplace(args: string[], _flags: PluginCommandArgs["flag
 			try {
 				const marketplaces = await manager.listMarketplaces();
 				if (marketplaces.length === 0) {
-					console.log(chalk.dim("No marketplaces configured"));
-					console.log(chalk.dim(`\nAdd one with: ${APP_NAME} plugin marketplace add <source>`));
+					writeStdout(chalk.dim("No marketplaces configured"));
+					writeStdout(chalk.dim(`\nAdd one with: ${APP_NAME} plugin marketplace add <source>`));
 					return;
 				}
 				console.log(chalk.bold("Configured Marketplaces:\n"));
 				for (const mp of marketplaces) {
-					console.log(`  ${chalk.cyan(mp.name)}  ${chalk.dim(mp.sourceUri)}`);
+					writeStdout(`  ${chalk.cyan(mp.name)}  ${chalk.dim(mp.sourceUri)}`);
 				}
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to list marketplaces: ${err}`));
@@ -288,15 +289,15 @@ async function handleDiscover(args: string[], _flags: PluginCommandArgs["flags"]
 		const plugins = await manager.listAvailablePlugins(marketplace);
 
 		if (plugins.length === 0) {
-			console.log(chalk.dim(marketplace ? `No plugins found in ${marketplace}` : "No plugins available"));
+			writeStdout(chalk.dim(marketplace ? `No plugins found in ${marketplace}` : "No plugins available"));
 			return;
 		}
 
 		console.log(chalk.bold(`Available Plugins${marketplace ? ` (${marketplace})` : ""}:\n`));
 		for (const plugin of plugins) {
-			console.log(`  ${chalk.cyan(plugin.name)}${plugin.version ? `@${plugin.version}` : ""}`);
+			writeStdout(`  ${chalk.cyan(plugin.name)}${plugin.version ? `@${plugin.version}` : ""}`);
 			if (plugin.description) {
-				console.log(chalk.dim(`    ${plugin.description}`));
+				writeStdout(chalk.dim(`    ${plugin.description}`));
 			}
 		}
 	} catch (err) {
@@ -312,11 +313,11 @@ async function handleUpgrade(args: string[], flags: PluginCommandArgs["flags"]):
 		if (pluginId) {
 			if (flags.scope) {
 				const result = await manager.upgradePlugin(pluginId, flags.scope);
-				console.log(chalk.green(`Upgraded ${pluginId} (${flags.scope}) to ${result.version}`));
+				writeStdout(chalk.green(`Upgraded ${pluginId} (${flags.scope}) to ${result.version}`));
 			} else {
 				const entries = await manager.upgradePluginAcrossScopes(pluginId);
 				for (const entry of entries) {
-					console.log(chalk.green(`Upgraded ${pluginId} (${entry.scope}) to ${entry.version}`));
+					writeStdout(chalk.green(`Upgraded ${pluginId} (${entry.scope}) to ${entry.version}`));
 				}
 			}
 		} else {
@@ -329,10 +330,10 @@ async function handleUpgrade(args: string[], flags: PluginCommandArgs["flags"]):
 			}
 			const results = await manager.upgradeAllPlugins();
 			if (results.length === 0) {
-				console.log("All marketplace plugins are up to date.");
+				writeStdout("All marketplace plugins are up to date.");
 			} else {
 				for (const r of results) {
-					console.log(chalk.green(`  ${r.pluginId} (${r.scope}): ${r.from} -> ${r.to}`));
+					writeStdout(chalk.green(`  ${r.pluginId} (${r.scope}): ${r.from} -> ${r.to}`));
 				}
 			}
 		}
@@ -368,7 +369,7 @@ async function handleInstall(
 					force: flags.force,
 					scope: flags.scope,
 				});
-				console.log(
+				writeStdout(
 					chalk.green(
 						`${theme.status.success} Installed ${target.name} from ${target.marketplace} (${entry.version})`,
 					),
@@ -394,17 +395,17 @@ async function handleInstall(
 			const result = await manager.install(spec, { force: flags.force, dryRun: flags.dryRun });
 
 			if (flags.json) {
-				console.log(JSON.stringify(result, null, 2));
+				writeStdout(JSON.stringify(result, null, 2));
 			} else {
 				if (flags.dryRun) {
-					console.log(chalk.dim(`[dry-run] Would install ${spec}`));
+					writeStdout(chalk.dim(`[dry-run] Would install ${spec}`));
 				} else {
-					console.log(chalk.green(`${theme.status.success} Installed ${result.name}@${result.version}`));
+					writeStdout(chalk.green(`${theme.status.success} Installed ${result.name}@${result.version}`));
 					if (result.enabledFeatures && result.enabledFeatures.length > 0) {
-						console.log(chalk.dim(`  Features: ${result.enabledFeatures.join(", ")}`));
+						writeStdout(chalk.dim(`  Features: ${result.enabledFeatures.join(", ")}`));
 					}
 					if (result.manifest.description) {
-						console.log(chalk.dim(`  ${result.manifest.description}`));
+						writeStdout(chalk.dim(`  ${result.manifest.description}`));
 					}
 				}
 			}
@@ -435,7 +436,7 @@ async function handleUninstall(
 			// Exact match against installed marketplace plugin IDs (name@marketplace)
 			try {
 				await mktMgr.uninstallPlugin(name, flags.scope);
-				console.log(chalk.green(`${theme.status.success} Uninstalled ${name}`));
+				writeStdout(chalk.green(`${theme.status.success} Uninstalled ${name}`));
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));
 				process.exit(1);
@@ -447,9 +448,9 @@ async function handleUninstall(
 		try {
 			await manager.uninstall(name);
 			if (flags.json) {
-				console.log(JSON.stringify({ uninstalled: name }));
+				writeStdout(JSON.stringify({ uninstalled: name }));
 			} else {
-				console.log(chalk.green(`${theme.status.success} Uninstalled ${name}`));
+				writeStdout(chalk.green(`${theme.status.success} Uninstalled ${name}`));
 			}
 		} catch (err) {
 			console.error(chalk.red(`${theme.status.error} Failed to uninstall ${name}: ${err}`));
@@ -464,13 +465,13 @@ async function handleList(manager: PluginManager, flags: { json?: boolean }): Pr
 	const mktPlugins = await mktMgr.listInstalledPlugins();
 
 	if (flags.json) {
-		console.log(JSON.stringify({ npm: npmPlugins, marketplace: mktPlugins }, null, 2));
+		writeStdout(JSON.stringify({ npm: npmPlugins, marketplace: mktPlugins }, null, 2));
 		return;
 	}
 
 	if (npmPlugins.length === 0 && mktPlugins.length === 0) {
-		console.log(chalk.dim("No plugins installed"));
-		console.log(chalk.dim(`\nInstall plugins with: ${APP_NAME} plugin install <package>`));
+		writeStdout(chalk.dim("No plugins installed"));
+		writeStdout(chalk.dim(`\nInstall plugins with: ${APP_NAME} plugin install <package>`));
 		return;
 	}
 
@@ -479,12 +480,12 @@ async function handleList(manager: PluginManager, flags: { json?: boolean }): Pr
 		for (const plugin of npmPlugins) {
 			const status = plugin.enabled ? chalk.green(theme.status.enabled) : chalk.dim(theme.status.disabled);
 			const nameVersion = `${plugin.name}@${plugin.version}`;
-			console.log(`${status} ${nameVersion}`);
+			writeStdout(`${status} ${nameVersion}`);
 			if (plugin.manifest.description) {
-				console.log(chalk.dim(`  ${plugin.manifest.description}`));
+				writeStdout(chalk.dim(`  ${plugin.manifest.description}`));
 			}
 			if (plugin.enabledFeatures && plugin.enabledFeatures.length > 0) {
-				console.log(chalk.dim(`  Features: ${plugin.enabledFeatures.join(", ")}`));
+				writeStdout(chalk.dim(`  Features: ${plugin.enabledFeatures.join(", ")}`));
 			}
 			if (plugin.manifest.features) {
 				const availableFeatures = Object.keys(plugin.manifest.features);
@@ -493,21 +494,21 @@ async function handleList(manager: PluginManager, flags: { json?: boolean }): Pr
 					const featureDisplay = availableFeatures
 						.map(f => (enabledSet.has(f) ? chalk.green(f) : chalk.dim(f)))
 						.join(", ");
-					console.log(chalk.dim(`  Available: [${featureDisplay}]`));
+					writeStdout(chalk.dim(`  Available: [${featureDisplay}]`));
 				}
 			}
 		}
 	}
 
 	if (mktPlugins.length > 0) {
-		if (npmPlugins.length > 0) console.log();
+		if (npmPlugins.length > 0) writeStdout();
 		console.log(chalk.bold("Marketplace Plugins:\n"));
 		for (const plugin of mktPlugins) {
 			const entry = plugin.entries[0];
 			const version = entry?.version ?? "unknown";
 			const shadowLabel = plugin.shadowedBy ? chalk.dim(" [shadowed]") : "";
 			const scopeLabel = chalk.dim(` (${plugin.scope})`);
-			console.log(`  ${plugin.id} (${version})${scopeLabel}${shadowLabel}`);
+			writeStdout(`  ${plugin.id} (${version})${scopeLabel}${shadowLabel}`);
 		}
 	}
 }
@@ -522,9 +523,9 @@ async function handleLink(manager: PluginManager, paths: string[], flags: { json
 		const result = await manager.link(paths[0]);
 
 		if (flags.json) {
-			console.log(JSON.stringify(result, null, 2));
+			writeStdout(JSON.stringify(result, null, 2));
 		} else {
-			console.log(chalk.green(`${theme.status.success} Linked ${result.name} from ${paths[0]}`));
+			writeStdout(chalk.green(`${theme.status.success} Linked ${result.name} from ${paths[0]}`));
 		}
 	} catch (err) {
 		console.error(chalk.red(`${theme.status.error} Failed to link: ${err}`));
@@ -536,7 +537,7 @@ async function handleDoctor(manager: PluginManager, flags: { json?: boolean; fix
 	const checks = await manager.doctor({ fix: flags.fix });
 
 	if (flags.json) {
-		console.log(JSON.stringify(checks, null, 2));
+		writeStdout(JSON.stringify(checks, null, 2));
 		return;
 	}
 
@@ -549,9 +550,9 @@ async function handleDoctor(manager: PluginManager, flags: { json?: boolean; fix
 				: check.status === "warning"
 					? chalk.yellow(theme.status.warning)
 					: chalk.red(theme.status.error);
-		console.log(`${icon} ${check.name}: ${check.message}`);
+		writeStdout(`${icon} ${check.name}: ${check.message}`);
 		if (check.fixed) {
-			console.log(chalk.dim(`  ${theme.nav.cursor} Fixed`));
+			writeStdout(chalk.dim(`  ${theme.nav.cursor} Fixed`));
 		}
 	}
 
@@ -560,12 +561,12 @@ async function handleDoctor(manager: PluginManager, flags: { json?: boolean; fix
 	const ok = checks.filter(c => c.status === "ok").length;
 	const fixed = checks.filter(c => c.fixed).length;
 
-	console.log("");
-	console.log(`Summary: ${ok} ok, ${warnings} warnings, ${errors} errors${fixed > 0 ? `, ${fixed} fixed` : ""}`);
+	writeStdout("");
+	writeStdout(`Summary: ${ok} ok, ${warnings} warnings, ${errors} errors${fixed > 0 ? `, ${fixed} fixed` : ""}`);
 
 	if (errors > 0) {
 		if (!flags.fix) {
-			console.log(chalk.dim("\nRun with --fix to attempt automatic repair"));
+			writeStdout(chalk.dim("\nRun with --fix to attempt automatic repair"));
 		}
 		process.exit(1);
 	}
@@ -624,14 +625,14 @@ async function handleFeatures(
 		}
 
 		await manager.setEnabledFeatures(pluginName, [...currentFeatures]);
-		console.log(chalk.green(`${theme.status.success} Updated features for ${pluginName}`));
+		writeStdout(chalk.green(`${theme.status.success} Updated features for ${pluginName}`));
 	}
 
 	// Display current state
 	const updatedFeatures = await manager.getEnabledFeatures(pluginName);
 
 	if (flags.json) {
-		console.log(
+		writeStdout(
 			JSON.stringify(
 				{
 					plugin: pluginName,
@@ -648,7 +649,7 @@ async function handleFeatures(
 	console.log(chalk.bold(`Features for ${pluginName}:\n`));
 
 	if (!plugin.manifest.features || Object.keys(plugin.manifest.features).length === 0) {
-		console.log(chalk.dim("  No optional features available"));
+		writeStdout(chalk.dim("  No optional features available"));
 		return;
 	}
 
@@ -657,9 +658,9 @@ async function handleFeatures(
 		const enabled = enabledSet.has(name);
 		const icon = enabled ? chalk.green(theme.status.enabled) : chalk.dim(theme.status.disabled);
 		const defaultLabel = feat.default ? chalk.dim(" (default)") : "";
-		console.log(`${icon} ${name}${defaultLabel}`);
+		writeStdout(`${icon} ${name}${defaultLabel}`);
 		if (feat.description) {
-			console.log(chalk.dim(`    ${feat.description}`));
+			writeStdout(chalk.dim(`    ${feat.description}`));
 		}
 	}
 }
@@ -703,26 +704,26 @@ async function handleConfig(
 			const schema = plugin.manifest.settings || {};
 
 			if (flags.json) {
-				console.log(JSON.stringify({ settings, schema }, null, 2));
+				writeStdout(JSON.stringify({ settings, schema }, null, 2));
 				return;
 			}
 
 			console.log(chalk.bold(`Settings for ${pluginName}:\n`));
 
 			if (Object.keys(schema).length === 0) {
-				console.log(chalk.dim("  No settings defined"));
+				writeStdout(chalk.dim("  No settings defined"));
 				return;
 			}
 
 			for (const [k, s] of Object.entries(schema)) {
 				const value = settings[k] ?? s.default;
 				const displayValue = s.secret && value ? "********" : String(value ?? chalk.dim("(not set)"));
-				console.log(`  ${k}: ${displayValue}`);
+				writeStdout(`  ${k}: ${displayValue}`);
 				if (s.description) {
-					console.log(chalk.dim(`    ${s.description}`));
+					writeStdout(chalk.dim(`    ${s.description}`));
 				}
 				if (s.env) {
-					console.log(chalk.dim(`    env: ${s.env}`));
+					writeStdout(chalk.dim(`    env: ${s.env}`));
 				}
 			}
 			break;
@@ -739,10 +740,10 @@ async function handleConfig(
 			const value = settings[key] ?? schema?.default;
 
 			if (flags.json) {
-				console.log(JSON.stringify({ [key]: value }));
+				writeStdout(JSON.stringify({ [key]: value }));
 			} else {
 				const displayValue = schema?.secret && value ? "********" : String(value ?? "(not set)");
-				console.log(displayValue);
+				writeStdout(displayValue);
 			}
 			break;
 		}
@@ -770,7 +771,7 @@ async function handleConfig(
 			}
 
 			await manager.setPluginSetting(pluginName, key, value);
-			console.log(chalk.green(`${theme.status.success} Set ${key}`));
+			writeStdout(chalk.green(`${theme.status.success} Set ${key}`));
 			break;
 		}
 
@@ -781,7 +782,7 @@ async function handleConfig(
 			}
 
 			await manager.deletePluginSetting(pluginName, key);
-			console.log(chalk.green(`${theme.status.success} Deleted ${key}`));
+			writeStdout(chalk.green(`${theme.status.success} Deleted ${key}`));
 			break;
 		}
 
@@ -812,15 +813,15 @@ async function handleConfigValidate(manager: PluginManager, flags: { json?: bool
 	}
 
 	if (flags.json) {
-		console.log(JSON.stringify({ valid: results.length === 0, errors: results }, null, 2));
+		writeStdout(JSON.stringify({ valid: results.length === 0, errors: results }, null, 2));
 		return;
 	}
 
 	if (results.length === 0) {
-		console.log(chalk.green(`${theme.status.success} All settings valid`));
+		writeStdout(chalk.green(`${theme.status.success} All settings valid`));
 	} else {
 		for (const { plugin, key, error } of results) {
-			console.log(chalk.red(`${theme.status.error} ${plugin}.${key}: ${error}`));
+			writeStdout(chalk.red(`${theme.status.error} ${plugin}.${key}: ${error}`));
 		}
 		process.exit(1);
 	}
@@ -865,9 +866,9 @@ async function handleSetEnabled(
 			try {
 				await mktMgr.setPluginEnabled(name, enabled, flags.scope);
 				if (flags.json) {
-					console.log(JSON.stringify({ [jsonKey]: name }));
+					writeStdout(JSON.stringify({ [jsonKey]: name }));
 				} else {
-					console.log(chalk.green(`${theme.status.success} ${pastTense} ${name}`));
+					writeStdout(chalk.green(`${theme.status.success} ${pastTense} ${name}`));
 				}
 			} catch (err) {
 				console.error(chalk.red(`${theme.status.error} Failed to ${action} ${name}: ${err}`));
@@ -879,9 +880,9 @@ async function handleSetEnabled(
 		try {
 			await manager.setEnabled(name, enabled);
 			if (flags.json) {
-				console.log(JSON.stringify({ [jsonKey]: name }));
+				writeStdout(JSON.stringify({ [jsonKey]: name }));
 			} else {
-				console.log(chalk.green(`${theme.status.success} ${pastTense} ${name}`));
+				writeStdout(chalk.green(`${theme.status.success} ${pastTense} ${name}`));
 			}
 		} catch (err) {
 			console.error(chalk.red(`${theme.status.error} Failed to ${action} ${name}: ${err}`));

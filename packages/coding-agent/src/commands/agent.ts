@@ -12,7 +12,7 @@
  */
 
 import * as path from "node:path";
-import { Args, Command, Flags, renderCommandHelp } from "@cornfield/utils/cli";
+import { Args, Command, Flags, renderCommandHelp, writeStdout } from "@cornfield/utils/cli";
 import {
 	renderList,
 	renderReconcile,
@@ -143,21 +143,21 @@ export default class Agent extends Command {
 					json: flags.json as boolean | undefined,
 				});
 				if (flags.json) {
-					console.log(JSON.stringify(result, null, 2));
+					writeStdout(JSON.stringify(result, null, 2));
 					return;
 				}
-				console.log(
+				writeStdout(
 					result.created
 						? `✓ Created agentDir at ${result.agentDir}`
 						: `✓ AgentDir exists at ${result.agentDir} (additive update — existing files preserved)`,
 				);
-				if (result.created) console.log(`  ${result.filesWritten} content files written`);
-				console.log(`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`omp agent show ${name}\``);
+				if (result.created) writeStdout(`  ${result.filesWritten} content files written`);
+				writeStdout(`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`omp agent show ${name}\``);
 				return;
 			}
 			case "list": {
 				const summaries = await runAgentList({ dir: dirResolved, json: flags.json as boolean | undefined });
-				console.log(renderList(summaries, Boolean(flags.json)));
+				writeStdout(renderList(summaries, Boolean(flags.json)));
 				return;
 			}
 			case "show": {
@@ -171,7 +171,7 @@ export default class Agent extends Command {
 					dir: dirResolved,
 					json: flags.json as boolean | undefined,
 				});
-				console.log(renderShow(detail, Boolean(flags.json)));
+				writeStdout(renderShow(detail, Boolean(flags.json)));
 				return;
 			}
 			case "validate": {
@@ -186,7 +186,7 @@ export default class Agent extends Command {
 					fix: flags.fix as boolean | undefined,
 					semantic: flags.semantic as boolean | undefined,
 				});
-				console.log(renderValidate(result, Boolean(flags.json)));
+				writeStdout(renderValidate(result, Boolean(flags.json)));
 				process.exitCode = result.valid ? 0 : 1;
 				return;
 			}
@@ -199,7 +199,7 @@ export default class Agent extends Command {
 					return;
 				}
 				const result = await runAgentRegister({ name, dir: dirResolved, json: flags.json as boolean | undefined });
-				console.log(renderRegister(result, Boolean(flags.json)));
+				writeStdout(renderRegister(result, Boolean(flags.json)));
 				process.exitCode = result.registered ? 0 : 1;
 				return;
 			}
@@ -214,12 +214,12 @@ export default class Agent extends Command {
 					deleteFiles: flags.deleteFiles as boolean | undefined,
 					json: flags.json as boolean | undefined,
 				});
-				console.log(renderUnregister(result, Boolean(flags.json)));
+				writeStdout(renderUnregister(result, Boolean(flags.json)));
 				return;
 			}
 			case "reconcile": {
 				const result = await runAgentReconcile({ json: flags.json as boolean | undefined });
-				console.log(renderReconcile(result, Boolean(flags.json)));
+				writeStdout(renderReconcile(result, Boolean(flags.json)));
 				return;
 			}
 			default:
