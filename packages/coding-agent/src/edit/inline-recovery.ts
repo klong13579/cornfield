@@ -2,15 +2,18 @@
  * Recovery for sloppy edit payloads the model emits as plain assistant text
  * instead of an `edit` tool call.
  *
- * Registered as the agent loop's `transformAssistantMessage` hook: the finalized
- * assistant message is rewritten in place before the loop reads its tool calls
- * and before it reaches the event stream, the session log or the next provider
- * request. The payload is lifted out of the text block and re-materialized as a
- * synthetic `edit` tool call, so the normal pipeline — argument validation,
- * approval, plan-mode guards, execution, rendering, journaling, provider replay —
- * runs it unchanged.
+ * Registered as the agent loop's `transformAssistantMessage` hook. The loop calls
+ * that hook on the finalized assistant message *before* it publishes it as
+ * `message_start`/`message_end`, so the rewritten message — payload lifted out of
+ * the text, one synthetic `edit` call appended in its place — is what the event
+ * subscribers see (including the session's own log: `message_end` is what
+ * AgentSession persists), what the tool dispatcher reads, and what the next
+ * provider request replays. Streaming deltas reach subscribers before the rewrite,
+ * never containing a tool call; the finalized event after it always does.
  *
- * This is a different layer from post-write validation/auto-repair
+ * The call therefore goes through the normal pipeline — argument validation,
+ * approval, plan-mode guards, execution, rendering, journaling, provider replay —
+ * unchanged. This is a different layer from post-write validation/auto-repair
  * (`./post-write`): recovery happens before execution, repair after it.
  */
 

@@ -658,8 +658,9 @@ export class AgentSession {
 		this.#unsubscribeAgent = this.agent.subscribe(this.#handleAgentEvent);
 
 		// A sloppy edit payload the model wrote as prose is rewritten into a real edit
-		// tool call by the loop, before it reads this turn's tool calls — so the call is
-		// dispatched, rendered and journalled like any other, through the normal pipeline.
+		// tool call by the loop, before the finalized message is published — so the turn
+		// dispatches, renders and journals that call like any other, and the message the
+		// session log stores is the same one the dispatcher ran.
 		this.agent.setTransformAssistantMessage(message => {
 			const recovered = recoverInlineSloppyEditFromTools(this.agent.state.tools, message);
 			if (recovered > 0) {

@@ -277,19 +277,6 @@ async function runLoop(
 				return;
 			}
 
-			// Let the caller rewrite the finalized assistant message before the loop
-			// decides what to dispatch. Best-effort: the hook is an enhancement, so a
-			// failure is logged and the turn continues with whatever it left behind.
-			if (config.transformAssistantMessage) {
-				try {
-					await config.transformAssistantMessage(message);
-				} catch (err) {
-					logger.warn("transformAssistantMessage hook failed", {
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
-			}
-
 			// Check for tool calls
 			const toolCalls = message.content.filter(c => c.type === "toolCall");
 			hasMoreToolCalls = toolCalls.length > 0;
@@ -582,6 +569,24 @@ async function streamAttempt(
 				const completedMessage = isIncompleteAssistantTurn(finalMessage)
 					? { ...finalMessage, errorMessage: "Incomplete assistant turn: no visible text or tool call" }
 					: finalMessage;
+				// Let the caller rewrite the finalized message before anything observes it.
+				// This has to happen before the pushes below: `message_end` is what
+				// subscribers persist, and a rewrite that lands after it would leave the
+				// session log holding the pre-rewrite message while the turn's tool calls
+				// (and their results) are written as usual.
+				// Best-effort: the hook is an enhancement, so a failure is logged and the
+				// turn continues with whatever it left behind. Failed messages (an error, an
+				// abort or a discarded attempt — all carry an `errorMessage`) are never
+				// handed to the hook.
+				if (config.transformAssistantMessage && !completedMessage.errorMessage) {
+					try {
+						await config.transformAssistantMessage(completedMessage);
+					} catch (err) {
+						logger.warn("transformAssistantMessage hook failed", {
+							error: err instanceof Error ? err.message : String(err),
+						});
+					}
+				}
 				if (addedPartial) {
 					context.messages[context.messages.length - 1] = completedMessage;
 				} else {

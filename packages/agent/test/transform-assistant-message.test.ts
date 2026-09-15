@@ -73,6 +73,9 @@ function scriptedStreamFn(first: () => AssistantMessage): () => AssistantMessage
 async function runLoop(
 	config: Partial<AgentLoopConfig>,
 	tools: AgentTool<any>[] = [],
+	streamFn: () => AssistantMessageEventStream = scriptedStreamFn(() =>
+		createAssistantMessage([{ type: "text", text: "no tool call" }]),
+	),
 ): Promise<{ events: AgentEvent[]; messages: AgentMessage[] }> {
 	const context: AgentContext = { systemPrompt: "", messages: [], tools };
 	const stream = agentLoop(
@@ -80,7 +83,7 @@ async function runLoop(
 		context,
 		{ model: createModel(), convertToLlm: identityConverter, ...config } as AgentLoopConfig,
 		undefined,
-		scriptedStreamFn(() => createAssistantMessage([{ type: "text", text: "no tool call" }])),
+		streamFn,
 	);
 
 	const events: AgentEvent[] = [];
@@ -171,6 +174,38 @@ describe("transformAssistantMessage", () => {
 		// One assistant message in the run, so exactly one hook call.
 		expect(messages.filter(message => message.role === "assistant")).toHaveLength(1);
 		expect(calls).toBe(1);
+	});
+
+	it("skips a discarded attempt and runs once on the message the loop keeps", async () => {
+		const seen: string[] = [];
+		let callIndex = 0;
+
+		const { messages } = await runLoop(
+			{
+				transformAssistantMessage: message => {
+					seen.push(message.content.map(block => block.type).join(",") || "(empty)");
+				},
+			},
+			[],
+			() => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					// Attempt 0 is a progressless turn (thinking only): the loop discards it
+					// and retries, so the hook must never see it.
+					const message =
+						callIndex === 0
+							? createAssistantMessage([{ type: "thinking", thinking: "quiet" }])
+							: createAssistantMessage([{ type: "text", text: "done" }]);
+					callIndex += 1;
+					stream.push({ type: "done", reason: "stop", message });
+				});
+				return stream;
+			},
+		);
+
+		expect(seen).toEqual(["text"]);
+		expect(callIndex).toBe(2);
+		expect(messages.filter(message => message.role === "assistant")).toHaveLength(1);
 	});
 
 	it("does not run for an errored message", async () => {
