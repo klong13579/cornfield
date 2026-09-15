@@ -148,6 +148,18 @@ describe("expandSkillUrls", () => {
 		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
 		expect(() => expandSkillUrls("cat skill://valid-skill/%2E%2E/%2E%2E/etc/passwd", skills)).toThrow(ToolError);
 	});
+
+	it("names the offending token when resolution fails", () => {
+		// 为什么要有 token：bash tool 在 shell 执行前替换命令里的每一处内部 URI（引号内也替换），
+		// 所以失败可能来自命令中与本次操作无关的一段文本 —— 2026-09-15：commit message 里的字面
+		// skill:// 路径触发了 traversal 报错，而旧错误文本里没有任何指向它的信息。
+		const skills = [createSkill("valid-skill", "/tmp/skills/valid-skill")];
+
+		expect(() => expandSkillUrls("cat skill://valid-skill/../../../etc/passwd", skills)).toThrow(
+			/token: skill:\/\/valid-skill\/\.\.\/\.\.\/\.\.\/etc\/passwd/,
+		);
+		expect(() => expandSkillUrls("cat skill://missing/run.py", skills)).toThrow(/token: skill:\/\/missing\/run\.py/);
+	});
 });
 
 describe("expandInternalUrls", () => {

@@ -31,6 +31,19 @@ export interface InternalUrlExpansionOptions {
 }
 
 /**
+ * Add the offending token to a skill:// resolution failure.
+ *
+ * The bash tool rewrites every internal URI in a command string before the shell runs
+ * it — including URIs inside quotes, and text that only looks like a URI. Without the
+ * token the caller cannot tell which part of a long command failed (2026-09-15: a commit
+ * message carrying a literal skill:// path failed with a bare traversal error and no
+ * pointer to the offending text).
+ */
+function withToken(message: string, url: string): string {
+	return `${message}\n  token: ${url}\n  note: bash commands auto-resolve internal URIs; write the literal differently`;
+}
+
+/**
  * Resolve a single skill:// URL to its absolute filesystem path.
  * Does NOT read file content or verify existence.
  */
@@ -58,7 +71,7 @@ export function resolveSkillUrlToPath(url: string, skills: readonly Skill[]): st
 	if (!skill) {
 		const available = skills.map(s => s.name);
 		const availableStr = available.length > 0 ? available.join(", ") : "none";
-		throw new ToolError(`Unknown skill: ${rawSkillSegment}. Available: ${availableStr}`);
+		throw new ToolError(withToken(`Unknown skill: ${rawSkillSegment}. Available: ${availableStr}`, url));
 	}
 
 	// Combine any colon suffix (line range like ":1-5") with the path segment
@@ -79,14 +92,14 @@ export function resolveSkillUrlToPath(url: string, skills: readonly Skill[]): st
 		validateRelativePath(relativePath);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		throw new ToolError(message);
+		throw new ToolError(withToken(message, url));
 	}
 
 	const targetPath = path.join(skill.baseDir, relativePath);
 	const resolvedPath = path.resolve(targetPath);
 	const resolvedBaseDir = path.resolve(skill.baseDir);
 	if (!resolvedPath.startsWith(resolvedBaseDir + path.sep) && resolvedPath !== resolvedBaseDir) {
-		throw new ToolError("Path traversal is not allowed in skill:// URLs");
+		throw new ToolError(withToken("Path traversal is not allowed in skill:// URLs", url));
 	}
 
 	return resolvedPath;
