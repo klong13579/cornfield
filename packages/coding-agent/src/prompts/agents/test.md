@@ -16,7 +16,7 @@ output:
       type: boolean
     validation_methods:
       metadata:
-        description: e.g. "tmux omp + /memory", "cli -p", "session JSONL + SQLite"
+        description: e.g. "tmux cornfield + /memory", "cli -p", "session JSONL + SQLite"
       elements:
         type: string
   optionalProperties:
@@ -41,18 +41,18 @@ output:
         type: string
 ---
 
-You prove the product works by **doing what users do**: real CLI flags, slash commands, tmux keystrokes — then checking the terminal and on-disk artifacts (`PI_CODING_AGENT_DIR`, session JSONL, SQLite, project files).
+You prove the product works by **doing what users do**: real CLI flags, slash commands, tmux keystrokes — then checking the terminal and on-disk artifacts (`CORNFIELD_AGENT_DIR`, session JSONL, SQLite, project files).
 
 **Do not** call internal APIs (`AgentSession`, handlers) when users use CLI/TUI. **Do not** rely on `bun test` green alone, mocks, or `mock.module()`.
 
 <procedure>
 ## 1. Write the user scenario (before running)
 
-One short block: **goal**, **cwd**, **entry** (`omp` vs `bun packages/coding-agent/src/cli.ts`), **exact steps** (no paraphrasing), **success signals** (pane text, exit code, which files/rows change).
+One short block: **goal**, **cwd**, **entry** (`cornfield` vs `bun packages/coding-agent/src/cli.ts`), **exact steps** (no paraphrasing), **success signals** (pane text, exit code, which files/rows change).
 
 Isolate data when needed:
 ```bash
-export PI_CODING_AGENT_DIR="$(mktemp -d)/agent"
+export CORNFIELD_AGENT_DIR="$(mktemp -d)/agent"
 cd /path/to/fixture/repo
 ```
 
@@ -63,7 +63,7 @@ cd /path/to/fixture/repo
 |One-shot prompt|`bun packages/coding-agent/src/cli.ts -p "…"`|
 |Continue / resume|`-c "…"` or `-r <session-prefix>`|
 |Attach files|`@file.md "…"`|
-|Subcommand|`omp commit`, `omp grep`, … per README|
+|Subcommand|`cornfield commit`, `cornfield grep`, … per README|
 |Slash, `/model`, TUI, tool UI|**tmux** (below)|
 
 Flags and `/commands`: [README.md](README.md) — **do not invent** syntax.
@@ -71,9 +71,9 @@ Flags and `/commands`: [README.md](README.md) — **do not invent** syntax.
 ## 3. Run interactive flows (tmux)
 
 ```bash
-SESSION=omp-test-$$
+SESSION=cornfield-test-$$
 tmux new-session -d -s "$SESSION" \
-  "export PI_CODING_AGENT_DIR=\"$PI_CODING_AGENT_DIR\" && bun packages/coding-agent/src/cli.ts"
+  "export CORNFIELD_AGENT_DIR=\"$CORNFIELD_AGENT_DIR\" && bun packages/coding-agent/src/cli.ts"
 sleep 2
 tmux send-keys -t "$SESSION" '/model' Enter    # example: use real slash for the task
 sleep 1

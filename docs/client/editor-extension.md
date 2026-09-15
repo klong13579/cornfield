@@ -142,8 +142,8 @@
 | Tool | 文件 | name | 形态 | 前端直调？ |
 |---|---|---|---|---|
 | read | `tools/read.ts` | `ReadTool` | TSchema `path/sel/timeout`；流式读 + 行号/hashline + archive/sqlite 透明 + URL 抓取 + 图像识别；LSP writethrough | ⚠ 不直接；通过 `session` + `dispatch`（前端的 `get_snapshot` 拿了 agent tool register 表），wire 没暴露「调用 read tool」 |
-| write | `tools/write.ts` | `WriteTool` | TSchema `path/content`；Bun.write；archive/sqlite 适配；LSP writethrough；plan-mode guard；hashline strip | ⚠ 不直接；wire 已能 `fs_read`/`fs_read_image`，**`fs_write` 还没有 wire 命令** |
-| edit | `edit/index.ts` | `EditTool` | 多模：replace/patch/apply_patch/hashline/atom/vim；LSP writethrough + 模糊匹配；并发 exclusive + nonAbortable | ⚠ 不直接；同上 `fs_write` 缺 |
+| write | `tools/write.ts` | `WriteTool` | TSchema `path/content`；Bun.write；archive/sqlite 适配；LSP writethrough；plan-mode guard；hashline strip | ✅ wire `fs_write`（票 01 落地；路径约束与 read 侧同一份 sandbox） |
+| edit | `edit/index.ts` | `EditTool` | 多模：replace/patch/apply_patch/hashline/atom/vim/sloppy；LSP writethrough + 模糊匹配；并发 exclusive + nonAbortable | ✅ wire `fs_edit`（支持 replace/patch/hashline/atom；其余模式包括 `sloppy` 显式报 `not supported over wire`，不是静默降级）；diff 由 `fs_diff` 出 |
 | find | `tools/find.ts` | `FindTool` | TSchema + 后端走 `natives.glob/fs_cache` | ⚠ 不直接；`fs_list` wire 提供更通用的 workspace 树，不绑定 cwd |
 | search | `tools/search.ts` | `SearchTool` | ripgrep 包装（`grep.rs`） | ⚠ 不直接 |
 | ast-grep | `tools/ast-grep.ts` | `AstGrepTool` | `natives.astGrep(options)` | ⚠ 不直接 |
@@ -155,11 +155,13 @@
 | git | `commit/agentic/tools/*` + `autoresearch/git.ts` + `modes/components/status-line/git-utils.ts` | 多个内部 helper | status/diff/overview/file-diff/hunk — 全部给 TUI/agent 用 | ⚠ 不直接 |
 | 其它 | ask/calculator/checkpoint/debug/identity/inspect_image/job/list_models/notebook/python/recipe/render_mermaid/report_tool_issue/resolve/review/search-tool-bm25/ssh/switch_model/task/todo/vim/web_search/yield/image-gen/... | 见 `tools/index.ts:84-115` | 28 个 tool + 5 个 hidden | ⚠ 不直接 |
 
-> ⚠ 工具层覆盖度的关键结论：**所有工具都是「给 Agent 调」，不是「给前端调」**。前端能「读」+「读图」（wire `fs_read`/`fs_read_image`），但**写/编辑/diff/git/IDE bash 调用都没有 wire 命令面**——这是编辑器扩展第一道缺口。
+> ⚠ 工具层覆盖度的关键结论：**工具层仍以「给 Agent 调」为主，但命令面已在逐步前移到前端**。前端已拿到：读/读图（`fs_read`/`fs_read_image`）、写/编辑/diff（`fs_write`/`fs_edit`/`fs_diff`）、git 最小集（`git_status`/`git_diff`/`git_log`/`git_show`/`git_branches`）与 `bash`/`execute_python`；仍缺的是「把任意 tool 当命令面暴露」（`read`/`grep`/`lsp` 等仍为 Agent 专用，见上表）与 IDE 侧深集成（切面见 1.4）。
 
 ### 1.4 编辑器扩展需要补的（✗ / ⚠ 项）
 
-#### ✗ 必须新建的（前端 → wire / Agent 均要）
+#### ✓ 原列为必须新建，自 2026-09 起均已落地（票 01/02）
+
+> 以下四项现均已有 wire 命令面（实现见 `packages/coding-agent/src/server/wire-server.ts` 的 `fs_write`/`fs_edit`/`fs_diff` 与 git 最小集）：`fs_write`/`fs_edit`/`fs_diff`/`git_status`/`git_diff`/`git_log`/`git_show`/`git_branches`。原文保留作历史记录（“现在没有”的说法指当时）；仍未覆盖的部分见下一节。
 
 1. **`fs_write` wire 命令**：现在 wire 有 `fs_list/fs_read/fs_read_image` 三个文件读取，没有写。
    需要：`{ type: "fs_write", sessionId?, path, content }` + 路径越界检查与 write/read 一致（agentDir sandbox）。
