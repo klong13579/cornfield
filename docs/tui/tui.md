@@ -65,6 +65,38 @@ render(width: number): string[] {
 }
 ```
 
+## Renderer tests and the render baseline
+
+Renderer tests (most live in `packages/coding-agent/test/tools/*-renderer.test.ts`) render a component to text and assert on that text. They share one helper: `packages/coding-agent/test/helpers/render-assert.ts`.
+
+### Contract
+
+```ts
+const surface = await createRenderSurface({ theme: "dark", width: 80 });
+
+surface.theme; // Theme — pass it to renderCall / renderResult
+surface.text(component); // render at `width`, strip ANSI + control chars → string
+surface.lines(component); // render at `width` → raw lines, ANSI intact
+surface.expectStable(() => renderer.renderResult(result, options, surface.theme)); // fresh instance per render
+surface.expectWithinWidth(component); // assert every line fits `width` visible columns
+```
+
+The rules the helper exists to enforce, and why:
+
+1. **Assertions run on stripped text, never on raw bytes.** Escape sequences encode the theme's color mode, which `detectColorMode()` derives from `COLORTERM` / `TERM`; an unstripped expectation changes between a developer's terminal and CI while the visible text does not. `sanitizeText` also drops control characters and normalizes CR — the same normalization the render paths apply.
+2. **A render expectation is a function of (input, options, theme, width).** Four inputs, all pinned by the surface. `expectStable()` takes a factory rather than a component so each render builds a fresh instance; re-rendering one instance only proves the component is not stateful across `render()`.
+3. **Theme injection is global as well as explicit.** `createRenderSurface()` installs the loaded theme with `setThemeInstance(...)`, because renderers reach past their `theme` parameter for module globals — `getMarkdownTheme()`, `Text`, and the components that import `theme` directly. This is the same wiring `InteractiveMode` performs at boot; a test that only passes the theme argument exercises a wiring production does not have.
+4. **Width is part of the input.** `expectWithinWidth()` is opt-in because a test may legitimately render overwide content (image/Sixel paths); renderers that produce ordinary text should assert it.
+
+### Updating a baseline
+
+- A renderer change that alters visible text *is* a baseline change: update the expectation in the same commit and name the renderer and width that moved.
+- Do not weaken an assertion to make a renderer pass — no shortened `toContain` prefix, no deleted `not.toContain`, no dropped width check. Wrong output is a renderer bug; fix the renderer.
+- Do not record output containing escape sequences: strip first (rule 1), so the expectation stays portable across terminals and CI.
+- Adding a width means adding a case (`createRenderSurface({ width })`), not narrowing or deleting the existing one — a regression at the original width must stay visible.
+
+Renderers on the baseline today: `test/tools/python-renderer.test.ts`. New renderer tests start here; existing ones move over as they are touched.
+
 ## Input handling and keybindings
 
 ### Raw key matching
@@ -481,3 +513,4 @@ The runtime therefore mixes event-driven state transitions with bounded render c
 - `packages/coding-agent/src/extensibility/custom-tools/types.ts` — custom tool execute/render contracts.
 - `packages/coding-agent/src/modes/components/tool-execution.ts` — mounting `renderCall`/`renderResult` components and partial-state options.
 - `packages/coding-agent/src/tools/context.ts` — tool UI context propagation (`hasUI`, `ui`).
+- `packages/coding-agent/test/helpers/render-assert.ts` — shared render surface: theme + width injection, ANSI stripping, stability and width assertions for renderer tests.
