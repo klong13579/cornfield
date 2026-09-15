@@ -460,7 +460,7 @@ Custom broker commands are trusted local configuration: anyone who can edit this
 
 Pi-intercom publishes live session status automatically. Sessions register as `idle`, switch to `thinking` while the agent is running, show `tool:<name>` during tool execution, and return to `idle` on agent completion. If `status` is set in config, it is appended as context instead of replacing the lifecycle status.
 
-By default, runtime state and config live under `~/.pi/agent/intercom`. If Pi is launched with `PI_CODING_AGENT_DIR`, pi-intercom uses `$PI_CODING_AGENT_DIR/intercom` instead, including `config.json`, broker PID/lock files, sockets, and launcher state.
+By default, runtime state and config live under `~/.cornfield/agent/intercom`. If CornField is launched with `CORNFIELD_AGENT_DIR`, pi-intercom uses `$CORNFIELD_AGENT_DIR/intercom` instead, including `config.json`, broker PID/lock files, sockets, and launcher state.
 
 ## Extension channels
 
@@ -535,7 +535,7 @@ Session IDs are the trusted addressing key. Duplicate names remain allowed for s
 
 Async extension work (startup, inbound flushes, reconnects, overlays, and relays) no-ops if the session shuts down or reloads before it settles.
 
-Runtime files live at `~/.pi/agent/intercom/` by default, or `$PI_CODING_AGENT_DIR/intercom/` when `PI_CODING_AGENT_DIR` is set:
+Runtime files live at `~/.cornfield/agent/intercom/` by default, or `$CORNFIELD_AGENT_DIR/intercom/` when `CORNFIELD_AGENT_DIR` is set:
 - `broker.sock` — Unix domain socket for communication (macOS/Linux only; Windows uses a named pipe instead)
 - `broker-launch.vbs` — Windows helper script used to launch the broker without a console window
 - `broker.pid` — Broker process ID
