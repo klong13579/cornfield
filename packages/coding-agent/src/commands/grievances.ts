@@ -76,7 +76,7 @@ export default class Grievances extends Command {
 					});
 			}
 		} catch (error) {
-			console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+			process.stderr.write(`error: ${error instanceof Error ? error.message : String(error)}\n`);
 			process.exitCode = 1;
 		}
 	}

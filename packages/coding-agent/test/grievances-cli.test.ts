@@ -88,18 +88,20 @@ function readAll(): Array<{ id: number; tool: string; exported: number }> {
 
 async function capture(run: () => Promise<void>): Promise<string[]> {
 	// `spyOn` returns the already-installed spy on a second call, so clear the
-	// accumulated calls instead of pretending each capture starts empty. The
-	// digest streams through `process.stdout.write`, the status lines through
-	// `console.log` — both belong to the command's output.
-	const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-	logSpy.mockClear();
+	// accumulated calls instead of pretending each capture starts empty. The whole
+	// command writes through `process.stdout.write` — a single `console.log`
+	// payload above the pipe buffer is truncated, so there is one writer now.
 	const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 	writeSpy.mockClear();
 	await run();
-	return [
-		...logSpy.mock.calls.map(call => String(call[0] ?? "")),
-		...writeSpy.mock.calls.map(call => String(call[0] ?? "")),
-	].map(line => Bun.stripANSI(line));
+	const lines: string[] = [];
+	for (const call of writeSpy.mock.calls) {
+		const parts = Bun.stripANSI(String(call[0] ?? "")).split("\n");
+		// A trailing newline ends a line, it does not open an empty one.
+		if (parts[parts.length - 1] === "") parts.pop();
+		lines.push(...parts);
+	}
+	return lines;
 }
 
 describe("parseSinceCutoff", () => {

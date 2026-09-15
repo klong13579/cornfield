@@ -11,6 +11,20 @@ import type { Database } from "bun:sqlite";
 import chalk from "chalk";
 import { closeAutoQaDb, openAutoQaDb, openAutoQaDbReadonly } from "../tools/report-tool-issue";
 
+/**
+ * Write one line (or one payload) of command output.
+ *
+ * Deliberately not `console.log`: with winston loaded — it is, wherever the
+ * logger is imported — a single `console.log` larger than the pipe buffer is
+ * cut at 64 KiB when stdout is a pipe, and the tail is lost before the process
+ * exits. Measured on this command: `-n 500 -j | wc -c` returned 65536 bytes of
+ * the 174467 the same run writes to a file. `process.stdout.write` delivers the
+ * whole payload, so every line this command prints goes through here.
+ */
+function writeStdout(text: string): void {
+	process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+}
+
 interface GrievanceRow {
 	id: number;
 	model: string;
@@ -189,9 +203,9 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 	const db = openAutoQaDbReadonly();
 	if (!db) {
 		if (options.json) {
-			console.log("[]");
+			writeStdout("[]");
 		} else {
-			console.log(chalk.dim(MISSING_DB_MESSAGE));
+			writeStdout(chalk.dim(MISSING_DB_MESSAGE));
 		}
 		return;
 	}
@@ -220,7 +234,7 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 		const untimedCount = cutoff !== null ? countUntimed(db, hasTimestamps) : 0;
 
 		if (options.json) {
-			console.log(JSON.stringify(rows, null, 2));
+			writeStdout(JSON.stringify(rows, null, 2));
 			return;
 		}
 
@@ -228,15 +242,15 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 			const rangeLabel =
 				cutoff === null ? "all reports" : `since ${new Date(cutoff).toISOString()} (--since ${options.since})`;
 			// The listing is newest-first (a feed); a digest reads oldest-first (a story).
-			console.log(renderGrievancesMarkdown({ rows: [...rows].reverse(), rangeLabel, untimedCount }));
+			writeStdout(renderGrievancesMarkdown({ rows: [...rows].reverse(), rangeLabel, untimedCount }));
 			return;
 		}
 
 		if (rows.length === 0) {
 			// An empty window is not the same statement as an empty database.
-			console.log(chalk.dim(cutoff === null ? "No grievances recorded yet." : "No reports in that window."));
+			writeStdout(chalk.dim(cutoff === null ? "No grievances recorded yet." : "No reports in that window."));
 			if (untimedCount > 0) {
-				console.log(chalk.dim(`${untimedCount} record(s) have no timestamp and were excluded.`));
+				writeStdout(chalk.dim(`${untimedCount} record(s) have no timestamp and were excluded.`));
 			}
 			return;
 		}
@@ -245,14 +259,14 @@ export async function listGrievances(options: ListGrievancesOptions): Promise<vo
 			const meta = [row.model, `v${row.version}`, timestamp(row.createdAt), row.sessionId ?? "unknown session"].join(
 				" · ",
 			);
-			console.log(`${chalk.dim(`#${row.id}`)} ${chalk.cyan(row.tool)} ${chalk.dim(`(${meta})`)}`);
-			console.log(`  ${row.report}`);
-			console.log();
+			writeStdout(`${chalk.dim(`#${row.id}`)} ${chalk.cyan(row.tool)} ${chalk.dim(`(${meta})`)}`);
+			writeStdout(`  ${row.report}`);
+			writeStdout("");
 		}
 
-		console.log(chalk.dim(`Showing ${rows.length} most recent${options.tool ? ` for ${options.tool}` : ""}`));
+		writeStdout(chalk.dim(`Showing ${rows.length} most recent${options.tool ? ` for ${options.tool}` : ""}`));
 		if (untimedCount > 0) {
-			console.log(chalk.dim(`${untimedCount} record(s) have no timestamp and were excluded.`));
+			writeStdout(chalk.dim(`${untimedCount} record(s) have no timestamp and were excluded.`));
 		}
 	} finally {
 		db.close();
@@ -274,9 +288,9 @@ export async function cleanGrievances(options: CleanGrievancesOptions): Promise<
 	const db = openDbForWrite();
 	if (!db) {
 		if (options.json) {
-			console.log(JSON.stringify({ deleted: 0, reason: "no-database" }));
+			writeStdout(JSON.stringify({ deleted: 0, reason: "no-database" }));
 		} else {
-			console.log(chalk.dim(MISSING_DB_MESSAGE));
+			writeStdout(chalk.dim(MISSING_DB_MESSAGE));
 		}
 		return;
 	}
@@ -301,14 +315,14 @@ export async function cleanGrievances(options: CleanGrievancesOptions): Promise<
 		const scope =
 			options.id !== undefined ? `#${options.id}` : options.tool ? `for ${options.tool}` : "(all entries)";
 		if (options.json) {
-			console.log(JSON.stringify({ deleted, scope }));
+			writeStdout(JSON.stringify({ deleted, scope }));
 			return;
 		}
 		if (deleted === 0) {
-			console.log(chalk.dim(`No matching grievances to delete ${scope}.`));
+			writeStdout(chalk.dim(`No matching grievances to delete ${scope}.`));
 			return;
 		}
-		console.log(chalk.green(`Deleted ${deleted} grievance${deleted === 1 ? "" : "s"} ${scope}.`));
+		writeStdout(chalk.green(`Deleted ${deleted} grievance${deleted === 1 ? "" : "s"} ${scope}.`));
 	} finally {
 		closeAutoQaDb();
 	}
@@ -331,9 +345,9 @@ export async function exportGrievances(options: ExportGrievancesOptions): Promis
 	const db = openDbForWrite();
 	if (!db) {
 		if (options.json) {
-			console.log(JSON.stringify({ exported: 0, out: null, reason: "no-database" }));
+			writeStdout(JSON.stringify({ exported: 0, out: null, reason: "no-database" }));
 		} else {
-			console.log(chalk.dim(MISSING_DB_MESSAGE));
+			writeStdout(chalk.dim(MISSING_DB_MESSAGE));
 		}
 		return;
 	}
@@ -365,11 +379,11 @@ export async function exportGrievances(options: ExportGrievancesOptions): Promis
 
 		if (rows.length === 0) {
 			if (options.json) {
-				console.log(JSON.stringify({ exported: 0, out: options.out ?? null, excludedUntimed: untimedCount }));
+				writeStdout(JSON.stringify({ exported: 0, out: options.out ?? null, excludedUntimed: untimedCount }));
 			} else {
-				console.log(chalk.dim("No new reports to export."));
+				writeStdout(chalk.dim("No new reports to export."));
 				if (untimedCount > 0) {
-					console.log(chalk.dim(`${untimedCount} report(s) have no timestamp and are excluded by --since.`));
+					writeStdout(chalk.dim(`${untimedCount} report(s) have no timestamp and are excluded by --since.`));
 				}
 			}
 			return;
@@ -383,18 +397,18 @@ export async function exportGrievances(options: ExportGrievancesOptions): Promis
 			// rows are marked: a failed export must stay queued.
 			await Bun.write(options.out, digest);
 		} else {
-			process.stdout.write(digest);
+			writeStdout(digest);
 		}
 
 		const ids = rows.map(row => row.id);
 		db.prepare(`UPDATE grievances SET exported = 1 WHERE id IN (${ids.map(() => "?").join(",")})`).run(...ids);
 
 		if (options.json) {
-			console.log(JSON.stringify({ exported: rows.length, out: options.out ?? null, ids }));
+			writeStdout(JSON.stringify({ exported: rows.length, out: options.out ?? null, ids }));
 			return;
 		}
 		const destination = options.out ? options.out : "stdout";
-		console.log(chalk.green(`Exported ${rows.length} report(s) to ${destination}.`));
+		writeStdout(chalk.green(`Exported ${rows.length} report(s) to ${destination}.`));
 	} finally {
 		closeAutoQaDb();
 	}
