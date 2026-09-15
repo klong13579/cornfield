@@ -1,13 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
 import { pythonToolRenderer } from "@cornfield/coding-agent/tools/python";
-import { sanitizeText } from "@cornfield/natives";
+import { createRenderSurface } from "../helpers/render-assert";
 
 describe("pythonToolRenderer", () => {
 	it("renders truncated output when collapsed and full output when expanded", async () => {
-		const theme = await getThemeByName("dark");
-		expect(theme).toBeDefined();
-		const uiTheme = theme!;
+		const surface = await createRenderSurface();
 
 		const fullOutput = ["line 1", "line 2", "line 3", "line 4"].join("\n");
 
@@ -27,20 +24,23 @@ describe("pythonToolRenderer", () => {
 			},
 		};
 
-		const collapsed = pythonToolRenderer.renderResult(
-			result,
-			{ expanded: false, isPartial: false, renderContext: { previewLines: 2 } },
-			uiTheme,
+		const collapsedOptions = { expanded: false, isPartial: false, renderContext: { previewLines: 2 } };
+		const collapsed = surface.expectStable(() =>
+			pythonToolRenderer.renderResult(result, collapsedOptions, surface.theme),
 		);
-		const collapsedLines = sanitizeText(collapsed.render(80).join("\n"));
-		expect(collapsedLines).toContain("line 4");
-		expect(collapsedLines).not.toContain("line 1");
-		expect(collapsedLines).toContain("more lines");
+		expect(collapsed).toContain("line 4");
+		expect(collapsed).not.toContain("line 1");
+		expect(collapsed).toContain("more lines");
 
-		const expanded = pythonToolRenderer.renderResult(result, { expanded: true, isPartial: false }, uiTheme);
-		const expandedLines = sanitizeText(expanded.render(80).join("\n"));
-		expect(expandedLines).toContain("line 1");
-		expect(expandedLines).toContain("line 4");
-		expect(expandedLines).not.toContain("more lines");
+		const expandedOptions = { expanded: true, isPartial: false };
+		const expanded = surface.expectStable(() =>
+			pythonToolRenderer.renderResult(result, expandedOptions, surface.theme),
+		);
+		expect(expanded).toContain("line 1");
+		expect(expanded).toContain("line 4");
+		expect(expanded).not.toContain("more lines");
+
+		surface.expectWithinWidth(pythonToolRenderer.renderResult(result, collapsedOptions, surface.theme));
+		surface.expectWithinWidth(pythonToolRenderer.renderResult(result, expandedOptions, surface.theme));
 	});
 });
