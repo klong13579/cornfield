@@ -1671,31 +1671,35 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 	): Promise<DeliveryTarget> {
 		const sessions = await activeClient.listSessions();
 		const currentSessionId = activeClient.sessionId;
-		if (!currentSessionId) {
-			throw new Error("Current session is not registered with intercom.");
-		}
+		if (!currentSessionId) throw new Error("Current session is not registered with intercom.");
 		const currentSession = sessions.find(session => session.id === currentSessionId);
-		if (!currentSession) {
-			throw new Error("Current session is missing from intercom session list.");
-		}
-
+		if (!currentSession) throw new Error("Current session is missing from intercom session list.");
 		const targetCwd =
-			options.cwd && options.cwd !== "." ? resolvePath(currentSession.cwd, options.cwd) : currentSession.cwd;
+			options.to && options.cwd === "." ? currentSession.cwd : resolvePath(currentSession.cwd, options.cwd);
 		const existing = resolveTargetInCwd({
 			sessions,
 			currentSessionId,
 			targetCwd,
 			...(options.to ? { to: options.to } : {}),
 		});
-		if (existing.kind === "found" && existing.session) {
+		if (existing.kind === "found" && existing.session)
 			return { id: existing.session.id, label: options.to || existing.session.name || existing.session.id };
-		}
 		if (!options.openProjectPaneIfMissing) {
+			const elsewhere = options.to
+				? sessions.find(
+						session =>
+							session.id !== currentSessionId &&
+							(session.id === options.to || session.name === options.to) &&
+							session.cwd !== targetCwd,
+					)
+				: undefined;
+			const hint = elsewhere
+				? ` Session "${options.to}" is connected in ${elsewhere.cwd}; remove cwd or use that cwd.`
+				: "";
 			throw new Error(
-				`${existing.reason ?? `No intercom session is connected in ${targetCwd}.`} Pass openProjectPaneIfMissing: true to open a Herdr project pane and start Pi there.`,
+				`${existing.reason ?? `No intercom session is connected in ${targetCwd}.`}${hint} Pass openProjectPaneIfMissing: true to open a Herdr project pane and start Pi there.`,
 			);
 		}
-
 		const beforeSessionIds = new Set(sessions.map(session => session.id));
 		const projectPane = await openProjectPane({
 			cwd: targetCwd,

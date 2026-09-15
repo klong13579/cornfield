@@ -331,7 +331,7 @@ export async function openProjectPane(input: {
 	const paneId = extractPaneId(split.data);
 	if (!paneId) throw new Error("Herdr project pane error (PANE_GONE): pane split returned no pane id.");
 
-	const bin = process.env.PI_INTERCOM_PI_BIN?.trim() || process.env.PI_BIN?.trim() || "pi";
+	const bin = process.env.PI_INTERCOM_PI_BIN?.trim() || process.env.PI_BIN?.trim() || "cornfield";
 	// The pane command runs through the pane's shell: env-var prefixes (POSIX) and
 	// the shell-quoted binary compose into one command string.
 	const command = (input.childMetadata ? buildPaneCommandEnvPrefix(input.childMetadata) : "") + shellQuote(bin);
