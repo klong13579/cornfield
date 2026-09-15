@@ -49,6 +49,9 @@ export class InternalUrlRouter {
 			throw new Error(`Unknown protocol: ${scheme}://\nSupported: ${available || "none"}`);
 		}
 
-		return handler.resolve(parsed as InternalUrl);
+		const resource = await handler.resolve(parsed as InternalUrl);
+		// The handler owns the answer to "is there an edit path to this resource?",
+		// so stamp it here instead of making every call site decide.
+		return { ...resource, immutable: resource.immutable ?? handler.immutable };
 	}
 }

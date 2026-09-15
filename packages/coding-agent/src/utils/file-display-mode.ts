@@ -21,19 +21,27 @@ export interface FileDisplayModeSession {
 /**
  * Computes effective line display mode from session settings/env.
  * Hashline mode takes precedence and implies line-addressed output everywhere.
- * Hashlines are suppressed when the edit tool is not available (e.g. explore agents)
- * and when the caller signals a `raw` read — raw output should be returned as-is
- * without injecting hashline anchors or line numbers.
+ * Hashlines are suppressed when the edit tool is not available (e.g. explore agents),
+ * when the caller signals a `raw` read, and when the resource is `immutable` —
+ * an internal URL has no edit path that could consume the anchors. Raw output is
+ * returned as-is. An immutable resource keeps line numbers, because `sel` takes
+ * line numbers and a resource the agent cannot re-read by range is worse than an
+ * unanchored one.
  */
-export function resolveFileDisplayMode(session: FileDisplayModeSession, options?: { raw?: boolean }): FileDisplayMode {
+export function resolveFileDisplayMode(
+	session: FileDisplayModeSession,
+	options?: { raw?: boolean; immutable?: boolean },
+): FileDisplayMode {
 	const { settings } = session;
 	const hasEditTool = session.hasEditTool ?? true;
 	const editMode = resolveEditMode(session);
 	const usesHashLineAnchors = editMode === "hashline" || editMode === "atom";
 	const raw = options?.raw === true;
-	const hashLines = !raw && hasEditTool && usesHashLineAnchors && settings.get("readHashLines") !== false;
+	const immutable = options?.immutable === true;
+	const anchorCapable = !raw && hasEditTool && usesHashLineAnchors && settings.get("readHashLines") !== false;
+	const hashLines = anchorCapable && !immutable;
 	return {
 		hashLines,
-		lineNumbers: !raw && (hashLines || settings.get("readLineNumbers") === true),
+		lineNumbers: !raw && (anchorCapable || settings.get("readLineNumbers") === true),
 	};
 }

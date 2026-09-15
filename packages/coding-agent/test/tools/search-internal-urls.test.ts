@@ -87,6 +87,7 @@ describe("SearchTool internal URL resolution", () => {
 		const router = new InternalUrlRouter();
 		router.register({
 			scheme: "agent",
+			immutable: true,
 			async resolve() {
 				return {
 					url: "agent://0",

@@ -61,6 +61,16 @@ describe("read skill:// resources", () => {
 		return new ReadTool(session);
 	}
 
+	function makeHashlineTool(): ReadTool {
+		const session = {
+			cwd: tmpDir,
+			hasEditTool: true,
+			settings: Settings.isolated({ "edit.mode": "hashline", readHashLines: true, "read.defaultLimit": 3000 }),
+			internalRouter: router,
+		} as unknown as ToolSession;
+		return new ReadTool(session);
+	}
+
 	it("honors the line window instead of returning the whole skill body", async () => {
 		const result = await makeTool().execute("c1", { path: "skill://demo", sel: "1-5" });
 		const text = getResultText(result);
@@ -93,5 +103,23 @@ describe("read skill:// resources", () => {
 		const text = getResultText(result);
 
 		expect(text).toContain("run.ts");
+	});
+
+	// Anchors are an edit affordance. A skill has no edit path, so an anchor here
+	// only invites an edit that must fail — but the line numbers stay, because the
+	// caller re-reads by range with `sel`.
+	it("does not mint edit anchors for a skill read in hashline mode", async () => {
+		const result = await makeHashlineTool().execute("c5", { path: "skill://demo", sel: "1-3" });
+		const text = getResultText(result);
+
+		expect(text).not.toMatch(/^\d+[a-z0-9]{2}\|/m);
+		expect(text).toMatch(/^1\|alpha-1$/m);
+	});
+
+	it("still mints edit anchors for a file read in hashline mode", async () => {
+		const result = await makeHashlineTool().execute("c6", { path: "SKILL.md" });
+		const text = getResultText(result);
+
+		expect(text).toMatch(/^\d+[a-z0-9]{2}\|/m);
 	});
 });

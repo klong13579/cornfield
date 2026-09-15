@@ -52,6 +52,7 @@ export function validateRelativePath(relativePath: string): void {
  */
 export class SkillProtocolHandler implements ProtocolHandler {
 	readonly scheme = "skill";
+	readonly immutable = true;
 
 	constructor(private readonly options: SkillProtocolOptions) {}
 

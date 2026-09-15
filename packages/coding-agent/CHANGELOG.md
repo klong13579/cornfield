@@ -22,6 +22,8 @@
 
 ### Changed
 
+- **内部资源不再发行号锚（但保留行号）**（`src/internal-urls/types.ts`、`src/internal-urls/router.ts`、十个 handler、`src/utils/file-display-mode.ts`、`src/tools/read.ts`、`test/file-display-mode.test.ts`）：`ProtocolHandler` 新增必填的 `immutable`，router 把答案盖到资源上（`resource.immutable ?? handler.immutable`），`resolveFileDisplayMode` 收到它时关掉 hashline 锚。理由是**假开关比没有开关更坏** —— 锚是给 edit 抄的，而 edit 拒绝内部 URL（`vim.ts:461` / `plan-mode-guard.ts:17` 都走 `resolveToCwd`，它在 `path-utils.ts:149` 直接抛），所以 hashline 会话里 `read skill://X` 发出去的锚必定导向一次失败的 edit（而 hashline 正是本地默认的 `edit.mode`）。upstream 在同样的位置会把行号一起关掉，本地不照抄：`sel` 收的是行号，一份不能按行重读的资源比一份没有锚的资源更糟，所以 immutable 只关锚、保留行号。声明 `false` 的只有 `local://`（它指向可写文件，锚在那里有效）；`skill` / `artifact` / `agent` / `memory` / `rule` / `mcp` / `pi` / `xd` / `jobs` 为 `true`。字段做成必填 —— 新 handler 必须自己回答，编译器不替它默认。回归：`test/file-display-mode.test.ts` 5 条（含「非 immutable 调用结果不变」）、`test/tools/read-skill-resource.test.ts` 增 2 条（hashline 会话里 skill 读取无锚有号，普通文件读取仍有锚）。
+
 - **intercom 的 action 词表收成一份**（`src/intercom-extension/index.ts`）：名称此前列在三处 —— 工具参数 enum 数组、斜杠补全表 `INTERCOM_ACTIONS`、schema description 字符串。2026-09-15 发现 `children` 漏在补全表里（`/intercom chi` 补不出来，但调用是通的，因为它本来就在 enum 里）。现 `INTERCOM_ACTION_NAMES` 是唯一真源：enum 直接用、description 由它生成、补全表由它 + `Record<IntercomActionName, string>` 说明表派生（新增动作时 TS 会逼着补说明）。
 
 - **`grievances` 表补 `createdAt` / `sessionId`，连接改为按库路径缓存**（`src/tools/report-tool-issue.ts`）：每行原先只有 `model` / `version` / `tool` / `report` 四列 —— 事后既不知道什么时候报的，也不知道哪个会话报的，等于拿到一句「有个工具不对劲」却没有现场。新增两列（都可空：SQLite 加 NOT NULL 列需要默认值，且旧行的真实状态就是「无时间」），旧库在打开时按 `PRAGMA table_info` 判定后 `ALTER TABLE` 就地加宽，读侧（CLI）在缺列时按 `NULL` 读出而不是整个命令失败。同时把进程级单例连接改成 **按路径缓存**：`setAgentDir` 在 gateway/serve 路径上会运行时改 agentDir，旧实现会让报告继续写进上一个 agent 的库。

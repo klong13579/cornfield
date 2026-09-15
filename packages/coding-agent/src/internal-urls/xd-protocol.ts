@@ -76,6 +76,7 @@ function renderCatalog(devices: Map<string, Tool>): string {
 
 export class XdevProtocolHandler implements ProtocolHandler {
 	readonly scheme = "xd";
+	readonly immutable = true;
 
 	constructor(private readonly options: XdevProtocolOptions) {}
 

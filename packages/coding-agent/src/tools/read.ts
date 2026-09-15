@@ -696,10 +696,11 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			sourceInternal?: string;
 			entityLabel: string;
 			ignoreResultLimits?: boolean;
+			immutable?: boolean;
 			raw?: boolean;
 		},
 	): AgentToolResult<ReadToolDetails> {
-		const displayMode = resolveFileDisplayMode(this.session, { raw: options.raw });
+		const displayMode = resolveFileDisplayMode(this.session, { raw: options.raw, immutable: options.immutable });
 		const details = options.details ?? {};
 		const allLines = text.split("\n");
 		const totalLines = allLines.length;
@@ -1480,6 +1481,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			sourceInternal: url,
 			entityLabel: "resource",
 			ignoreResultLimits: scheme === "skill",
+			immutable: resource.immutable,
 		});
 	}
 

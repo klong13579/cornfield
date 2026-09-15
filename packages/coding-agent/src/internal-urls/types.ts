@@ -25,6 +25,13 @@ export interface InternalResource {
 	 * from `sourcePath` (see the read tool's dirent listing).
 	 */
 	isDirectory?: boolean;
+	/**
+	 * True when the resource has no edit path (the router copies it from the
+	 * handler). Callers use it to suppress edit affordances — a hashline anchor
+	 * that no edit tool can consume only invites an edit that must fail.
+	 * Set per resource only to override the handler's answer.
+	 */
+	immutable?: boolean;
 	/** Additional notes about resolution */
 	notes?: string[];
 }
@@ -49,6 +56,13 @@ export interface InternalUrl extends URL {
 export interface ProtocolHandler {
 	/** The scheme this handler processes (without trailing ://) */
 	readonly scheme: string;
+	/**
+	 * Whether resources from this handler can be edited by the agent. `false`
+	 * only for handlers that address a writable file (local://); read-only
+	 * handlers declare `true` so the read tool stops minting hashline anchors
+	 * that no edit path could consume. Required: a new handler must answer.
+	 */
+	readonly immutable: boolean;
 	/**
 	 * Resolve an internal URL to its content.
 	 * @param url Parsed URL object
