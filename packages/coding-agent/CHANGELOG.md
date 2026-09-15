@@ -14,11 +14,17 @@
 
 - **`report_tool_issue` 恒回「Noted, thanks!」——报告没落库也照说不误**（`src/tools/report-tool-issue.ts`、`test/tools/report-tool-issue.test.ts`）：`execute()` 里 `openDb()` 失败返回 `null`、继而 `db?.prepare(...).run(...)` 整条静默跳过（可选链吞掉「没有库」），catch 只写 logger，返回文本恒定 —— 调用方（模型和用户）分不清「记下了」和「丢了」，而这个工具的**唯一**用途就是留证据。2026-09-15 查它时本地库已积压 486 行、其中 395 行是同一个 `yield` 缺工具的历史告警（全在 v14.5.12，无人处置也无人看见），正说明这条静默路径的代价。现写入失败回 `details: { error: true, reason, dbPath }` 且正文改成 `Not recorded (<原因>). This report was NOT saved.`；成功回 `details: { recorded: true }`。仍不抛异常（QA 侧信道不该打断回合），但不再说谎。回归覆盖：正常落库、无 session、旧库迁移、库打不开、表存在但缺列（打开成功而插入失败）五条路径。
 
+- **`report_tool_issue` 的 `tool` 参数改成枚举，且不再默默丢弃越界报告**（`src/tools/report-tool-issue.ts`、`src/tools/index.ts`、`test/tools/report-tool-issue.test.ts`；借鉴上游 `9155df2bf0`）：参数原来是自由字符串，库里于是积下 `3`、`.`、`write (xd://mcp__gitnexus_impact)`、`read / write / glob`、`transcript-correction/transcript-correction.py` 这类没法聚合的名字（其中 `3`/`.` 那 133 条就是 `yield` 事故的产物）。现在 `createTools()` 把本次**真正构造出来**的 built-in / hidden 工具名快照传给工厂，枚举与运行时白名单来自同一份集合（不会各说各话）；MCP server 与扩展工具在 `sdk.ts` 里晚于 `createTools()` 进集合，天然落在枚举外——这是**有意**的边界：那些是用户自己的配置，不是我们发布的东西。模型无视枚举时报了别的名字 → 回 `Not recorded: "<tool>" is not a built-in tool in this session. Nothing was saved.` 且**不落库也不建库**（上游此处是静默回 `Noted, thanks!`；本仓延续上一条「不许谎报」的原则，丢弃就说丢弃）。旧名（`find`/`search`/`todo_write`）先过 `builtin-names.ts` 的 `normalizeToolName`——等价于上游剥 `proxy_` 前缀，但走的是本仓既有的别名边界，不新增第二处名字判断。顺带抄上游的 `report` 参数描述：`unexpected behavior; generic, NEVER PII (paths, file contents, identifiers, prompt text)`（本仓库里已全是绝对路径与会话 id，这是最便宜的降敏）。回归：枚举内容、无活跃集时退回自由字符串、越界拒绝且不建库、旧名归一、白名单为空时仍全记。
+
 ### Added
 
 - **`test/intercom-extension/skill-drift.test.ts`：把 pi-intercom 的 prose 契约钉到代码上**（新文件、`src/intercom-extension/index.ts`）：`skills/pi-intercom/SKILL.md` 编进 binary、会话启动时落盘，是 agent 读 intercom 用法的唯一来源，而它此前零测试 —— 2026-09-15 一次复核查出四处与代码不符（attachment 声称没有 `path` 字段、`send` 的「忙时会丢」前提、错误处理示例的 `result.delivered`、`/name` 不是 cornfield 命令），没有一处会自报。断言三件事：Key Differences 表的 action 集合 == `INTERCOM_ACTION_NAMES`（不多不少；负向对照验过，删掉一行即红）；schema 的 action 说明由名称表生成、不得手写第二份；已知会写错的事实（裸字段名 / 把路径塞进 `name` / `/name`）不得回潮。
 
 - **`cornfield grievances --since <窗口> --markdown`：auto-QA 报告终于有出口**（`src/cli/grievances-cli.ts`、`src/commands/grievances.ts`、`test/grievances-cli.test.ts`）：`grievances` 表此前只有一个只读人工入口（`cornfield grievances`，全仓无第二个读取方，scripts/CI/gateway 均不引用），攒下的 486 行没有任何机制送到该看见的人手里。新增 `--since`（时长 `7d`/`36h`/`90m`/`2w`，或日期 `2026-09-01`）做时间窗口，`--markdown` 出摘要（按工具计数表 + 逐条「时间 / 模型 / 会话 / 原文」，**按时间正序**——摘要是给人读的叙事，不是信息流）。`--json` 与 `--markdown` 互斥；无法解析的 `--since` 直接报错并 `exit 1`（静默忽略会让旧行看起来像「最近很安静」）。文本输出同步带上时间与 session，无时间的旧行显式写成 `no timestamp`，时间窗口查询会把被排除的旧行条数一并打出来。回归：窗口过滤、旧库无列、缺库、JSON 新增字段、摘要渲染与空窗口 8 条用例；并对真实库（486 行、尚无时间列）实跑 `--since 7d -m` —— 输出 `No reports in range.` + `_486 report(s) carry no timestamp and are excluded…_`，不崩、不假装。
+
+- **`cornfield grievances export`：把「攒下的报告怎么送到人手里」变成一条可重跑的命令**（`src/cli/grievances-cli.ts`、`src/commands/grievances.ts`、`test/grievances-cli.test.ts`；借鉴上游 `0bb385f8ab` 的导出骨架，不抄它的传输层）：`cornfield grievances export [-o <path>] [-s <窗口>] [-t <工具>] [-n <上限>] [-j]` 只选 `exported = 0` 的行，写出摘要（复用 `-m` 的同一份渲染）**之后**才把那些行标成 `exported = 1` —— 先写后标，写失败（目标不可写）就原样留在队列里等下次，语义是至少一次，不会因为一次重定向到断管而静默丢行；第二次跑只会得到 `No new reports to export.`。`--json` 必须配 `--out`（JSON 已占 stdout，而「没产出摘要却标成已导出」是撒谎）。上游的 `flushGrievances` 批量 POST 到 `dev.autoqaPush.endpoint` + consent 弹窗没抄：本仓没有接收端，落点也不该我定（TODO/topics/钉钉都是候选，接不接、接哪个由你拍）。
+
+- **`cornfield grievances clean`：删旧报告**（同上文件）：`--id <n>` / `--tool <名>` / `--all` 三者必须**恰好给一个**（给两个直接拒，`--id 5 --all` 这种脚枪不留），支持 `-j` 出 `{deleted, scope}`，全清时重置自增序列（`sqlite_sequence`），后续新报告从 #1 开始。典型用途：`grievances clean -t yield` 一把清掉那 395 条同一事故的噪声。缺库时只报告不建库（探针是一次只读打开），跟 `list` 的说法一致。
 
 ### Changed
 
@@ -27,6 +33,8 @@
 - **intercom 的 action 词表收成一份**（`src/intercom-extension/index.ts`）：名称此前列在三处 —— 工具参数 enum 数组、斜杠补全表 `INTERCOM_ACTIONS`、schema description 字符串。2026-09-15 发现 `children` 漏在补全表里（`/intercom chi` 补不出来，但调用是通的，因为它本来就在 enum 里）。现 `INTERCOM_ACTION_NAMES` 是唯一真源：enum 直接用、description 由它生成、补全表由它 + `Record<IntercomActionName, string>` 说明表派生（新增动作时 TS 会逼着补说明）。
 
 - **`grievances` 表补 `createdAt` / `sessionId`，连接改为按库路径缓存**（`src/tools/report-tool-issue.ts`）：每行原先只有 `model` / `version` / `tool` / `report` 四列 —— 事后既不知道什么时候报的，也不知道哪个会话报的，等于拿到一句「有个工具不对劲」却没有现场。新增两列（都可空：SQLite 加 NOT NULL 列需要默认值，且旧行的真实状态就是「无时间」），旧库在打开时按 `PRAGMA table_info` 判定后 `ALTER TABLE` 就地加宽，读侧（CLI）在缺列时按 `NULL` 读出而不是整个命令失败。同时把进程级单例连接改成 **按路径缓存**：`setAgentDir` 在 gateway/serve 路径上会运行时改 agentDir，旧实现会让报告继续写进上一个 agent 的库。
+
+- **`grievances` 表补 `exported` 列（备索引），并把数据库的打开收口成三个入口**（`src/tools/report-tool-issue.ts`、`src/cli/grievances-cli.ts`）：新增 `exported INTEGER NOT NULL DEFAULT 0`（带默认值，所以旧行加列后自动是「未导出」，不会被导出流程漏掉）+ `(exported, id)` 索引（导出扫的是 `WHERE exported = 0`）。同时把路径 / schema / 迁移 / 连接缓存收成 `openAutoQaDb()`（可写，带缓存与迁移）、`openAutoQaDbReadonly()`（列表用，缺库返回 null）、`closeAutoQaDb()`（唯一允许关缓存句柄的出口——直接 `db.close()` 会把死句柄留在缓存里交给下一个调用方）三个函数，工具与 CLI 共用一份；此前 CLI 自己开连接、自己容忍缺列，三处各有一份「表长什么样」的认知。这是上游 `0bb385f8ab` 里 `openAutoQaDb` 那道收口，只是没带上它的传输层。
 
 ## [1.2.3] - 2026-09-14
 

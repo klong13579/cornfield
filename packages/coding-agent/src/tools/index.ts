@@ -461,7 +461,13 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	// Injected unconditionally into every agent, regardless of requested tool list.
 	const autoQA = isAutoQaEnabled(session.settings);
 	if (autoQA && !tools.some(t => t.name === "report_tool_issue")) {
-		const qaTool = await HIDDEN_TOOLS.report_tool_issue(session);
+		// The report enum is built from the built-ins constructed above, so MCP
+		// servers and extension tools never become report targets — they are added
+		// to the tool set later (sdk.ts), after this point.
+		const activeBuiltinNames = tools
+			.map(t => t.name)
+			.filter(name => (name in BUILTIN_TOOLS || name in HIDDEN_TOOLS) && name !== "report_tool_issue");
+		const qaTool = createReportToolIssueTool(session, activeBuiltinNames);
 		if (qaTool) {
 			tools.push(wrapToolWithMetaNotice(qaTool));
 		}
