@@ -7,18 +7,20 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import { dereferenceJsonSchema, sanitizeSchemaForStrictMode } from "@cornfield/ai/utils/schema";
 import type { Static, TSchema } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
 import { subprocessToolRegistry } from "../task/subprocess-tool-registry";
 import type { ToolSession } from ".";
-import { jtdToJsonSchema, normalizeSchema } from "./jtd-to-json-schema";
+import {
+	buildOutputValidator,
+	compileJsonSchema,
+	formatValidationIssues,
+	type SchemaValidationResult,
+} from "./output-schema-validator";
 
 export interface YieldDetails {
 	data: unknown;
 	status: "success" | "aborted";
 	error?: string;
 }
-
-const ajv = new Ajv({ allErrors: true, strict: false, logger: false });
 
 function formatSchema(schema: unknown): string {
 	if (schema === undefined) return "No schema provided.";
@@ -28,16 +30,6 @@ function formatSchema(schema: unknown): string {
 	} catch {
 		return "[unserializable schema]";
 	}
-}
-
-function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
-	if (!errors || errors.length === 0) return "Unknown schema validation error.";
-	return errors
-		.map(err => {
-			const path = err.instancePath ? `${err.instancePath}: ` : "";
-			return `${path}${err.message ?? "invalid"}`;
-		})
-		.join("; ");
 }
 
 export class YieldTool implements AgentTool<TSchema, YieldDetails> {
@@ -54,7 +46,7 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 	readonly intent = "omit" as const;
 	lenientArgValidation = true;
 
-	readonly #validate?: ValidateFunction;
+	readonly #validate?: (value: unknown) => SchemaValidationResult;
 	#schemaValidationFailures = 0;
 
 	constructor(session: ToolSession) {
@@ -74,28 +66,17 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 				},
 			) as TSchema;
 
-		let validate: ValidateFunction | undefined;
+		let validate: ((value: unknown) => SchemaValidationResult) | undefined;
 		let dataSchema: TSchema;
 		let parameters: TSchema;
 
 		try {
-			const schemaResult = normalizeSchema(session.outputSchema);
-			// Convert JTD to JSON Schema if needed (auto-detected)
-			const normalizedSchema =
-				schemaResult.normalized !== undefined ? jtdToJsonSchema(schemaResult.normalized) : undefined;
-			let schemaError = schemaResult.error;
-
-			if (!schemaError && normalizedSchema === false) {
-				schemaError = "boolean false schema rejects all outputs";
-			}
-
-			if (normalizedSchema !== undefined && normalizedSchema !== false && !schemaError) {
-				try {
-					validate = ajv.compile(normalizedSchema as Record<string, unknown> | boolean);
-				} catch (err) {
-					schemaError = err instanceof Error ? err.message : String(err);
-				}
-			}
+			const {
+				validate: schemaValidate,
+				jsonSchema: normalizedSchema,
+				error: schemaError,
+			} = buildOutputValidator(session.outputSchema);
+			validate = schemaValidate;
 
 			const schemaHint = formatSchema(normalizedSchema ?? session.outputSchema);
 			const schemaDescription = schemaError
@@ -125,7 +106,8 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 			parameters = createParameters(dataSchema);
 			JSON.stringify(parameters);
 			// Verify the final parameters compile with AJV (catches unresolved $ref, etc.)
-			ajv.compile(parameters as Record<string, unknown>);
+			const compilation = compileJsonSchema(parameters);
+			if (!compilation.ok) throw new Error(compilation.error);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			dataSchema = Type.Record(Type.String(), Type.Any(), {
@@ -172,12 +154,15 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 			if (data === undefined || data === null) {
 				throw new Error("data is required when yield indicates success");
 			}
-			if (this.#validate && !this.#validate(data)) {
-				this.#schemaValidationFailures++;
-				if (this.#schemaValidationFailures <= 1) {
-					throw new Error(`Output does not match schema: ${formatAjvErrors(this.#validate.errors)}`);
+			if (this.#validate) {
+				const verdict = this.#validate(data);
+				if (!verdict.valid) {
+					this.#schemaValidationFailures++;
+					if (this.#schemaValidationFailures <= 1) {
+						throw new Error(`Output does not match schema: ${formatValidationIssues(verdict.issues)}`);
+					}
+					schemaValidationOverridden = true;
 				}
-				schemaValidationOverridden = true;
 			}
 		}
 

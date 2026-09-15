@@ -131,4 +131,59 @@ describe("subagent warning injection", () => {
 		expect(result.rawOutput.includes("SYSTEM WARNING")).toBe(false);
 		expect(result.exitCode).toBe(0);
 	});
+
+	const closedSchema = {
+		type: "object",
+		properties: { ok: { type: "boolean" } },
+		required: ["ok"],
+		additionalProperties: false,
+	};
+
+	// Guards on the fallback acceptance policy that predates the unified output-schema
+	// entry: a raw-JSON completion is only recovered when it satisfies the declared schema.
+	it("rejects a fallback completion missing a required field", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: '{"other":true}',
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			yieldItems: undefined,
+			outputSchema: closedSchema,
+		});
+
+		expect(result.rawOutput).toBe(`${SUBAGENT_WARNING_MISSING_YIELD}\n\n{"other":true}`);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toBe(SUBAGENT_WARNING_MISSING_YIELD);
+	});
+
+	it("rejects a fallback completion carrying extra fields on a closed schema", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: '{"ok":true,"extra":1}',
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			yieldItems: undefined,
+			outputSchema: closedSchema,
+		});
+
+		expect(result.rawOutput).toBe(`${SUBAGENT_WARNING_MISSING_YIELD}\n\n{"ok":true,"extra":1}`);
+		expect(result.exitCode).toBe(1);
+	});
+
+	it("rejects a fallback completion when the declared schema cannot be compiled", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: '{"ok":true}',
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			yieldItems: undefined,
+			outputSchema: { type: "object", properties: { ok: { type: "not-a-real-json-schema-type" } } },
+		});
+
+		expect(result.rawOutput).toBe(`${SUBAGENT_WARNING_MISSING_YIELD}\n\n{"ok":true}`);
+		expect(result.exitCode).toBe(1);
+	});
 });
