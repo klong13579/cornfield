@@ -1,35 +1,74 @@
-import type { DisabledSkillDto, SkillDto } from "@cornfield/wire";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { RemoteSkillItemDto } from "../../lib/pi-client-api";
+import type {
+	RemoteSkillItemDto,
+	SkillActivation,
+	SkillScope,
+	SkillScopeRowDto,
+	SkillStatus,
+	SkillsResultDto,
+} from "../../lib/pi-client-api";
+import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 
 /**
- * 技能面板（W3 D5）—— 列表/搜索/分类折叠 + 启停 toggle 禁用态。
- * 数据：serve get_skills（session.skills 同源，即 agent 实际加载的「已启用」技能集）。
- * toggle 为 B3 技能管理协议的前置 UI：协议落地前渲染禁用态 + 提示，不做任何假写操作。
+ * 技能工作台（T10B）—— 回答五个问题，每个都来自 serve 端既有事实源，前端不自己猜：
  *
- * 顶部「开源 Skill Hub」（h2，契约命令 h1 并行实现）：list_remote_skills 浏览远程技能市场 + install_remote_skill 装到本机 skills。
+ *   范围 scope        按 SKILL.md 路径相对 agentDir / 会话 Project root 判定（agent/project/global）
+ *   来源 source       discovery 的 provider:level + SKILL.md 绝对路径
+ *   版本 version      frontmatter 声明的版本（可能没有）+ 内容指纹 + mtime（文件系统真相）
+ *   激活 activation   本次会话加载了（loaded）/ 磁盘上有但没进会话（discoverable）/ 被挡住（blocked）
+ *   错误              发现警告（同名冲突、扫描失败、SKILL.md 读不到）
+ *
+ * 数据：serve get_skills（session.skills 同源 = agent 实际加载的技能集 + 停用名单 + 发现错误）。
+ * 换 Agent 必须重读：列表锚在焦点 Agent（activeAgentIdOf）上，不重读就会把上一个 Agent 的
+ * 技能显示成这一个的。
+ *
+ * 顶部「开源 Skill Hub」（h2）：list_remote_skills 浏览远程技能市场 + install_remote_skill 装到本机 skills。
  */
 
-const LEVEL_LABELS: Record<SkillDto["level"], string> = {
-	user: "用户级",
-	project: "项目级",
-	native: "内置",
+const SCOPE_LABELS: Record<SkillScope, string> = { agent: "Agent", project: "Project", global: "全局" };
+const SCOPE_ORDER: SkillScope[] = ["agent", "project", "global"];
+const ACTIVATION_LABELS: Record<SkillActivation, string> = {
+	loaded: "已加载",
+	discoverable: "可发现",
+	blocked: "受阻",
+};
+const STATUS_LABELS: Record<SkillStatus, string> = {
+	enabled: "启用",
+	disabled: "停用",
+	deprecated: "废弃",
+	unavailable: "读不到",
 };
 
-const LEVEL_ORDER: SkillDto["level"][] = ["user", "project", "native"];
+/** 版本显示：声明优先，否则内容指纹（并把「没声明」说清，不冒充版本号）。 */
+function versionText(row: SkillScopeRowDto): string {
+	if (row.version) return `v${row.version}`;
+	if (row.fingerprint) return `指纹 ${row.fingerprint}`;
+	return "版本未知";
+}
 
-interface SkillRow extends SkillDto {
-	enabled: true;
+function fmtDay(ts: number | undefined): string | null {
+	if (ts === undefined) return null;
+	const date = new Date(ts);
+	if (Number.isNaN(date.getTime())) return null;
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/** 状态徽标配色（读写不到与「停用」不是一件事，颜色也不同）。 */
+function statusClass(status: SkillStatus): string {
+	if (status === "unavailable") return "bg-danger/10 text-danger";
+	if (status === "deprecated") return "bg-surface-2 text-ink-faint line-through";
+	if (status === "disabled") return "bg-surface-2 text-ink-faint";
+	return "bg-success/10 text-success";
 }
 
 export function SkillsView(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
-	const [skills, setSkills] = useState<SkillRow[]>([]);
-	const [disabled, setDisabled] = useState<DisabledSkillDto[]>([]);
+	const agentId = activeAgentIdOf(view);
+	const [data, setData] = useState<SkillsResultDto | null>(null);
 	const [query, setQuery] = useState("");
 	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 	const [showDisabled, setShowDisabled] = useState(false);
@@ -115,6 +154,18 @@ export function SkillsView(): React.JSX.Element {
 		}
 	};
 
+	/** 重读技能工作台数据（焦点 Agent 定向；换 Agent / 启停后都走这一条）。 */
+	const refresh = async (): Promise<void> => {
+		try {
+			const result = await store.fetchSkills(agentId);
+			setData(result);
+			setError(null);
+		} catch (err) {
+			setData(null);
+			setError(err instanceof Error ? err.message : String(err));
+		}
+	};
+
 	/** 安装远程技能（install_remote_skill）：成功后重拉本地技能列表（新装技能进列表/已安装态 disabled）。 */
 	const installRemote = async (item: RemoteSkillItemDto): Promise<void> => {
 		if (!view.connected || installingName) return;
@@ -130,7 +181,7 @@ export function SkillsView(): React.JSX.Element {
 					? `「${item.name}」已在 ${r.path}，无需重复安装`
 					: `「${item.name}」安装完成 → ${r.path}`,
 			);
-			await refreshBoth(); // 本地列表重拉：新技能出现在已启用/已停用分组
+			await refresh(); // 本地列表重拉：新技能出现在已启用/已停用分组
 		} catch (err) {
 			setHubError(`安装「${item.name}」失败：${err instanceof Error ? err.message : String(err)}`);
 		} finally {
@@ -138,22 +189,13 @@ export function SkillsView(): React.JSX.Element {
 		}
 	};
 
-	/** 启停（P2-W3-3 B3 写协议）：停用/回切后重拉列表，技能在两集合间迁移；in-flight 防重入。 */
-	const refreshBoth = async () => {
-		try {
-			const { skills: list, disabled: dropped } = await store.fetchSkills();
-			setSkills(list.map(s => ({ ...s, enabled: true as const })));
-			setDisabled(dropped);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		}
-	};
-	const toggleSkill = async (name: string, enabled: boolean) => {
+	/** 启停（P2-W3-3 B3 写协议）：写焦点 Agent 自己的配置，重发现后重拉列表。 */
+	const toggleSkill = async (row: SkillScopeRowDto, enabled: boolean) => {
 		if (busy) return;
-		setBusy(name);
+		setBusy(row.name);
 		try {
-			await store.setSkillEnabled(name, enabled);
-			await refreshBoth();
+			await store.setSkillEnabled(row.name, enabled, agentId);
+			await refresh();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -162,31 +204,29 @@ export function SkillsView(): React.JSX.Element {
 	};
 
 	useEffect(() => {
-		if (!view.connected) return;
-		setError(null);
-		void store
-			.fetchSkills()
-			.then(({ skills: list, disabled: dropped }) => {
-				setSkills(list.map(s => ({ ...s, enabled: true as const })));
-				setDisabled(dropped);
-			})
-			.catch(err => setError(err instanceof Error ? err.message : String(err)));
+		if (!view.connected) {
+			setData(null);
+			return;
+		}
+		void refresh();
 		// 进入即拉远程技能市场；失败仅写 hubError（h1 契约命令 serve 端并行实现，未就绪时页面不崩）
 		void store
 			.fetchRemoteSkills()
 			.then(setRemote)
 			.catch(err => setHubError(err instanceof Error ? err.message : String(err)));
-	}, [store, view.connected]);
+	}, [store, view.connected, agentId]);
 
+	const loaded = data?.skills ?? [];
+	const disabled = data?.disabled ?? [];
 	const groups = useMemo(() => {
 		const q = query.trim().toLowerCase();
 		const filtered = q
-			? skills.filter(s => s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q))
-			: skills;
-		return LEVEL_ORDER.map(level => ({ level, rows: filtered.filter(s => s.level === level) })).filter(
-			g => g.rows.length > 0,
+			? loaded.filter(s => s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q))
+			: loaded;
+		return SCOPE_ORDER.map(scope => ({ scope, rows: filtered.filter(s => s.scope === scope) })).filter(
+			group => group.rows.length > 0,
 		);
-	}, [skills, query]);
+	}, [loaded, query]);
 
 	const disabledFiltered = useMemo(() => {
 		const q = query.trim().toLowerCase();
@@ -196,11 +236,26 @@ export function SkillsView(): React.JSX.Element {
 	/** 本地已存在的技能名（已启用 + 已停用）→ 远程条目同名视为已安装。 */
 	const localInstalled = useMemo(() => {
 		const names = new Set<string>();
-		for (const s of skills) names.add(s.name);
+		for (const s of loaded) names.add(s.name);
 		for (const d of disabled) names.add(d.name);
 		return names;
-	}, [skills, disabled]);
+	}, [loaded, disabled]);
 	const isInstalledRemote = (name: string): boolean => localInstalled.has(name) || installedRemote.has(name);
+
+	/** 需要人看见的问题：发现错误、被挡住的技能、Project registry 读不出来。 */
+	const problems = useMemo(() => {
+		const items: Array<{ title: string; detail: string }> = [];
+		if (data?.scope.projectError) {
+			items.push({ title: "Project 归属未知", detail: data.scope.projectError });
+		}
+		for (const blocked of data?.blocked ?? []) {
+			items.push({ title: `受阻：${blocked.name}`, detail: `${blocked.path} —— ${blocked.reason}` });
+		}
+		for (const err of data?.errors ?? []) {
+			items.push({ title: "发现错误", detail: err.path ? `${err.path} —— ${err.message}` : err.message });
+		}
+		return items;
+	}, [data]);
 
 	const toggleCollapsed = (level: string) => {
 		setCollapsed(prev => {
@@ -238,6 +293,38 @@ export function SkillsView(): React.JSX.Element {
 						</div>
 					</div>
 				</div>
+
+				{/* 范围锚点：这份列表是「谁的、按哪个根判定的」。同屏多个 Agent 时没有它就会读错人。 */}
+				<div className="mb-4 rounded-xl border border-hairline bg-surface px-5 py-3">
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-3xs text-ink-faint">
+						<span>
+							Agent <b className="text-ink-subtle">{data?.scope.agentId ?? agentId ?? "—"}</b>
+						</span>
+						<span className="truncate" title={data?.scope.agentDir}>
+							agentDir {data?.scope.agentDir ?? "—"}
+						</span>
+						<span className="truncate" title={data?.scope.sessionCwd}>
+							会话根 {data?.scope.sessionCwd ?? "—"}
+						</span>
+						<span className="truncate" title={data?.scope.projectRoot ?? ""}>
+							Project {data?.scope.projectRoot ?? "未归属"}
+						</span>
+					</div>
+				</div>
+
+				{/* 错误与受阻：读失败/冲突必须可见，不能折叠成一个「空列表」。 */}
+				{problems.length > 0 && (
+					<div className="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-5 py-3">
+						<div className="mb-1 text-xs font-semibold text-danger">发现错误 {problems.length} 项</div>
+						<div className="space-y-1">
+							{problems.map(problem => (
+								<div key={`${problem.title}:${problem.detail}`} className="text-2xs text-ink-subtle">
+									<span className="font-medium text-ink">{problem.title}</span>：{problem.detail}
+								</div>
+							))}
+						</div>
+					</div>
+				)}
 
 				{/* 开源 Skill Hub（h2）——远程技能市场浏览 + 安装。加载/安装中/失败均可见，不崩页。 */}
 				<div className="mb-6 overflow-hidden rounded-xl border border-hairline bg-surface">
@@ -417,32 +504,39 @@ export function SkillsView(): React.JSX.Element {
 					<div className="py-20 text-center text-[13px] text-ink-faint">未连接——技能列表不可用</div>
 				)}
 				{error && <div className="py-20 text-center text-[13px] text-ink-faint">技能列表不可用：{error}</div>}
-				{view.connected && !error && skills.length === 0 && !query && (
-					<div className="py-20 text-center text-[13px] text-ink-faint">当前 agent 未加载任何技能</div>
+				{view.connected && !error && loaded.length === 0 && !query && (
+					<div className="py-20 text-center text-[13px] text-ink-faint">
+						当前 Agent 未加载任何技能（停用名单 {disabled.length} 项）
+					</div>
 				)}
 
 				{groups.map(group => (
-					<div key={group.level} className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface">
+					<div key={group.scope} className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface">
 						<button
 							type="button"
-							onClick={() => toggleCollapsed(group.level)}
+							onClick={() => toggleCollapsed(group.scope)}
 							className="flex w-full items-center gap-2.5 px-5 py-3 text-left"
 						>
 							<span
-								className={`text-xs text-ink-faint transition-transform ${collapsed.has(group.level) ? "" : "rotate-90"}`}
+								className={`text-xs text-ink-faint transition-transform ${collapsed.has(group.scope) ? "" : "rotate-90"}`}
 							>
 								▶
 							</span>
 							<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">
-								{LEVEL_LABELS[group.level]}
+								{SCOPE_LABELS[group.scope]}
 							</span>
 							<span className="ml-auto font-mono text-xs text-ink-faint">{group.rows.length}</span>
 						</button>
 
-						{!collapsed.has(group.level) && (
+						{!collapsed.has(group.scope) && (
 							<div className="border-t border-hairline">
 								{group.rows.map(row => (
-									<SkillRowView key={row.name} row={row} onToggle={() => void toggleSkill(row.name, false)} />
+									<SkillRowView
+										key={row.name}
+										row={row}
+										busy={busy === row.name}
+										onToggle={() => void toggleSkill(row, false)}
+									/>
 								))}
 							</div>
 						)}
@@ -471,14 +565,23 @@ export function SkillsView(): React.JSX.Element {
 										<div className="min-w-0 flex-1">
 											<div className="flex items-baseline gap-2">
 												<span className="text-xs font-medium text-ink-faint line-through">{row.name}</span>
+												<span
+													className={`rounded px-1.5 py-0.5 font-mono text-2xs ${statusClass(row.status)}`}
+												>
+													{STATUS_LABELS[row.status]}
+												</span>
+												<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
+													{SCOPE_LABELS[row.scope]}
+												</span>
 											</div>
 											{row.description && (
 												<div className="mt-0.5 line-clamp-2 text-xs text-ink-faint">{row.description}</div>
 											)}
+											<div className="mt-0.5 font-mono text-3xs text-ink-faint">{row.reason ?? "—"}</div>
 										</div>
 										<button
 											type="button"
-											onClick={() => void toggleSkill(row.name, true)}
+											onClick={() => void toggleSkill(row, true)}
 											disabled={busy === row.name}
 											aria-label={`${row.name} 启用`}
 											className="mt-0.5 shrink-0 rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-2xs text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default"
@@ -500,24 +603,54 @@ export function SkillsView(): React.JSX.Element {
 	);
 }
 
-function SkillRowView({ row, onToggle }: { row: SkillRow; onToggle: () => void }): React.JSX.Element {
+/** 一行技能：名字 + 来源 + 范围 + 版本 + 激活/状态 + 启停开关。 */
+function SkillRowView({
+	row,
+	busy,
+	onToggle,
+}: {
+	row: SkillScopeRowDto;
+	busy: boolean;
+	onToggle: () => void;
+}): React.JSX.Element {
+	const day = fmtDay(row.updatedAt);
 	return (
 		<div className="flex items-start gap-3 border-b border-hairline px-5 py-3 last:border-b-0">
 			<div className="min-w-0 flex-1">
-				<div className="flex items-baseline gap-2">
+				<div className="flex flex-wrap items-baseline gap-2">
 					<span className="text-xs font-medium text-ink">{row.name}</span>
 					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink-faint">
-						{row.provider}
+						{row.providerName ?? row.provider}
+					</span>
+					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
+						{row.source}
+					</span>
+					<span className={`rounded px-1.5 py-0.5 font-mono text-2xs ${statusClass(row.status)}`}>
+						{STATUS_LABELS[row.status]}
+					</span>
+					<span
+						className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint"
+						title={`激活态：${ACTIVATION_LABELS[row.activation]}`}
+					>
+						{ACTIVATION_LABELS[row.activation]}
 					</span>
 				</div>
 				{row.description && <div className="mt-0.5 line-clamp-2 text-xs text-ink-subtle">{row.description}</div>}
+				<div className="mt-0.5 flex flex-wrap items-center gap-x-3 font-mono text-3xs text-ink-faint">
+					<span title={row.path} className="max-w-[420px] truncate">
+						{row.path || "路径未知"}
+					</span>
+					<span>{versionText(row)}</span>
+					{day && <span>更新 {day}</span>}
+				</div>
 			</div>
 
-			{/* 启停 toggle（P2-W3-3 B3 写协议）：点击停用；当前列表=已启用集，停用后技能移除 */}
+			{/* 启停 toggle（P2-W3-3 B3 写协议）：点击停用；当前列表=已启用集，停用后进「已停用」组 */}
 			<button
 				type="button"
 				onClick={onToggle}
-				title="停用该技能（写 config.yml skills.ignoredSkills）"
+				disabled={busy}
+				title="停用该技能（写该 Agent 的 config.yml skills.ignoredSkills）"
 				aria-label={`${row.name} 启停开关（当前已启用）`}
 				className="mt-0.5 flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-success/40 px-0.5 transition-colors hover:bg-success/60 disabled:cursor-not-allowed"
 			>

@@ -10,11 +10,9 @@ import type {
 	CronLogEntryDto,
 	DashboardStatsDto,
 	DingtalkAgentConfigDto,
-	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
-	MemoryProjectionDto,
 	ModelCatalogDto,
 	ModelSelectionDto,
 	ModelTestResultDto,
@@ -26,7 +24,6 @@ import type {
 	ProviderStatusDto,
 	SessionSnapshotDto,
 	SessionTreeDto,
-	SkillDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
@@ -46,8 +43,10 @@ import type {
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
+	MemoryScopeProjectionDto,
 	PiClient,
 	RemoteSkillItemDto,
+	SkillsResultDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 
@@ -678,25 +677,48 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<DashboardStatsDto>(command as never);
 	}
 
-	/** 记忆投影（get_memory；三分区只读，取不到为 null，失败抛错由调用方空态）。 */
-	async getMemory(): Promise<MemoryProjectionDto> {
-		return this.#req<MemoryProjectionDto>({ type: "get_memory" } as never);
+	/**
+	 * 记忆投影（get_memory；按 Agent/Project/Session/User scope 分区，只读）。
+	 * sessionId 定向 agent；pi-wire 的 get_memory 命令形状还没有 sessionId 字段
+	 * （与 fs_read / get_config 等处同一 cast 约定），后端已按此字段定向。
+	 */
+	async getMemory(sessionId?: string): Promise<MemoryScopeProjectionDto> {
+		const command = { type: "get_memory", ...(sessionId ? { sessionId } : {}) } as never;
+		return this.#req<MemoryScopeProjectionDto>(command);
 	}
 
-	/** 已加载技能 + 已停用名单（get_skills；只读；失败抛错由调用方空态）。 */
-	async getSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }> {
-		const result = await this.#req<{ skills?: SkillDto[]; disabled?: DisabledSkillDto[] }>({
+	/** 技能工作台数据（get_skills；已加载 + 停用 + 被挡住 + 发现错误，失败抛错由调用方空态）。 */
+	async getSkills(sessionId?: string): Promise<SkillsResultDto> {
+		const result = await this.#req<Partial<SkillsResultDto>>({
 			type: "get_skills",
+			...(sessionId ? { sessionId } : {}),
 		} as never);
-		return { skills: result.skills ?? [], disabled: result.disabled ?? [] };
+		return {
+			skills: result.skills ?? [],
+			disabled: result.disabled ?? [],
+			blocked: result.blocked ?? [],
+			errors: result.errors ?? [],
+			scope: result.scope ?? {
+				agentId: sessionId ?? "default",
+				agentDir: "",
+				sessionCwd: "",
+				projectRoot: null,
+				projectError: null,
+			},
+		};
 	}
 
-	/** 启停技能（set_skill_enabled；写配置 + 重发现热重载，失败抛错由调用方提示）。 */
-	async setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+	/** 启停技能（set_skill_enabled；写该 agent 自己的配置 + 重发现热重载）。 */
+	async setSkillEnabled(
+		name: string,
+		enabled: boolean,
+		sessionId?: string,
+	): Promise<{ ok: boolean; name: string; enabled: boolean }> {
 		return this.#req<{ ok: boolean; name: string; enabled: boolean }>({
 			type: "set_skill_enabled",
 			name,
 			enabled,
+			...(sessionId ? { sessionId } : {}),
 		} as never);
 	}
 

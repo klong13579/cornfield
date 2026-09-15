@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveGlobalMemoryRootCandidates } from "@cornfield/self-evolution/paths";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
-import { getAgentDir, getConfigRootDir, isEnoent, logger, parseFrontmatter, prompt } from "@cornfield/utils";
+import { getAgentDir, isEnoent, logger, prompt } from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
@@ -55,8 +54,6 @@ import {
 } from "../lsp";
 import { connectToServer, disconnectServer } from "../mcp/client";
 import type { MCPServerConfig } from "../mcp/types";
-import { getMemoryDb, getMemoryRoot, releaseMemoryDb, resolveMemoryDbPath } from "../memories";
-import { loadSectionsFromDb } from "../memories/projection";
 import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import diagnoseSessionPrompt from "../prompts/diagnose-session.md" with { type: "text" };
 import { discoverSkills } from "../sdk";
@@ -77,10 +74,12 @@ import type { ToolSession } from "../tools";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
+import { resolveAgentScope } from "./agent-scope";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
 import { WireHostToolBridge } from "./host-tool-bridge";
+import { buildMemoryScopeProjection } from "./memory-scope";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
 import { readProjectContext } from "./projects-wire";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
@@ -92,6 +91,13 @@ import {
 	SessionRegistry,
 } from "./session-registry";
 import { bringBackChildResult, readSessionTree } from "./session-tree-wire";
+import {
+	collectDisabledInputs,
+	projectDisabledSkills,
+	projectLoadedSkills,
+	type SkillScopeFacts,
+	splitSkillWarnings,
+} from "./skill-scope";
 import { clearStatsCache, getCachedStats, setCachedStats } from "./stats-cache";
 
 export interface WireServerOptions {
@@ -797,12 +803,34 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "get_memory": {
-					// W3 D3：只读记忆投影（memory/user/project 三分区），锚定 serve 进程 cwd 的 default agent。
-					// 记忆根用 getAgentDir()（~/.cornfield/agent）——default meta 的 agentDir 是 workspace cwd（P1 语义），
-					// 与 sdk.ts 里 memory 扩展的解析不一致，不能用于记忆投影。
+					// W3 D3 + T10B：只读记忆投影，按 Agent/Project/Session/User scope 分区。
+					// sessionId（= agent id）缺省 = 本连接焦点 agent；未 attach 的 agent 只按 agentDir 推算。
+					// pi-wire 的 get_memory 命令形状还没有 sessionId（客户端按同库既有的 cast 约定传入），
+					// 读法与 fs_read/git_* 处的 `(command as { sessionId?: string })` 一致。
+					const agentId = (command as { sessionId?: string }).sessionId ?? ctx.activeAgentId;
+					// 未注册的 agent 不能回退到「default 的目录 + 别人的名字」：那会把一个不存在的
+					// Agent 的记忆显示成它自己的。注册表说了算（与 fs_read / list_projects 同一判决）。
+					if (!registry.getMeta(agentId)) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
 					try {
-						const cwd = process.cwd();
-						done(await buildMemoryProjection(cwd, getAgentDir()));
+						const anchor = await resolveAgentScope({
+							agentId,
+							meta: registry.getMeta(agentId),
+							attached: registry.getAttached(agentId),
+						});
+						done(
+							await buildMemoryScopeProjection({
+								agentId: anchor.agentId,
+								agentDir: anchor.agentDir,
+								sessionCwd: anchor.sessionCwd,
+								projectRoot: anchor.project?.root,
+								declaredMemoryDir: anchor.declaredMemoryDir,
+								sessionFile: anchor.sessionFile,
+								attached: anchor.attached,
+							}),
+						);
 					} catch (err) {
 						fail(`memory unavailable: ${String(err)}`);
 					}
@@ -1354,30 +1382,54 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					break;
 				}
 				case "get_skills": {
-					// W3 D5 + P2-W3-3 回切：只读列出已加载技能 + 已停用名单。
-					// skills = session.skills（discovery 按 settings 过滤后的「已启用」集）；
-					// disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据
+					// W3 D5 + P2-W3-3 + T10B：只读列出技能，并带上 scope / 来源 / 版本 / 激活 / 错误五个事实。
+					// 全部来自既有事实源：session.skills（本次会话真的加载了）、session.settings（停用名单）、
+					// session.skillWarnings（发现错误）、agent-scope（范围判定的三个根）。
+					// 停用名单读的是**这个 agent 自己的** settings（registry agent 各有一份；旧实现读全局实例，
+					// 会把 default agent 的名单当成人家的）。
+					const anchor = await resolveAgentScope({ agentId, meta: attached.meta, attached });
+					const facts: SkillScopeFacts = {
+						agentId: anchor.agentId,
+						agentDir: anchor.agentDir,
+						sessionCwd: anchor.sessionCwd,
+					};
+					if (anchor.project) facts.projectRoot = anchor.project.root;
+					const loaded = await projectLoadedSkills(facts, session.skills);
+					const disabled = await projectDisabledSkills(
+						facts,
+						collectDisabledInputs(
+							session.settings.get("skills.ignoredSkills") ?? [],
+							session.settings.get("disabledExtensions") ?? [],
+						),
+					);
+					const warnings = splitSkillWarnings(session.skillWarnings);
 					done({
-						skills: session.skills.map(s => ({
-							name: s.name,
-							description: s.description,
-							source: s.source,
-							level: s._source?.level ?? "native",
-							provider: s._source?.providerName ?? "builtin",
-						})),
-						disabled: await buildDisabledSkillList(),
+						skills: loaded.rows,
+						disabled,
+						blocked: warnings.blocked,
+						errors: [...loaded.errors, ...warnings.errors],
+						scope: {
+							agentId: anchor.agentId,
+							agentDir: anchor.agentDir,
+							sessionCwd: anchor.sessionCwd,
+							projectRoot: anchor.project?.root ?? null,
+							projectError: anchor.projectError ?? null,
+						},
 					});
 					break;
 				}
 				case "set_skill_enabled": {
 					// P2-W3-3（B3 技能写协议）：写 settings（config.yml skills.ignoredSkills）+ 重发现热重载。
+					// T10B：写**焦点 agent 自己的** settings 与它的会话根 —— 旧实现用全局 Settings.instance +
+					// process.cwd()，对 registry agent 会把停用名单写进 default agent 的 config.yml，
+					// 并把 serve 项目根的技能重新热加载进人家的会话（写错人 + 拿错范围）。
 					const skillName = command.name.trim();
 					if (!skillName || skillName.includes("/") || skillName.includes("\\")) {
 						failWithCode("internal", `invalid skill name: ${String(command.name)}`);
 						break;
 					}
 					try {
-						const settings = Settings.instance;
+						const settings = session.settings;
 						const ignored = new Set<string>(settings.get("skills.ignoredSkills") ?? []);
 						if (command.enabled) {
 							ignored.delete(skillName);
@@ -1389,7 +1441,11 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						// 会把用户停用的扩展技能全拉回来，42→74 事故根因）+ 会话热重载
 						const skillsSettings = settings.getGroup("skills");
 						const disabledExtensionIds = settings.get("disabledExtensions") ?? [];
-						const result = await discoverSkills(process.cwd(), getAgentDir(), {
+						// 发现根由 (cwd, home) 决定：registry agent 的会话根 = 它的 agentDir，所以它的
+						// `.cornfield/skills`（project 级）会被扫到；`~/.cornfield/agent/skills`（loader 的
+						// user 级根）仍然是共享用户库，不是这个 agent 私有的。
+						const anchor = await resolveAgentScope({ agentId, meta: attached.meta, attached });
+						const result = await discoverSkills(anchor.sessionCwd, anchor.agentDir, {
 							...skillsSettings,
 							disabledExtensions: disabledExtensionIds,
 						});
@@ -2232,51 +2288,6 @@ async function readTextFileClipped(
 	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
 }
 
-// ── P2-W3-3 回切：已停用技能名单（settings.skills.ignoredSkills + SKILL.md 元数据）──
-
-interface DisabledSkillRow {
-	name: string;
-	description?: string;
-}
-
-async function buildDisabledSkillList(): Promise<DisabledSkillRow[]> {
-	const ignored = Settings.instance.get("skills.ignoredSkills") ?? [];
-	if (ignored.length === 0) return [];
-	const agentDir = getAgentDir();
-	const cwd = process.cwd();
-	const rows: DisabledSkillRow[] = [];
-	for (const name of ignored) {
-		const description = await readSkillFrontmatterDescription(name, cwd, agentDir);
-		rows.push(description !== undefined ? { name, description } : { name });
-	}
-	return rows;
-}
-
-/** 读技能目录 SKILL.md 的 description（用户级 agentDir/skills 或项目级 .cornfield/skills）。 */
-async function readSkillFrontmatterDescription(
-	name: string,
-	cwd: string,
-	agentDir: string,
-): Promise<string | undefined> {
-	const candidates = [
-		path.join(agentDir, "skills", name, "SKILL.md"),
-		path.join(cwd, ".cornfield", "skills", name, "SKILL.md"),
-	];
-	for (const filePath of candidates) {
-		try {
-			const content = await Bun.file(filePath).text();
-			const { frontmatter } = parseFrontmatter(content, { source: filePath });
-			if (typeof frontmatter.description === "string" && frontmatter.description.length > 0) {
-				return frontmatter.description;
-			}
-			return undefined;
-		} catch {
-			// 该候选目录不存在/损坏——试下一个
-		}
-	}
-	return undefined;
-}
-
 // ── P2-4：cron/gateway 命令转发 gateway 生产端点（POST /wire）──
 //
 // serve 不再直读 jobs.json / gateway.status.json——gateway 是调度器主人，直接回答
@@ -2678,21 +2689,6 @@ function parseStatsPeriod(period: WireCommandOfType<"get_stats">["period"]): num
 	return period === undefined ? undefined : (STATS_PERIOD_MS[period] ?? undefined);
 }
 
-// ── W3 D3：记忆投影（memory/user/project 三分区，只读）──
-
-interface MemoryTextFileProjection {
-	path: string;
-	content: string;
-	truncated: boolean;
-}
-
-/** 读文本文件（>128KB 截断并标记）；文件不存在/读取失败返回 null（空态）。 */
-async function readMemoryFileClipped(filePath: string): Promise<MemoryTextFileProjection | null> {
-	const res = await readTextFileClipped(filePath);
-	if ("error" in res) return null;
-	return { path: filePath, content: res.text, truncated: res.truncated };
-}
-
 // ── R-IMG-SERVE：二进制图片读取（dataUrl，2MB 上限，MIME 按扩展名）──
 
 const FS_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
@@ -2777,99 +2773,6 @@ async function readImageFileClipped(
 		if (isEnoent(err)) return { error: `no such file: ${path.basename(filePath)}` };
 		throw err;
 	}
-}
-
-interface MemorySectionProjection {
-	namespace: string;
-	entries: { id: string; content: string; importance: number; lastAccessedAt: number }[];
-}
-
-interface MemoryProjectFileProjection {
-	memoryRoot: string;
-	memoryMd: MemoryTextFileProjection | null;
-	summaryMd: MemoryTextFileProjection | null;
-	rawMd: MemoryTextFileProjection | null;
-}
-
-/**
- * 项目记忆三分区：canonical evolution 目录优先，旧版扁平目录（agentDir/memories）回落。
- * 任一候选目录有投影文件即采用；全部无文件则返回 canonical 的空投影（UI 显示「未生成」）。
- */
-async function buildProjectMemoryZone(
-	memoryRoot: string | undefined,
-	agentDir: string,
-	cwd: string,
-): Promise<MemoryProjectFileProjection | null> {
-	if (!memoryRoot) return null;
-
-	const candidates = [memoryRoot];
-	try {
-		candidates.push(...resolveGlobalMemoryRootCandidates(agentDir, cwd));
-	} catch {
-		// 旧目录解析失败不影响 canonical
-	}
-
-	let emptyFallback: MemoryProjectFileProjection | null = null;
-	for (const root of candidates) {
-		const [memoryMd, summaryMd, rawMd] = await Promise.all([
-			readMemoryFileClipped(path.join(root, "MEMORY.md")),
-			readMemoryFileClipped(path.join(root, "memory_summary.md")),
-			readMemoryFileClipped(path.join(root, "raw_memories.md")),
-		]);
-		if (memoryMd || summaryMd || rawMd) {
-			return { memoryRoot: root, memoryMd, summaryMd, rawMd };
-		}
-		if (!emptyFallback) emptyFallback = { memoryRoot: root, memoryMd, summaryMd, rawMd };
-	}
-	return emptyFallback;
-}
-
-/** 记忆投影：user.md + 项目 MEMORY 文件 + self-evolution 记忆库分区。 */
-async function buildMemoryProjection(
-	cwd: string,
-	agentDir: string,
-): Promise<{
-	user: MemoryTextFileProjection | null;
-	project: MemoryProjectFileProjection | null;
-	memoryStore: { dbPath: string; sections: MemorySectionProjection[]; totalEntries: number };
-}> {
-	// user 区：~/.cornfield/user.md（身份画像；与 identity 工具同路径解析）
-	const userPath = path.join(getConfigRootDir(), "user.md");
-	const user = await readMemoryFileClipped(userPath);
-
-	// project 区：当前项目记忆目录的投影文件（MEMORY.md / memory_summary.md / raw_memories.md）
-	// getMemoryRoot 对系统路径（~/.cornfield 等）返回 undefined——该场景项目记忆不适用，置 null。
-	const memoryRoot = getMemoryRoot(agentDir, cwd);
-	const project = await buildProjectMemoryZone(memoryRoot, agentDir, cwd);
-
-	// memory 区：self-evolution 记忆库（vector_embeddings 分区，importance 降序）
-	// refcount 平衡：get 后无论如何 release（load 抛错也不漏 ref）
-	let sections: MemorySectionProjection[] = [];
-	let dbPath = "";
-	const db = getMemoryDb(cwd);
-	try {
-		dbPath = resolveMemoryDbPath(cwd);
-		sections = loadSectionsFromDb(db).map(section => ({
-			namespace: section.namespace,
-			entries: section.entries.map(e => ({
-				id: e.id,
-				content: e.content,
-				importance: e.importance,
-				lastAccessedAt: e.lastAccessedAt,
-			})),
-		}));
-	} catch (err) {
-		logger.debug("memory store read failed", { cwd, error: err instanceof Error ? err.message : String(err) });
-	} finally {
-		releaseMemoryDb(cwd);
-	}
-	const totalEntries = sections.reduce((sum, s) => sum + s.entries.length, 0);
-
-	return {
-		user,
-		project,
-		memoryStore: { dbPath, sections, totalEntries },
-	};
 }
 
 // ═══════════════════════════════════════════════════════════════════════

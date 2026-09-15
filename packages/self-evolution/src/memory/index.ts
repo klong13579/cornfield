@@ -1187,7 +1187,15 @@ function loadMemoryConfig(settings: Settings): MemoryRuntimeConfig {
 }
 
 export { encodeProjectPathForGlobalMemory as encodeProjectPath, getMemoryRoot } from "../paths";
-export { closeMemoryDb, getMemoryDb, openMemoryDb, releaseMemoryDb, resolveMemoryDbPath } from "./storage";
+export {
+	closeMemoryDb,
+	getMemoryDb,
+	openMemoryDb,
+	readSessionMemory,
+	releaseMemoryDb,
+	resolveMemoryDbPath,
+	type SessionMemoryRow,
+} from "./storage";
 export { ensureMemorySummaryFromMemory } from "./summary";
 
 function unixNow(): number {

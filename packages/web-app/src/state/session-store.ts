@@ -7,11 +7,9 @@ import type {
 	CronLogEntryDto,
 	DashboardStatsDto,
 	DiagnosisAggregationDto,
-	DisabledSkillDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
-	MemoryProjectionDto,
 	MessageContentDto,
 	MessageDto,
 	ModelCatalogDto,
@@ -27,7 +25,6 @@ import type {
 	SessionPhaseDto,
 	SessionSnapshotDto,
 	SessionTreeDto,
-	SkillDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
@@ -42,8 +39,10 @@ import type {
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
+	MemoryScopeProjectionDto,
 	PiClient,
 	RemoteSkillItemDto,
+	SkillsResultDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import { createClient } from "./client";
@@ -926,19 +925,23 @@ export class SessionStore {
 		return this.#client.getStats(period);
 	}
 
-	/** 记忆投影（get_memory，代理到 pi-client；展示层自行持有状态）。 */
-	fetchMemory(): Promise<MemoryProjectionDto> {
-		return this.#client.getMemory();
+	/** 记忆投影（get_memory，代理到 pi-client；sessionId 定向 agent，展示层自行持有状态）。 */
+	fetchMemory(sessionId?: string): Promise<MemoryScopeProjectionDto> {
+		return this.#client.getMemory(sessionId);
 	}
 
-	/** 已加载技能 + 已停用名单（get_skills，代理到 pi-client；展示层自行持有状态）。 */
-	fetchSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }> {
-		return this.#client.getSkills();
+	/** 技能工作台数据（get_skills，代理到 pi-client；sessionId 定向 agent）。 */
+	fetchSkills(sessionId?: string): Promise<SkillsResultDto> {
+		return this.#client.getSkills(sessionId);
 	}
 
-	/** 启停技能（set_skill_enabled，代理到 pi-client）。 */
-	setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
-		return this.#client.setSkillEnabled(name, enabled);
+	/** 启停技能（set_skill_enabled，代理到 pi-client；写该 agent 自己的配置）。 */
+	setSkillEnabled(
+		name: string,
+		enabled: boolean,
+		sessionId?: string,
+	): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+		return this.#client.setSkillEnabled(name, enabled, sessionId);
 	}
 
 	/** 远程技能市场（list_remote_skills，代理到 pi-client；展示层自行持有状态）。 */
