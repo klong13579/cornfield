@@ -20,6 +20,8 @@
 
 - **`ast_grep` 的 parse-error 归一整段静默失效**（`src/tools/ast-grep.ts`、`test/tools/ast-grep.test.ts`）：原生层把文案从 `syntax tree contains error nodes` 改成 `error or missing nodes` 后，剥离查询前缀的正则再也匹配不上，去重退化成按原始串比较。现在父层描述按 `[^)]+` 宽松匹配，文案再变也不会静默失效。
 
+- **serve 首帧 `server_snapshot` 把预挂载中的 agent 报成未挂载**（`src/server/wire-server.ts`、`test/wire-server-multi-agent.integration.test.ts`）：预挂载是后台任务（不阻塞 listening——桌面端「打开即连接」靠的就是这个），但 registry 的 attached 事件会立刻广播一次列表，于是「已注册但还没挂上」的 agent 会以 `attached:false` 出现在客户端收到的**第一帧**里，随后才被纠正。c481a2a214 想修的「未挂载」闪现其实没消失，只是窗口小到要多试几次才看见（CI 上随 shard 命中）。现在把门闸放在 `server_snapshot` 的**唯一发送点**：预挂载结算前不发，期间多次广播合并成一次（结算后发的是那一刻的真实状态）；单个 agent 挂不上只告警，10s 上限兜底——超时就按当时真实状态发，不把没挂上说成已挂上。`hello_ack` 仍即时发出，握手延迟不变。回归：`wire-server-multi-agent` 在 14 个 CPU 占用者下连跑 6 次全过（修前 3/5），首帧快照 4/4 均为全 attached。
+
 ## [1.2.4] - 2026-09-15
 
 ### Fixed
