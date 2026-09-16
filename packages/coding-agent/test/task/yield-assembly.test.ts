@@ -26,7 +26,10 @@ describe("assembleYieldResult", () => {
 	});
 
 	it("wraps a single section in a list when the schema declares that label as an array", () => {
-		const out = assembleYieldResult([{ status: "success", type: ["findings"], data: { id: 1 } }], new Set(["findings"]));
+		const out = assembleYieldResult(
+			[{ status: "success", type: ["findings"], data: { id: 1 } }],
+			new Set(["findings"]),
+		);
 		expect(out?.data).toEqual({ findings: [{ id: 1 }] });
 	});
 
@@ -39,7 +42,10 @@ describe("assembleYieldResult", () => {
 	});
 
 	it("keeps sections when the terminal submission carries no data", () => {
-		const out = assembleYieldResult([{ status: "success", type: ["notes"], data: "n" }, { status: "success", type: "result" }]);
+		const out = assembleYieldResult([
+			{ status: "success", type: ["notes"], data: "n" },
+			{ status: "success", type: "result" },
+		]);
 		expect(out?.data).toEqual({ notes: "n" });
 		expect(out?.terminalStatus).toBe("success");
 	});

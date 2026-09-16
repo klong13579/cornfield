@@ -30,7 +30,6 @@ import { truncateTail } from "../session/streaming-output";
 import type { ContextFileEntry } from "../tools";
 import { normalizeSchema } from "../tools/jtd-to-json-schema";
 import { buildOutputValidator } from "../tools/output-schema-validator";
-import { arrayValuedLabels, assembleYieldResult, isIncrementalYieldType } from "./yield-assembly";
 import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
@@ -46,6 +45,7 @@ import {
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "./types";
+import { arrayValuedLabels, assembleYieldResult, isIncrementalYieldType } from "./yield-assembly";
 
 const MCP_CALL_TIMEOUT_MS = 60_000;
 
@@ -797,7 +797,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 								existing.push(data);
 							}
 							progress.extractedToolData[event.toolName] = existing;
-							if (event.toolName === "yield" && !isIncrementalYieldType((data as { type?: unknown } | undefined)?.type)) {
+							if (
+								event.toolName === "yield" &&
+								!isIncrementalYieldType((data as { type?: unknown } | undefined)?.type)
+							) {
 								// Only a terminal submission closes the run. An incremental section
 								// reports a part of the result, so ending the loop here would cut the
 								// subagent off mid-result and lose everything it had left to send.

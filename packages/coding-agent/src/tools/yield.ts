@@ -5,12 +5,12 @@
  */
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
 import { dereferenceJsonSchema, sanitizeSchemaForStrictMode } from "@cornfield/ai/utils/schema";
+import { isRecord } from "@cornfield/utils";
 import type { Static, TSchema } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import yieldDescription from "../prompts/tools/yield.md" with { type: "text" };
-import { isIncrementalYieldType } from "../task/yield-assembly";
 import { subprocessToolRegistry } from "../task/subprocess-tool-registry";
-import { isRecord } from "@cornfield/utils";
+import { isIncrementalYieldType } from "../task/yield-assembly";
 import type { ToolSession } from ".";
 import {
 	buildOutputValidator,
@@ -95,10 +95,7 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 			Type.Object(
 				{
 					result: Type.Union([
-						Type.Object(
-							{ data: dataSchema, type: createTypeSchema() },
-							{ description: "task succeeded" },
-						),
+						Type.Object({ data: dataSchema, type: createTypeSchema() }, { description: "task succeeded" }),
 						Type.Object({
 							error: Type.String({ description: "error message" }),
 							type: createTypeSchema(),
@@ -229,9 +226,7 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 				const known = this.#sections.labels;
 				for (const label of sectionList) {
 					if (this.#sections.closed && known !== undefined && !known.has(label)) {
-						throw new Error(
-							`Unknown output section "${label}". Known sections: ${[...known].join(", ")}.`,
-						);
+						throw new Error(`Unknown output section "${label}". Known sections: ${[...known].join(", ")}.`);
 					}
 					const verdict = this.#validateSection?.(label, data);
 					if (verdict && !verdict.valid) {

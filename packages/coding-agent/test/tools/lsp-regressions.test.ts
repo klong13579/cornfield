@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RenderResultOptions } from "@cornfield/agent";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import { LspTool } from "@cornfield/coding-agent/lsp";
 import * as lspClient from "@cornfield/coding-agent/lsp/client";
 import * as lspConfig from "@cornfield/coding-agent/lsp/config";
@@ -28,7 +29,6 @@ import {
 import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { clampTimeout } from "@cornfield/coding-agent/tools/tool-timeouts";
-import { Settings } from "@cornfield/coding-agent/config/settings";
 import { sanitizeText } from "@cornfield/natives";
 import * as piUtils from "@cornfield/utils";
 import { TempDir } from "@cornfield/utils";

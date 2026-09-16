@@ -9,9 +9,10 @@
  * policy — `yield` runs its retry/override ladder, the executor decides whether a raw-text
  * completion is an acceptable fallback.
  */
-import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
+
 import { dereferenceJsonSchema } from "@cornfield/ai/utils/schema";
 import { isRecord } from "@cornfield/utils";
+import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
 import { jtdToJsonSchema, normalizeSchema } from "./jtd-to-json-schema";
 
 /**
@@ -177,11 +178,7 @@ export function sectionMetadata(schema: unknown): SectionMetadata {
  * subschema for `label`, or when that subschema cannot be compiled — there is no
  * verdict to give, and the caller decides whether an undeclared label is an error.
  */
-export function validateSection(
-	schema: unknown,
-	label: string,
-	value: unknown,
-): SchemaValidationResult | undefined {
+export function validateSection(schema: unknown, label: string, value: unknown): SchemaValidationResult | undefined {
 	try {
 		const sub = topLevelProperties(schema)?.properties[label];
 		if (sub === undefined || sub === null) return undefined;
