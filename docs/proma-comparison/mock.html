@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cornfield UX Mock</title>
+<style>
+:root{font:14px system-ui;color:#eaf1ff;background:#0b1222;--p:#121d32;--b:#293b5e;--m:#91a3c2;--a:#6689ff}*{box-sizing:border-box}body{margin:0}.app{display:grid;grid-template-columns:240px 1fr 330px;height:100vh}.app.lclosed{grid-template-columns:42px 1fr 330px}.app.rclosed{grid-template-columns:240px 1fr 42px}.app.lclosed.rclosed{grid-template-columns:42px 1fr 42px}aside,main{overflow:auto}aside{background:var(--p);border-color:var(--b)}.left{border-right:1px solid;padding:18px}.right{border-left:1px solid;padding:18px}.lclosed .left>*:not(.toggle),.rclosed .right>*:not(.toggle){display:none}.toggle,.btn,.tab,.nav button{border:1px solid var(--b);background:#172744;color:#eaf1ff;border-radius:7px;padding:8px 11px;cursor:pointer}.logo{font-weight:800;font-size:20px;margin:12px 8px 22px}.agent,.card{background:#16243e;border:1px solid var(--b);border-radius:11px;padding:14px;margin-bottom:13px}.agent b{display:block;margin:7px 0}.ey,.muted{color:var(--m);font-size:12px}.ey{text-transform:uppercase;letter-spacing:.12em;font-size:10px}.nav{display:grid;gap:3px}.nav button{border:0;text-align:left}.nav button:hover,.nav .on,.tab.on{background:#2a416b;color:#fff}.group{color:#6880a7;font-size:10px;text-transform:uppercase;margin:18px 8px 5px}main{padding:28px}.head{display:flex;justify-content:space-between;gap:16px;margin-bottom:22px}.title{font-size:27px;font-weight:800;margin:5px 0}.actions{display:flex;gap:7px;flex-wrap:wrap}.primary{background:var(--a);border-color:#8da7ff}.tabs{border-bottom:1px solid var(--b);margin-bottom:15px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:13px}.c12{grid-column:span 12}.c8{grid-column:span 8}.c6{grid-column:span 6}.c4{grid-column:span 4}.row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--b)}.row:last-child{border:0}.pill{background:#29426f;border-radius:99px;padding:4px 8px;font-size:11px}.ok{background:#164537;color:#7ee7bd}.warn{background:#4d3a1b;color:#ffd88b}.tree{line-height:2.1}.node{padding-left:12px;border-left:1px solid #4b628d}.table{width:100%;border-collapse:collapse}.table td,.table th{padding:10px;text-align:left;border-bottom:1px solid var(--b);font-size:12px}.table th{color:var(--m)}.term{background:#070b13;padding:14px;border-radius:8px;color:#9fe2af;font:12px/1.8 monospace}.modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center}.modal>div{background:#182744;border:1px solid #526c9d;border-radius:12px;padding:20px;width:min(520px,90vw)}select{width:100%;background:#0d1729;color:#fff;border:1px solid var(--b);border-radius:7px;padding:9px;margin:5px 0 12px}@media(max-width:900px){.app{grid-template-columns:72px 1fr}.right{display:none}.left{padding:8px}.left>*:not(.toggle){display:none}.grid{display:block}.card{margin-bottom:12px}main{padding:18px}.head{display:block}.actions{margin-top:12px}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+<aside class="left"><button class="toggle" onclick="togglePane('l')">☰</button><div class="logo">cornfield</div><div class="agent"><span class="ey">当前 Agent</span><b id="agentName">未选择 Agent</b><span class="muted" id="contextHint">先选择 Agent</span></div>
+<div class="group">工作</div><nav class="nav"><button data-p="home">⌂　首页</button><button data-p="workspace">◈　会话工作台</button><button data-p="records">▤　会话记录</button></nav>
+<div class="group">Agent</div><nav class="nav"><button data-p="agents">♙　Agent 总览</button><button data-p="projects">▦　项目</button><button data-p="tree">♧　会话树</button></nav>
+<div class="group">能力</div><nav class="nav"><button data-p="skills">✦　Skills</button><button data-p="memory">◌　Memory</button><button data-p="todo">✓　Todo</button><button data-p="models">◎　模型</button><button data-p="voice">◉　语音</button></nav>
+<div class="group">系统</div><nav class="nav"><button data-p="tasks">◷　定时任务</button><button data-p="insights">▥　用量</button><button data-p="settings">⚙　设置</button></nav></aside>
+<main id="main"></main>
+<aside class="right"><button class="toggle" onclick="togglePane('r')">›</button><div class="tabs"><button class="tab on" data-r="context">Context</button><button class="tab" data-r="files">Files</button><button class="tab" data-r="artifacts">Artifacts</button><button class="tab" data-r="terminal">Terminal</button></div><div id="pane"></div></aside></div>
+<div class="modal" id="modal"><div><h2>选择 Agent</h2><select id="agentSelect"><option>软件 Agent</option><option>产品 Agent</option><option>数据分析 Agent</option></select><button class="btn" onclick="closeModal()">取消</button> <button class="btn primary" onclick="chooseAgent()">确认</button></div></div>
+<script>
+const state={agent:'',project:'',session:'',page:'home',right:'context'};
+const names={home:['首页','从 Agent 入口开始，继续最近工作'],workspace:['会话工作台','当前 Root Session 的对话、子会话和工作区'],records:['会话记录','历史 Session、回放和诊断'],agents:['Agent 总览','长期数字员工和服务项目'],projects:['项目','当前 Agent 可服务的 Project'],tree:['会话树','Root、Child、Process 和结果带回'],skills:['Skills','Agent 全局和 Project 有效能力'],memory:['Memory','按 scope 管理记忆'],todo:['Todo','Agent Todo、Project TODO.md、Session Todo'],models:['模型','Catalog、Providers、运行时配置'],voice:['语音','语音输入、Jarvis、听记'],tasks:['定时任务','Schedule 绑定 Agent，执行创建 Root Session'],insights:['用量与健康','按 Agent、Project、Session 观察运行质量'],settings:['设置','系统连接、默认 Agent、权限和 MCP']};
+const body={
+home:`<div class="grid"><div class="card c8"><h2>快速会话</h2><p class="muted">${state.agent?'当前 Agent：'+state.agent+'。':'先选择 Agent，再开始对话。'}${state.project?' 当前项目：'+state.project+'.':''}</p><div class="card"><div class="muted">Agent 回复区域</div><p>${state.agent?'准备好开始工作。可以继续最近任务，或创建完整 Session。':'未选择 Agent，当前不会启动会话。'}</p></div><div class="row"><input id="quickInput" placeholder="输入消息…" style="flex:1"><button class="btn primary" onclick="sendQuick()">发送</button></div><button class="btn" onclick="go('workspace')">转入会话工作台</button></div><div class="card c4"><h2>工作概览</h2><div class="row"><span>Agent</span><span>${state.agent||'未选择'}</span></div><div class="row"><span>Project</span><span>${state.project||'未选择'}</span></div><div class="row"><span>最近 Session</span><span>${state.session||'无'}</span></div><button class="btn primary" onclick="openModal()">${state.agent?'切换 Agent':'选择 Agent'}</button></div><div class="card c6"><h2>最近会话</h2><div class="row"><span>桌面客户端架构整理</span><button class="btn" onclick="go('workspace')">继续</button></div><div class="row"><span>研究 Proma 编辑器</span><button class="btn" onclick="go('records')">查看</button></div></div><div class="card c6"><h2>待处理</h2><div class="row"><span>子会话结果 ready</span><button class="btn" onclick="go('tree')">查看</button></div><div class="row"><span>Agent Todo</span><button class="btn" onclick="go('todo')">查看</button></div></div></div>`,
+workspace:`<div class="tabs"><button class="tab on" onclick="pane('context')">对话</button><button class="tab" onclick="pane('files')">Files</button><button class="tab" onclick="pane('artifacts')">Artifacts</button><button class="tab" onclick="toast('子会话创建需要当前 Agent 和 Project')">委派子会话</button></div><div class="card"><h2>${state.session||'未选择 Session'}</h2><p class="muted">${state.agent||'未选择 Agent'} / ${state.project||'未选择 Project'}</p><div class="row"><span>主会话</span><span class="pill ok">${state.agent?'running':'未启动'}</span></div><button class="btn primary" onclick="toast('Root Session 已创建')">新建 Session</button></div>`,
+records:`<div class="card"><table class="table"><tr><th>Session</th><th>Scope</th><th>Type</th><th>状态</th><th></th></tr><tr><td>桌面客户端架构整理</td><td>软件 / Cornfield</td><td>root</td><td><span class="pill ok">completed</span></td><td><button class="btn" onclick="go('workspace')">打开工作台</button></td></tr></table></div>`,
+agents:`<div class="actions"><button class="btn primary" onclick="toast('创建 Agent 表单')">+ 新建 Agent</button></div><div class="grid"><div class="card c4"><h2>软件 Agent</h2><p class="muted">软件系统与架构</p><span class="pill ok">online</span><br><button class="btn" onclick="selectAgent('软件 Agent');go('projects')">查看项目</button></div><div class="card c4"><h2>产品 Agent</h2><p class="muted">产品规划与用户价值</p><span class="pill">idle</span><br><button class="btn" onclick="selectAgent('产品 Agent');go('projects')">查看项目</button></div><div class="card c4"><h2>数据分析 Agent</h2><p class="muted">经营数据与实验</p><span class="pill ok">online</span><br><button class="btn" onclick="selectAgent('数据分析 Agent');go('projects')">查看项目</button></div></div>`,
+projects:`<div class="actions"><button class="btn primary" onclick="toast('绑定项目表单')">+ 绑定项目</button></div><div class="card"><table class="table"><tr><th>Project</th><th>Agent</th><th>Context</th><th></th></tr><tr><td>Cornfield</td><td>${state.agent||'未选择'}</td><td>active</td><td><button class="btn" onclick="selectProject('Cornfield');go('workspace')">进入工作台</button></td></tr><tr><td>米克原子 DTC</td><td>${state.agent||'未选择'}</td><td>bound</td><td><button class="btn" onclick="selectProject('米克原子 DTC');toast('Project 已选择')">选择</button></td></tr></table></div>`,
+tree:`<div class="grid"><div class="card c6"><h2>Session Tree</h2><div class="tree">◆ ${state.session||'Root Session'} <span class="pill ok">running</span><div class="node">├─ Research · ready</div><div class="node">├─ Design · running</div><div class="node">└─ Verify · waiting</div></div></div><div class="card c6"><h2>结果状态</h2><div class="row"><span>Process</span><span class="pill ok">healthy</span></div><div class="row"><span>Result</span><span class="pill">ready</span></div><button class="btn primary" onclick="toast('结果已带回主会话')">带回主会话</button></div></div>`,
+skills:`<div class="card"><table class="table"><tr><th>Skill</th><th>source</th><th>scope</th><th>activation</th><th>status</th></tr><tr><td>project-todo</td><td>builtin</td><td>project</td><td>loaded</td><td><span class="pill ok">enabled</span></td></tr><tr><td>squad-programming</td><td>user</td><td>agent</td><td>loaded</td><td><span class="pill ok">enabled</span></td></tr></table></div>`,
+memory:`<div class="grid"><div class="card c6"><h2>Agent Memory</h2><div class="row"><span>行为偏好</span><span>12 evidence</span></div><div class="row"><span>领域知识</span><span>48 entries</span></div></div><div class="card c6"><h2>Project Memory</h2><div class="row"><span>Cornfield 架构</span><span>project scope</span></div></div></div>`,
+todo:`<div class="tabs"><button class="tab on" onclick="toast('Agent Todo')">Agent Todo</button><button class="tab" onclick="toast('Project TODO.md')">Project TODO.md</button><button class="tab" onclick="toast('Session Todo')">Session Todo</button></div><div class="card"><div class="row"><span>定义 Session Process 契约</span><span class="pill warn">Agent</span></div><div class="row"><span>评估编辑器方案</span><span class="pill">Project</span></div></div>`,
+models:`<div class="tabs"><button class="tab on" onclick="toast('Catalog')">Catalog</button><button class="tab" onclick="toast('Providers')">Providers</button><button class="tab" onclick="toast('运行时配置')">配置</button></div><div class="card"><div class="row"><span>当前模型</span><b>${state.agent?'deepseek-v4-pro':'未解析'}</b></div><div class="row"><span>来源</span><span class="muted">${state.agent?'Agent 默认':'选择 Agent 后解析'}</span></div></div>`,
+voice:`<div class="grid"><div class="card c4"><h2>语音输入</h2><button class="btn primary" onclick="toast('录音开始')">开始录音</button></div><div class="card c4"><h2>Jarvis</h2><span class="pill">breathing</span></div><div class="card c4"><h2>听记</h2><button class="btn" onclick="toast('打开听记历史')">历史</button></div></div>`,
+tasks:`<div class="actions"><button class="btn primary" onclick="toast(state.agent?'Schedule 表单':'请先选择 Agent')">+ 新建定时任务</button></div><div class="card"><div class="row"><span>每日 CI 检查</span><span class="pill">${state.agent||'需要绑定 Agent'}</span></div><p class="muted">Schedule 必须持久化 agentId，不能读取当前 UI 选择。</p></div>`,
+insights:`<div class="grid"><div class="card c4"><h2>Token</h2><div class="title">${state.agent?'4.2M':'--'}</div></div><div class="card c4"><h2>进程健康</h2><div class="title">${state.agent?'98.7%':'--'}</div></div><div class="card c4"><h2>子会话</h2><div class="title">${state.agent?'12':'--'}</div></div></div>`,
+settings:`<div class="grid"><div class="card c6"><h2>默认 Agent</h2><p class="muted">${state.agent||'没有默认 Agent。新建 Session 时需要显式选择。'}</p><button class="btn primary" onclick="openModal()">设置默认 Agent</button></div><div class="card c6"><h2>系统连接</h2><div class="row"><span>Serve</span><span class="pill ok">connected</span></div><div class="row"><span>MCP</span><span>3 configured</span></div></div></div>`};
+function go(p){state.page=p;document.querySelectorAll('[data-p]').forEach(x=>x.classList.toggle('on',x.dataset.p===p));const n=names[p]||names.home;const scoped=['skills','memory','todo','models','tasks'].includes(p);let actions=p==='home'?'<button class="btn primary" onclick="openModal()">选择 Agent</button>':p==='workspace'?'<button class="btn primary" onclick="toast(\'Session 已创建\')">新建 Session</button>':scoped?'<span class="pill">scope: '+(state.agent||'未选择 Agent')+'</span>':'';main.innerHTML='<div class="head"><div><div class="crumb">'+(state.agent||'未选择 Agent')+(state.project?' / '+state.project:'')+(p==='workspace'&&state.session?' / '+state.session:'')+'</div><div class="title">'+n[0]+'</div><div class="muted">'+n[1]+'</div></div><div class="actions">'+actions+'</div></div>'+(body[p]||body.home);history.replaceState({},'',`#${p}`);}
+function pane(p){state.right=p;document.querySelectorAll('[data-r]').forEach(x=>x.classList.toggle('on',x.dataset.r===p));const content={context:'<h2>WorkspaceContext</h2><div class="card"><b>'+ (state.agent||'未选择 Agent')+'</b><p class="muted">'+(state.project||'未选择 Project')+' · '+(state.session||'未选择 Session')+'</p></div>',files:'<h2>Files</h2><div class="card"><div class="row"><span>src/</span><span>目录</span></div><div class="row"><span>architecture.md</span><button class="btn" onclick="toast(\'文件预览\')">打开</button></div></div>',artifacts:'<h2>Artifacts</h2><div class="card"><div class="row"><span>research-report.md</span><button class="btn" onclick="toast(\'预览 Artifact\')">预览</button></div><div class="row"><span>diff-summary.html</span><button class="btn" onclick="toast(\'打开 HTML 预览\')">打开</button></div></div>',terminal:'<h2>Agent Terminal</h2><div class="term">$ process: '+(state.agent?'healthy':'not started')+'<br>$ _</div>'};document.querySelector('#pane').innerHTML=content[p]||content.context}
+function togglePane(x){document.querySelector('#app').classList.toggle(x+'closed')};function openModal(){modal.style.display='flex'}function closeModal(){modal.style.display='none'}function selectAgent(a){state.agent=a;state.project=a==='软件 Agent'?'Cornfield':'';state.session=state.project?'桌面客户端架构整理':'';agentName.textContent=a;contextHint.textContent=state.project?state.project:'未绑定 Project';}function chooseAgent(){selectAgent(agentSelect.value);closeModal();toast('Agent / Project / Session 上下文已更新');go(state.page)}function selectProject(p){state.project=p;state.session='新的 Session';toast('Project 已选择，WorkspaceContext 已更新');go(state.page)}function toast(s){let t=document.querySelector('#toast');if(!t){t=document.createElement('div');t.id='toast';t.style='position:fixed;right:20px;bottom:20px;background:#284477;padding:12px;border-radius:8px';document.body.append(t)}t.textContent=s;setTimeout(()=>t.remove(),1800)}
+function sendQuick(){if(!state.agent){openModal();return}const input=document.querySelector('#quickInput');if(!input||!input.value.trim()){toast('请输入消息');return}state.session=state.session||'首页快速会话';toast('消息已发送到 '+state.agent);go('workspace')}
+const conversations = [];
+let activeConversation = null;
+let conversationSequence = 0;
+const escapeText = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+function createConversation(agent, project, title, parentId = null) {
+  const entry = {id: 'session-' + (++conversationSequence), agent, project, title, parentId, messages: [], broughtBack: false};
+  conversations.push(entry); activeConversation = entry;
+  return entry;
+}
+function showConversation(entry) {
+  activeConversation = entry; state.agent = entry.agent; state.project = entry.project; state.session = entry.title;
+  document.querySelector('#agentName').textContent = entry.agent;
+  document.querySelector('#contextHint').textContent = entry.project || '无项目';
+  go('workspace');
+}
+function conversationMarkup() {
+  if (!activeConversation) return '<div class="card"><h2>开始一段新对话</h2><p>每个会话独立保存消息；项目可选。不会继承上次会话的消息。</p><button class="btn" data-conversation-action="new">新建会话</button></div>';
+  const entry = activeConversation;
+  const children = conversations.filter(item => item.parentId === entry.id);
+  const root = entry.parentId ? conversations.find(item => item.id === entry.parentId) : null;
+  return '<div class="card"><h2>' + escapeText(entry.title) + '</h2><p>' + escapeText(entry.agent) + ' / ' + escapeText(entry.project || '无项目') + ' / ' + entry.id + '</p>' +
+    (root ? '<button class="btn" data-open-session="' + root.id + '">返回父会话：' + escapeText(root.agent) + '</button>' : '') +
+    '<div id="conversationMessages" aria-live="polite">' + entry.messages.map(message => '<article class="card"><b>' + escapeText(message.author) + '</b><p style="white-space:pre-wrap">' + escapeText(message.text) + '</p></article>').join('') + '</div>' +
+    '<label>消息<textarea id="conversationInput" style="width:100%" rows="3"></textarea></label><button class="btn primary" data-conversation-action="send">发送消息</button></div>' +
+    '<div class="card"><h3>协作子会话</h3><p class="muted">一个会话一个负责 Agent。以下进程和结果均为模拟，不启动真实 worker。</p><button class="btn" data-conversation-action="delegate">委派子会话</button>' +
+    children.map(child => '<article class="row"><span>' + escapeText(child.agent + ' · ' + child.title) + ' · ' + (child.broughtBack ? '已带回' : '结果待带回') + '</span><button class="btn" data-open-session="' + child.id + '">查看子会话</button><button class="btn" data-return-session="' + child.id + '" ' + (child.broughtBack ? 'disabled' : '') + '>带回结果</button></article>').join('') + '</div>';
+}
+function syncConversationView() {
+  if (!['home','workspace'].includes(state.page)) return;
+  const header = document.querySelector('#main .head .actions');
+  header.innerHTML = state.page === 'workspace' ? '<button class="btn" data-conversation-action="new">新建会话</button>' : '';
+  const content = document.createElement('section'); content.id = 'conversationSurface';
+  content.innerHTML = '<p class="muted">交互原型：示例数据，仅保存在当前页面内存，不调用模型、不执行命令。</p>' +
+    (state.page === 'home' ? '<h2>快速会话</h2>' : '') + conversationMarkup() +
+    (state.page === 'home' && activeConversation ? '<button class="btn" data-conversation-action="expand">转入完整工作台（同一会话）</button>' : '') +
+    '<div class="card"><h3>最近会话</h3>' + conversations.filter(entry => !entry.parentId).map(entry => '<button class="btn" data-open-session="' + entry.id + '">' + escapeText(entry.agent + ' · ' + entry.title) + '</button>').join('') + '</div>';
+  const mainElement = document.querySelector('#main');
+  while(mainElement.children.length > 1) mainElement.lastElementChild.remove();
+  mainElement.append(content); pane(state.right);
+}
+const conversationObserver = new MutationObserver(() => {
+  if (['home','workspace'].includes(state.page) && !document.querySelector('#conversationSurface')) syncConversationView();
+});
+conversationObserver.observe(document.querySelector('#main'), {childList:true});
+const dialog = document.createElement('dialog'); dialog.id = 'conversationDialog';
+dialog.innerHTML = '<form method="dialog" id="conversationForm"><h2 id="conversationDialogTitle">新建会话</h2><p>新任务会创建独立会话；转入完整工作台则保留同一个会话。</p><label>负责 Agent<select name="agent"><option>软件 Agent</option><option>产品 Agent</option><option>数据分析 Agent</option></select></label><label>项目<select name="project"><option value="">无项目</option><option>Cornfield</option><option>米克原子 DTC</option></select></label><label>任务标题<input name="title" required maxlength="120"></label><p class="muted">只模拟会话，不启动真实进程。</p><button type="button" class="btn" id="cancelConversation">取消</button><button class="btn primary">创建</button></form>';
+document.body.append(dialog);
+let delegationParent = null;
+document.querySelector('#cancelConversation').onclick = () => dialog.close();
+document.querySelector('#conversationForm').onsubmit = event => {
+  event.preventDefault(); const form = event.currentTarget;
+  const title = form.elements.title.value.trim(); if (!title) return;
+  const entry = createConversation(form.elements.agent.value, form.elements.project.value, title, delegationParent?.id || null);
+  if (delegationParent) entry.messages.push({author:entry.agent, text:'模拟研究结果：建议保留首页快速会话，并用独立子会话承载其他 Agent 的分析。'});
+  dialog.close();
+  if (delegationParent) showConversation(delegationParent);
+  else {state.agent=entry.agent;state.project=entry.project;state.session=entry.title;document.querySelector('#agentName').textContent=entry.agent;go(state.page);}
+};
+document.addEventListener('click', event => {
+  const button = event.target.closest('button'); if (!button) return;
+  const action = button.dataset.conversationAction;
+  if (action === 'new' || action === 'delegate') {
+    delegationParent = action === 'delegate' ? activeConversation : null;
+    const form = document.querySelector('#conversationForm'); form.reset();
+    if(state.agent) form.elements.agent.value=state.agent;
+    form.elements.project.value=state.project || '';
+    document.querySelector('#conversationDialogTitle').textContent = delegationParent ? '委派子会话' : '新建会话';
+    dialog.showModal();
+  } else if (action === 'expand') go('workspace');
+  else if (action === 'send') {
+    const input=document.querySelector('#conversationInput');const text=input.value.trim();if(!text)return;
+    activeConversation.messages.push({author:'你',text},{author:activeConversation.agent,text:'模拟回复：已收到「'+text+'」。此消息仅保存在原型中。'});
+    syncConversationView();
+  } else if (button.dataset.openSession) showConversation(conversations.find(entry => entry.id === button.dataset.openSession));
+  else if (button.dataset.returnSession) {
+    const child=conversations.find(entry=>entry.id===button.dataset.returnSession);
+    const parent=conversations.find(entry=>entry.id===child.parentId);
+    if(!child.broughtBack){parent.messages.push({author:'子会话结果 · '+child.agent,text:child.messages.at(-1).text});child.broughtBack=true;}
+    showConversation(parent);
+  }
+});
+document.querySelectorAll('[data-p]').forEach(button=>button.onclick=()=>go(button.dataset.p));
+document.querySelectorAll('[data-r]').forEach(button=>button.onclick=()=>pane(button.dataset.r));
+go(location.hash.slice(1)||'home'); pane('context'); syncConversationView();
+</script>
+</body></html>
