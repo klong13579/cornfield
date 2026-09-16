@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { selectionLineRange } from "../../lib/context-items";
+import { activeAgentIdOf } from "../../state/agent-context";
 import type { OpenFile } from "../../state/file-workflow-store";
 import { getFileWorkflow, useFileWorkflow } from "../../state/file-workflow-store";
-import { DiffView } from "./DiffView";
+import type { SessionView } from "../../state/session-store";
+import { useSessionStore } from "../../state/session-store";
+import { useSession } from "../../state/use-session";
+import { type DiffSource, DiffView } from "./DiffView";
 
 /**
  * 文件预览 / 编辑面板（右栏与 Agent 详情页共用）。
@@ -23,9 +27,25 @@ interface PreviewImage {
 export function FilePreviewPane({ image }: { image: PreviewImage | null }): React.JSX.Element {
 	const flow = useFileWorkflow();
 	const open = flow.open;
+	const view = useSession();
+	const sessions = useSessionStore();
 
 	if (flow.diff) {
-		return <DiffView review={flow.diff} onClose={() => getFileWorkflow().closeDiff()} />;
+		// diff 的来源是**这份文件被打开时的**那个 agent（open.agentId 打开后就固定了），
+		// 不是此刻的焦点会话 —— 右栏改动页可以打开别的会话工作区里的文件。
+		const source = open ? diffSourceOf(open.agentId, view) : undefined;
+		if (source && !source.isCurrent) {
+			const { agentId } = source;
+			return (
+				<DiffView
+					review={flow.diff}
+					onClose={() => getFileWorkflow().closeDiff()}
+					source={source}
+					onReturnToSource={() => sessions.switchSession(agentId)}
+				/>
+			);
+		}
+		return <DiffView review={flow.diff} onClose={() => getFileWorkflow().closeDiff()} source={source} />;
 	}
 	if (open) return <OpenFilePane open={open} pending={flow.pendingOpen !== null} />;
 	if (image) {
@@ -47,6 +67,23 @@ export function FilePreviewPane({ image }: { image: PreviewImage | null }): Reac
 			<div className="text-[12px] text-ink-faint">点击左侧目录展开，点文件查看或编辑</div>
 		</div>
 	);
+}
+
+/**
+ * 这份 diff 的来源会话：agent 名（查不到就是 id 本身）+ 「它是不是当前焦点」。
+ *
+ * 焦点用 activeAgentIdOf（全应用同一处解析），不用裸 view.activeAgentId —— 新连接上后者
+ * 往往还没被切过，拿它比会把当前会话的 diff 报成「来自别处」。焦点未知（一个 agent 都没
+ * 有）时算**是**当前会话：不知道的事不要编成「来自别处」，那会让用户去点一个指向自己脚下的
+ * 出口。
+ */
+function diffSourceOf(agentId: string, view: SessionView): DiffSource {
+	const focus = activeAgentIdOf(view);
+	return {
+		agentId,
+		label: view.agents.find(agent => agent.id === agentId)?.name ?? agentId,
+		isCurrent: focus === undefined || agentId === focus,
+	};
 }
 
 function OpenFilePane({ open, pending }: { open: OpenFile; pending: boolean }): React.JSX.Element {

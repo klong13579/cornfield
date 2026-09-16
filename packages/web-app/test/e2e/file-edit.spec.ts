@@ -176,6 +176,16 @@ test.describe("文件编辑闭环（真实 serve + 真实文件系统）", () =>
 			// （行号与行内容在相邻 span 里，不拼成一个字符串，所以按 diff 行类型断言）
 			await expect(page.locator('[data-diff-kind="del"]').first()).toContainText("alpha");
 			await expect(page.locator('[data-diff-kind="add"]').first()).toContainText("external version");
+
+			// 并列视图是同一份 diff 的另一种摆法：删除行在左、新增行在右，内容一字不差
+			await page.getByRole("button", { name: "并列视图" }).click();
+			await expect(page.locator('[data-split-side="old"][data-split-kind="del"]').first()).toContainText("alpha");
+			await expect(page.locator('[data-split-side="new"][data-split-kind="add"]').first()).toContainText(
+				"external version",
+			);
+			// 切回统一视图不影响后续断言（两种视图是同一份数据的两种摆法）
+			await page.getByRole("button", { name: "统一视图" }).click();
+			await expect(page.locator('[data-diff-kind="del"]').first()).toContainText("alpha");
 			await page.getByRole("button", { name: "返回" }).click();
 
 			// ── 4. 「用我的覆盖」：以磁盘版本为基线重写 ──
