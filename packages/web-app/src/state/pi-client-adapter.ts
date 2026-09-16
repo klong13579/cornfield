@@ -1,5 +1,5 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@cornfield/client";
-import { PiClient as WirePiClient } from "@cornfield/client";
+import { PiServerError, PiClient as WirePiClient } from "@cornfield/client";
 import type {
 	AgentInfoDto,
 	AvailableModelsDto,
@@ -48,8 +48,11 @@ import type {
 	DiagnosisAggregationDto,
 	DiagnosisReportListItemDto,
 	DiagnosisSummaryDto,
+	FsDiffResult,
 	FsEntryDto,
 	FsImageResult,
+	FsReadResult,
+	FsWriteResult,
 	GatewayAccountPatchDto,
 	GatewayStatusDto,
 	ListenRecordingDto,
@@ -57,6 +60,7 @@ import type {
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
+import { FsConflictError } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 
 /** serve get_state env 条目（pi-wire WireEnvironmentSummary；pendingCronCount 为可选缺省）。 */
@@ -636,14 +640,60 @@ export class PiClientAdapter implements PiClient {
 		return { entries: result.entries ?? [] };
 	}
 
-	/** 读 agent workspace 文件（fs_read；>128KB 截断标记）。 */
-	async fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }> {
-		const result = await this.#req<{ text?: string | null; truncated?: boolean | null }>({
+	/** 读 agent workspace 文件（fs_read；>128KB 截断标记；version = 磁盘内容身份，保存时回传做 CAS）。 */
+	async fsRead(sessionId: string, path: string): Promise<FsReadResult> {
+		const result = await this.#req<{
+			text?: string | null;
+			truncated?: boolean | null;
+			version?: string | null;
+		}>({
 			type: "fs_read",
 			sessionId,
 			path,
 		} as never);
-		return { text: result.text ?? "", truncated: result.truncated === true };
+		return {
+			text: result.text ?? "",
+			truncated: result.truncated === true,
+			version: result.version ?? "",
+		};
+	}
+
+	/**
+	 * 整段写文件（fs_write）+ 服务端 compare-and-swap。
+	 *
+	 * `expectedVersion` 原样回传打开时读到的 version；服务端对不上就拒绝并且不落盘，
+	 * 这里把那个判决归一成 {@link FsConflictError}（可恢复：调用方重读磁盘后让用户选）。
+	 * 其余错误（越界/超限/未连接）原样上抛 —— 只有冲突是「选择哪一份」的问题。
+	 */
+	async fsWrite(sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult> {
+		const command = { type: "fs_write", sessionId, path, content, expectedVersion } as never;
+		try {
+			const result = await this.#req<{
+				bytesWritten?: number | null;
+				version?: string | null;
+				normalized?: boolean | null;
+			}>(command);
+			return {
+				path,
+				bytesWritten: result.bytesWritten ?? 0,
+				version: result.version ?? "",
+				normalized: result.normalized === true,
+			};
+		} catch (err) {
+			const detail = conflictDetailOf(err);
+			if (detail !== null) throw new FsConflictError(detail);
+			throw err;
+		}
+	}
+
+	/** 两段纯文本的统一 diff（fs_diff 的 before/after 分支；不落地）。 */
+	async fsDiff(before: string, after: string): Promise<FsDiffResult> {
+		const result = await this.#req<{ diff?: string | null; firstChangedLine?: number | null }>({
+			type: "fs_diff",
+			before,
+			after,
+		} as never);
+		return { diff: result.diff ?? "", firstChangedLine: result.firstChangedLine ?? undefined };
 	}
 
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限；FileExplorer 预览用）。 */
@@ -1248,6 +1298,20 @@ function toPlaybackEntries(messages: unknown[]): PlaybackEntry[] {
 		});
 	}
 	return entries;
+}
+
+/**
+ * fs_write 的 CAS 拒绝标记。服务端把判决放在 error 字符串的固定前缀上（wire 错误码枚举
+ * `WireErrorCode` 在 pi-wire 里，本票不改那个包），这里只认这个前缀 —— 其余服务端错误
+ * （越界/超限/未知文件）必须原样上抛，不能被归成「冲突」。
+ */
+const FS_CONFLICT_PREFIX = "fs_conflict:";
+
+/** 从服务端错误里取出冲突判决文本；不是冲突则返回 null。 */
+function conflictDetailOf(err: unknown): string | null {
+	if (!(err instanceof PiServerError)) return null;
+	const detail = typeof err.serverError === "string" ? err.serverError : err.serverError.message;
+	return detail.startsWith(FS_CONFLICT_PREFIX) ? detail : null;
 }
 
 function prettyArgs(args: Record<string, unknown>): string {

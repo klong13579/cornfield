@@ -1929,7 +1929,11 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── fs 写命令面（票 01）：LSP writethrough 续接 ──
 				case "fs_write": {
-					const cmd = command as { path: string; content: string };
+					// 乐观并发（CAS）：客户端带上读到时的 `expectedVersion`，盘上现状不同就拒写，
+					// 而不是默默覆盖外部写入者（比如 agent 自己）的改动。
+					// 冲突报错走现有 `error: string` 通道，以 `fs_conflict: ` 前缀作为客户端契约——
+					// WireErrorCode 定义在 packages/pi-wire（本票范围外），所以不新增错误码。
+					const cmd = command as { path: string; content: string; expectedVersion?: string };
 					if (typeof cmd.content !== "string") {
 						fail("content required (string)");
 						break;
@@ -1940,11 +1944,28 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail(target.error);
 						break;
 					}
+					const bytesWritten = Buffer.byteLength(cmd.content, "utf8");
+					if (bytesWritten > FS_MAX_WRITE_BYTES) {
+						fail(`content too large: ${bytesWritten} bytes exceeds limit of ${FS_MAX_WRITE_BYTES} bytes`);
+						break;
+					}
 					try {
+						if (cmd.expectedVersion !== undefined) {
+							const currentVersion = await contentVersionOfFile(target.path);
+							if (currentVersion !== cmd.expectedVersion) {
+								fail(`fs_conflict: expected ${cmd.expectedVersion}, actual ${currentVersion}`);
+								break;
+							}
+						}
 						const toolSession = toWireToolSession(session, agentDir);
+						const sentVersion = contentVersionOf(new TextEncoder().encode(cmd.content));
 						await createWireWritethrough(toolSession)(target.path, cmd.content);
 						invalidateFsScanAfterWrite(target.path);
-						done({ path: cmd.path, bytesWritten: Buffer.byteLength(cmd.content, "utf8") });
+						// 回读再算版本：writethrough 可能格式化后落盘，`cmd.content` 的哈希未必等于盘上字节。
+						const version = await contentVersionOfFile(target.path);
+						// 落盘内容被改写（lsp.formatOnWrite 等）时必须说出来，不能报成「写的就是你发的那份」：
+						// 客户端据此把编辑器同步成盘上的那一份，否则「已保存」显示的是发出去的样子而不是文件现在的样子。
+						done({ path: cmd.path, bytesWritten, version, normalized: version !== sentVersion });
 					} catch (err) {
 						fail(err instanceof Error ? err.message : String(err));
 					}
@@ -2296,7 +2317,37 @@ async function buildEnvironmentSummary(registry: SessionRegistry): Promise<WireE
 
 // ── Agent 详情页文件系统（只读）──
 
+/**
+ * 单次 fs_read 的磁盘字节预算（128KiB）。
+ *
+ * 比较对象是**文件在磁盘上的字节数**，不是解码后的字符数：多字节文本（中文 3B/字、
+ * emoji 4B/字）按字符判会让超标文件报 `truncated:false`，从而把「只读降级」关掉。
+ */
 const FS_MAX_READ_BYTES = 128 * 1024;
+
+/**
+ * 单次整段写入正文的内存上限（8 MiB）。
+ *
+ * 与只读侧的 {@link FS_MAX_READ_BYTES} 是两件事，互不推导：读侧超预算就裁剪并标记 truncated
+ * （拿得到一份不完整的预览），写侧超上限就整体拒写（一份不完整的正文不该落盘）。
+ * 两者都以磁盘/载荷的 **UTF-8 字节**为准。
+ */
+const FS_MAX_WRITE_BYTES = 8 * 1024 * 1024;
+
+/** 文件内容身份令牌：整体字节的 sha256 十六进制。『读到的东西』与『要写回去的东西』是否同一份，靠它判定。 */
+function contentVersionOf(bytes: Uint8Array): string {
+	return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+/** 盘上文件的当前内容身份令牌。文件不存在 = 空基线（""），客户端据此以 CAS 语义创建新文件。 */
+async function contentVersionOfFile(file: string): Promise<string> {
+	try {
+		return contentVersionOf(await Bun.file(file).bytes());
+	} catch (err) {
+		if (isEnoent(err)) return "";
+		throw err;
+	}
+}
 
 /** 解析 agentDir 内相对路径；拒绝越界（含 .. 逃逸与符号链接逃逸）。 */
 function resolveFsPath(agentDir: string, rel: string): { ok: true; path: string } | { ok: false; error: string } {
@@ -2333,21 +2384,39 @@ async function listDirEntries(
 	return { items };
 }
 
-/** 读文本文件，> 128KB 截断并标记 truncated。 */
+/**
+ * 读文本文件，磁盘字节 > {@link FS_MAX_READ_BYTES} 就截断并标记 `truncated`。
+ *
+ * 判定按**原始字节**，不按解码后的 `text.length`：常量名就是 BYTES，而「这份内容还全不全」
+ * 是磁盘上的事实。按字符数判会让多字节文本（中文/emoji）超出很多字节仍然报 `truncated:false`
+ * —— 一个 300KiB 的中文文件会被当成「读全了」，下游（编辑器）就会拿半份内容去写回，
+ * 把文件真的截断。
+ *
+ * 截断是 UTF-8 安全的：`stream: true` 让解码器把边界上被切开的多字节序列留在缓冲里丢掉，
+ * 而不是吐一个 U+FFFD —— 截断是「少一截」，不是「改一个字」。
+ *
+ * 字节只读一次：`text` 是裁剪后的内容，`version` 覆盖整份文件的原始字节——
+ * 因此对超限文件只改尾部（裁剪区之外）也能被写侧 CAS 发现。
+ */
 async function readTextFileClipped(
 	file: string,
 ): Promise<
-	{ text: string; truncated: boolean; error?: undefined } | { text?: undefined; truncated?: undefined; error: string }
+	| { text: string; truncated: boolean; version: string; error?: undefined }
+	| { text?: undefined; truncated?: undefined; version?: undefined; error: string }
 > {
-	let text: string;
+	let bytes: Uint8Array;
 	try {
-		text = await Bun.file(file).text();
+		bytes = await Bun.file(file).bytes();
 	} catch (err) {
 		if (isEnoent(err)) return { error: `no such file: ${path.basename(file)}` };
 		throw err;
 	}
-	if (text.length <= FS_MAX_READ_BYTES) return { text, truncated: false };
-	return { text: text.slice(0, FS_MAX_READ_BYTES), truncated: true };
+	const version = contentVersionOf(bytes);
+	if (bytes.byteLength <= FS_MAX_READ_BYTES) {
+		return { text: new TextDecoder("utf-8").decode(bytes), truncated: false, version };
+	}
+	const clipped = new TextDecoder("utf-8").decode(bytes.subarray(0, FS_MAX_READ_BYTES), { stream: true });
+	return { text: clipped, truncated: true, version };
 }
 
 // ── P2-4：cron/gateway 命令转发 gateway 生产端点（POST /wire）──

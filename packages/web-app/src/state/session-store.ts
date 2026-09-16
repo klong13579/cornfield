@@ -42,7 +42,10 @@ import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
 import type {
 	AgentTodoDto,
 	ArtifactDto,
+	FsDiffResult,
 	FsEntryDto,
+	FsReadResult,
+	FsWriteResult,
 	GatewayAccountPatchDto,
 	GatewayStatusDto,
 	ListenRecordingDto,
@@ -1056,9 +1059,19 @@ export class SessionStore {
 		return this.#client.fsList(sessionId, path);
 	}
 
-	/** 读 agent workspace 文件（fs_read，代理到 pi-client）。 */
-	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }> {
+	/** 读 agent workspace 文件（fs_read，代理到 pi-client；version = 磁盘内容身份）。 */
+	fsRead(sessionId: string, path: string): Promise<FsReadResult> {
 		return this.#client.fsRead(sessionId, path);
+	}
+
+	/** 整段写文件（fs_write，代理到 pi-client；expectedVersion 不符则抛 FsConflictError）。 */
+	fsWrite(sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult> {
+		return this.#client.fsWrite(sessionId, path, content, expectedVersion);
+	}
+
+	/** 两段纯文本的统一 diff（fs_diff，代理到 pi-client）。 */
+	fsDiff(before: string, after: string): Promise<FsDiffResult> {
+		return this.#client.fsDiff(before, after);
 	}
 
 	/** 读 agent workspace 图片（fs_read_image，代理到 pi-client；serve 待实现）。 */
