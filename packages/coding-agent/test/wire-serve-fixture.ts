@@ -11,7 +11,9 @@
  * - **预算**：`waitForServe` 的等待与 `beforeAll` 预算必须前者小于后者，散落成多份时
  *   出现了 60–70s 预算包着 60s 等待的反向配置——失败时 bun 先掐断，丢掉真实原因。
  * - **隔离**：HOME 不隔离时子进程会加载运行者的真实配置与会话（已经因此踩过两次：
- *   permission 的 cwd 错位、git 的 `not a git repository`）。
+ *   permission 的 cwd 错位、git 的 `not a git repository`）。serve 是**启动即读**
+ *   （registry.json、skills discovery），所以预置内容走 `seed` 钩子写在 spawn 之前——
+ *   晚于 spawn 写只剩下 fs watcher 的竞态。
  *
  * 这里把它们收敛成一处。**静默停摆**（子进程活着、零输出、不监听）已定位到 bun 运行时层
  * ——连 `serve:boot:start` 都没打出来，产品侧无从修——所以按仓库自己的先例
@@ -57,12 +59,17 @@ export interface ServeFixture {
 export interface SpawnServeOptions {
 	/** 隔离 HOME 的 mkdtemp 前缀（默认 omp-serve-）。 */
 	homePrefix?: string;
-	/** 子进程 cwd（默认不指定，继承测试进程；git 系用例传自己的仓库）。 */
-	cwd?: string;
+	/** 子进程 cwd（默认不指定，继承测试进程）；传函数时入参是夹具创建的隔离 HOME（cwd 常常要落在 HOME 里）。 */
+	cwd?: string | ((home: string) => string);
 	/** 额外的 serve 参数，追加在 --port/--host/--no-extensions 之后。 */
 	extraArgs?: string[];
 	/** 额外环境变量（HOME / PI_NO_TITLE 由夹具负责）；传函数时入参是夹具创建的隔离 HOME（用 CORNFIELD_CONFIG_DIR 之类的用例需要）。 */
 	env?: Record<string, string> | ((home: string) => Record<string, string>);
+	/**
+	 * 预置隔离 HOME 的内容（入参是夹具创建的隔离 HOME），在 spawn **之前**执行。
+	 * serve 启动即读 registry.json / 发现 skills，晚于 spawn 写只剩竞态。
+	 */
+	seed?: (home: string) => Promise<void>;
 	/** 静默停摆时是否重试一次（默认 true）。 */
 	retryOnSilentStall?: boolean;
 }
@@ -78,6 +85,15 @@ export async function spawnServeFixture(options: SpawnServeOptions = {}): Promis
 	let lastError: unknown;
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		const home = await fs.mkdtemp(path.join(os.tmpdir(), options.homePrefix ?? "omp-serve-"));
+		// 顺序：mkdtemp → seed(home) → 解析 cwd → spawn。seed 与 cwd 都必须在子进程起来之前定下。
+		try {
+			await options.seed?.(home);
+		} catch (err) {
+			// seed 抛错是调用方的 bug（不是停摆），不重试；但隔离 HOME 不能因此留在盘上。
+			await fs.rm(home, { recursive: true, force: true });
+			throw err;
+		}
+		const cwd = typeof options.cwd === "function" ? options.cwd(home) : options.cwd;
 		const port = await pickPort();
 		const proc = Bun.spawn(
 			[
@@ -92,7 +108,7 @@ export async function spawnServeFixture(options: SpawnServeOptions = {}): Promis
 				...(options.extraArgs ?? []),
 			],
 			{
-				...(options.cwd ? { cwd: options.cwd } : {}),
+				...(cwd ? { cwd } : {}),
 				stdout: "pipe",
 				stderr: "pipe",
 				env: {
