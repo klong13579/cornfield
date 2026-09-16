@@ -222,8 +222,16 @@ test.describe("文件编辑闭环（真实 serve + 真实文件系统）", () =>
 			await expect(page.locator(".chip", { hasText: `${FILE}:1-3` })).toHaveCount(0, { timeout: 10_000 });
 
 			// ── 7. 换会话：文件视图随会话作废（不是一个全局的编辑器） ──
-			// 顶栏那个（侧栏列表里也有一个同名按钮）
+			// 顶栏那个（侧栏列表里也有一个同名按钮）现在打开的是新建会话表单，**提交才真的建会话**。
 			await page.locator("header").getByRole("button", { name: "新会话" }).click();
+			const createSession = page.getByRole("button", { name: "新建会话" });
+			await expect(createSession).toBeVisible();
+			// 点开表单 ≠ 已经建了会话：文件视图还在（它只在会话真换了之后才作废）。
+			// 表单里选 Agent / Project / 标题都不算数 —— 没提交之前什么也没发生。
+			await expect(page.getByText("点击左侧目录展开，点文件查看或编辑")).toHaveCount(0);
+			await expect(page.getByLabel(`编辑 ${FILE}`)).toHaveCount(1);
+			// 提交（默认路径 = 当前焦点的 Agent）→ 会话真的换了，文件视图随之作废
+			await createSession.click();
 			await expect(page.getByText("点击左侧目录展开，点文件查看或编辑")).toBeVisible({ timeout: 20_000 });
 			await expect(page.getByLabel(`编辑 ${FILE}`)).toHaveCount(0);
 		} finally {
