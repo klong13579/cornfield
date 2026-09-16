@@ -4,6 +4,8 @@
 
 ### Changed
 
+- **用量面板的 Project 匹配改用 pi-wire 的规则**（`src/pages/insights/insights-scope.ts`）：删掉本地那份 `matchProjectForPath`（与 serve 同算法的第二份），改为 `normalizePath` 词法归一后调 pi-wire 的 `pickDeepestRootIndex`。规则一份（pi-wire），归一化按侧不同且不可避免（serve = realpath，浏览器 = 词法；归一结果不同就可能命中不同，前端认不出的 symlink 路径仍是未归属，不猜）。`undefined` = registry 未读到 ≠ 未归属的语义不变。
+
 - **导航与外壳收口：面板注册表成为唯一元数据源**（`src/router.tsx`, `src/layout/panel-registry.ts`, `src/layout/AppShell.tsx`, `src/layout/AppTopbar.tsx`）: 删除 `PAGE_META` / `PageMeta` / `findPageMeta`（与 panelRegistry 平行的第二份 path→标题/分组表；其 `protocol` 字段从无消费者，是随时会说谎的死元数据）；路由表由注册表派生（path / element / children 同源），当前面板改为从路由匹配链的 `handle` 解析（`activePanelOf` / `panelHandle`），不再按 pathname 前缀猜——子路由（`/models/catalog`、`/records/:id`、`/m`）在自己的路由上声明归属，自带顶栏由注册表的 `customTopbar` 声明。同时解掉 router ↔ AppShell 的循环 import，并删掉不再做任何查表的 `PanelHost`（面板就是路由，内容区直接是 Outlet）。
 ### Added
 

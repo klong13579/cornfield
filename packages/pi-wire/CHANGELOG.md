@@ -4,6 +4,8 @@
 
 ### Added
 
+- **「最深祖先 root 获胜」规则单源化**（`src/scope.ts`）：新增纯选择函数 `pickDeepestRootIndex(roots, targetPath)` —— 返回命中 `targetPath` 的最深祖先 root 的下标（未命中 = -1）。不碰文件系统、不做归一化：输入是调用方按自己运行时的真实能力归一后的字符串（serve 用 realpath，浏览器用词法），判定只有这一份。边界：`/a/b` 不是 `/a/bc` 的祖先；`/a/b/` 与 `/a/b` 等价；空串 root 跳过；多个命中取最深者。
+
 - **调度定义写面与 schedule 绑定形状**（`src/commands.ts`, `src/results/cron.ts`）：新增 `cron_create` / `cron_update` / `cron_remove` / `cron_test_run` 四条 wire 命令（`cron_update` / `cron_remove` 用 `taskId` —— 不复用命令的关联 `id`）；`TaskRowDto` 补 agent 绑定（`agentId` / `agentDir` / `agentDisplayName` / `agentResolution` / `agentEnabled` / `agentError` / `projectIds`）与可靠性事实（`taskType` / `timeoutMs` / `retry` / `repeatCount` / `repeatCompleted` / `delivery` / `lastDeliveryError` / 时间戳），`CronLogEntryDto` 补 `agentSessionPath`；新增 `ScheduleAgentResolution` 三态（registered / unregistered / unbound）与写面入参/回写形状。
 
 - **听记条目形状 canon化**（`src/results/listen.ts`）：`ListenRecordingDto` + `ListenProvenanceDto`（写入时标下的 agentId / agentDir / projectId / sessionFile）进 pi-wire，serve 与 web-app 共用一份（客户端级听记库里的归属只能来自这个字段，缺省 = 未标注）。

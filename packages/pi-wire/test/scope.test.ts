@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { classifyScope, type PathContainment, type ScopeAnchors } from "../src/scope";
+import { classifyScope, type PathContainment, pickDeepestRootIndex, type ScopeAnchors } from "../src/scope";
 
 /**
  * 共享范围规则（wire）—— 技能页与 composer 上下文条目用的是同一条。
@@ -16,6 +16,61 @@ const contains: PathContainment = (root, candidate) => {
 function anchors(patch: Partial<ScopeAnchors> & Pick<ScopeAnchors, "agentDir" | "sessionCwd">): ScopeAnchors {
 	return patch;
 }
+
+describe("pickDeepestRootIndex（最深祖先 root 获胜）", () => {
+	it("root 自身命中（含带尾斜杠的写法，与不带斜杠等价）", () => {
+		expect(pickDeepestRootIndex(["/a/b"], "/a/b")).toBe(0);
+		expect(pickDeepestRootIndex(["/a/b/"], "/a/b")).toBe(0);
+		expect(pickDeepestRootIndex(["/a/b"], "/a/b/")).toBe(0);
+	});
+
+	it("后代命中（任意深度）", () => {
+		expect(pickDeepestRootIndex(["/a/b"], "/a/b/c/d")).toBe(0);
+	});
+
+	it("未命中 / 空列表 → -1", () => {
+		expect(pickDeepestRootIndex(["/a/b"], "/a/other")).toBe(-1);
+		expect(pickDeepestRootIndex([], "/a/b")).toBe(-1);
+	});
+
+	it("前缀相似但不是祖先：/a/b 不得命中 /a/bc（两边同理）", () => {
+		expect(pickDeepestRootIndex(["/a/b"], "/a/bc")).toBe(-1);
+		expect(pickDeepestRootIndex(["/a/bc"], "/a/b")).toBe(-1);
+	});
+
+	it("多个命中取最深者（嵌套声明遮蔽父级）", () => {
+		const roots = ["/a", "/a/b/c", "/a/b"];
+		expect(pickDeepestRootIndex(roots, "/a/b/c/d")).toBe(1);
+		expect(pickDeepestRootIndex(roots, "/a/b/x")).toBe(2);
+		expect(pickDeepestRootIndex(roots, "/a/other")).toBe(0);
+	});
+
+	it("同深并列时取声明在前的那一个（结果稳定，不依赖输入顺序之外的东西）", () => {
+		expect(pickDeepestRootIndex(["/a/b", "/a/b/"], "/a/b/c")).toBe(0);
+		expect(pickDeepestRootIndex(["/a/b/", "/a/b"], "/a/b/c")).toBe(0);
+	});
+
+	it("空串 root 跳过（归一化可能产出空串，它不是任何路径的祖先）", () => {
+		expect(pickDeepestRootIndex([""], "/a/b")).toBe(-1);
+		expect(pickDeepestRootIndex(["", "/a"], "/a/b")).toBe(1);
+	});
+
+	it("根目录是 `/` 时它是所有绝对路径的祖先", () => {
+		expect(pickDeepestRootIndex(["/"], "/a/b")).toBe(0);
+		expect(pickDeepestRootIndex(["/", "/a"], "/a/b")).toBe(1);
+	});
+
+	it("Windows 形式（`\\` 分隔符）同样按分隔符边界判定", () => {
+		expect(pickDeepestRootIndex(["C:\\a\\b"], "C:\\a\\b\\c")).toBe(0);
+		expect(pickDeepestRootIndex(["C:\\a\\b"], "C:\\a\\bc")).toBe(-1);
+		expect(pickDeepestRootIndex(["C:\\a", "C:\\a\\b"], "C:\\a\\b\\c")).toBe(1);
+	});
+
+	it("调用方归一好后比较：函数自己不折叠、不去尾斜杠之外的归一", () => {
+		// 未归一的重复分隔符不是本函数的义务 —— 它按字面边界判，认不出来就说没命中
+		expect(pickDeepestRootIndex(["/a//b/"], "/a/b/c")).toBe(-1);
+	});
+});
 
 describe("classifyScope", () => {
 	it("agentDir / projectRoot / 其他三分，且同名前缀目录不算在内", () => {

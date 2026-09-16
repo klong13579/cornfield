@@ -132,7 +132,7 @@ describe("normalizePath", () => {
 	});
 });
 
-describe("matchProjectForPath（最深祖先获胜）", () => {
+describe("matchProjectForPath（最深祖先获胜；规则在 pi-wire，这里只做词法归一）", () => {
 	const projects = [project("p-parent", "/Users/me"), project("p-child", "/Users/me/proj")];
 
 	it("root 自身命中", () => {
@@ -156,6 +156,12 @@ describe("matchProjectForPath（最深祖先获胜）", () => {
 	it("registry 未读到（undefined）→ 没有答案，不是「未归属」", () => {
 		expect(matchProjectForPath(undefined, "/Users/me/proj")).toBeUndefined();
 		expect(matchProjectForPath([], "/Users/me/proj")).toBeUndefined();
+	});
+
+	it("词法归一后成了空串的 root 不构成归属（空不是任何路径的祖先）", () => {
+		const hits = matchProjectForPath([project("p-empty", "   "), project("p", "/Users/me/proj")], "/Users/me/proj");
+		expect(hits?.projectId).toBe("p");
+		expect(matchProjectForPath([project("p-empty", "   ")], "/Users/me/proj")).toBeUndefined();
 	});
 });
 

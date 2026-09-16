@@ -8,6 +8,8 @@
 
 ### Changed
 
+- **`matchProjectForPath` 的规则改由 pi-wire 提供**（`src/agent-domain/project-store.ts`）：签名与返回类型不变（现有调用点零改动），内部改为对 target 与每个 root 各做 `resolveEquivalentPath` 归一，再调 pi-wire 的 `pickDeepestRootIndex` —— 前端用量面板问的是同一件事，规则不能再有两份实现（归一化留在 serve：realpath 是这边独有的事实）。
+
 - **听记条目改用 pi-wire 的规范形状**（`src/stt/listen-service.ts`）：`ListenRecordingSummary` 不再自建同形接口，改从 `@cornfield/wire` 引入 `ListenRecordingDto`（两端一份，字段加一处同时可见）。
 
 ### Fixed
