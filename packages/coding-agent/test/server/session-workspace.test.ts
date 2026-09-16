@@ -219,6 +219,39 @@ describe("读不到要说真话", () => {
 	});
 });
 
+describe("声明里的 projectRoot 不是 Project", () => {
+	// WP1 :79 `workspace.project-undeclared`：有 projectRoot 就必须有 projectId —— 文件系统路径不等于
+	// Project (§4)。所以声明里的 projectRoot 既不能进 roots，也不能替会话决定归属。
+
+	it("声明里那个没人认领的 projectRoot：不进 roots、不给归属", async () => {
+		const declared = path.join(home, "declared-but-unknown");
+		await declareWorkspace({ projectRoot: declared });
+
+		const resolved = await resolveSessionWorkspace({ agentDir, header: header({ cwd: home }) });
+
+		expect(resolved.projectId).toBeUndefined();
+		expect(resolved.projectSource).toBe("none");
+		expect(resolved.roots).not.toContain(declared);
+		expect(resolved.roots).toEqual([agentDir]);
+	});
+
+	it("声明的 projectRoot 确实是个已声明的 Project 也不替会话决定：会话 cwd 说了算", async () => {
+		const declared = path.join(home, "agent-project");
+		await upsertProject({ projectId: "agent-project", root: declared, name: "Agent Project" });
+		await declareWorkspace({ projectRoot: declared });
+
+		// cwd 在 Project 外：声明不能把它拉进去（agent 的绑定是上限，不是会话的归属）。
+		const elsewhere = await resolveSessionWorkspace({ agentDir, header: header({ cwd: home }) });
+		expect(elsewhere.projectId).toBeUndefined();
+		expect(elsewhere.roots).not.toContain(declared);
+
+		// cwd 真的在那个 Project 里时才归属它，且来源是 cwd（rung 2），不是那份声明。
+		const inside = await resolveSessionWorkspace({ agentDir, header: header({ cwd: path.join(declared, "src") }) });
+		expect(inside.projectId).toBe("agent-project");
+		expect(inside.projectSource).toBe("cwd");
+	});
+});
+
 describe("roots", () => {
 	it("顺序是 Project root → 声明的 attachedRoots → agentDir", async () => {
 		const repoRoot = path.join(home, "repo");

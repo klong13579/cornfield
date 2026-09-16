@@ -248,6 +248,13 @@ function matchCwd(projects: readonly ProjectRecord[], cwd: string | undefined): 
  * The roots the agentDir itself declares, resolved the way every declaration path in
  * `../skeleton/workspace` is (relative to the agentDir, absolute paths pass through).
  *
+ * **Only `attachedRoots` is taken from the declaration.** Its `projectRoot` is deliberately neither a
+ * root nor a Project: WP1's `workspace.project-undeclared` rule (`docs/proma-comparison/`
+ * `wp1-agent-domain-contract.md`, :79) says a `projectRoot` with no `projectId` is an invalid state,
+ * "文件系统路径不等于 Project". Which Project a session belongs to is decided by the registry —
+ * rung 1 (the session's own record) or rung 2 (its cwd) — never by a path an agentDir happens to
+ * declare. Adding it here would let a declaration mint a Project out of a directory name.
+ *
  * `readWorkspaceDeclaration` keeps "no declaration" (ENOENT) apart from "a declaration I cannot
  * interpret"; the second is fatal here because it is exactly the case that may be declaring roots.
  * Other I/O errors propagate from that reader untouched.
