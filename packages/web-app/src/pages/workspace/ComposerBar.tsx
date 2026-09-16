@@ -5,8 +5,9 @@ import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
 import { ProviderLogo } from "../../components/ProviderLogo";
 import type { ContextItem } from "../../lib/context-items";
-import { composePrompt } from "../../lib/context-items";
+import { composePrompt, hasFileVersion } from "../../lib/context-items";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
+import { SCOPE_LABELS } from "../../lib/scope-display";
 import { getFileWorkflow, useFileWorkflow } from "../../state/file-workflow-store";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
@@ -49,6 +50,55 @@ function contextItemLabel(item: ContextItem): string {
 	if (item.kind !== "selection") return item.path;
 	const range = item.lineStart === item.lineEnd ? `${item.lineStart}` : `${item.lineStart}-${item.lineEnd}`;
 	return `${item.path}:${range}`;
+}
+
+/** 版本在 chip 里只显示前 8 位（sha256 太长）；完整值在 title 上，不丢事实。 */
+function shortVersion(version: string): string {
+	return version.length > 8 ? `${version.slice(0, 8)}…` : version;
+}
+
+/**
+ * 上下文条目 chip：定位（路径 / 选区行范围）+ 范围 + 版本（§9 要求每个引用看得到这两件事）。
+ *
+ * 缺哪件就说「未知」：渲染成空标签等于把「不知道」画成「没有」。URL 条目不说版本 ——
+ * 链接不是文件，那是「不适用」而不是「没读到」（{@link hasFileVersion}）。
+ */
+export function ContextItemChip({ item, onRemove }: { item: ContextItem; onRemove: () => void }): React.JSX.Element {
+	return (
+		<span className="chip max-w-[320px] gap-1.5">
+			<span className="truncate font-mono" title={item.path}>
+				{contextItemLabel(item)}
+			</span>
+			<span
+				className="shrink-0 rounded-sm bg-surface-3 px-1 text-[9px] text-ink-subtle"
+				title={
+					item.scope === undefined
+						? "范围未知：拿不到这个 Agent 的工作区锚点，判不出来"
+						: `范围：${SCOPE_LABELS[item.scope]}`
+				}
+			>
+				{item.scope === undefined ? "范围未知" : SCOPE_LABELS[item.scope]}
+			</span>
+			{hasFileVersion(item.kind) &&
+				(item.version === undefined ? (
+					<span className="shrink-0 text-[9px] text-ink-faint" title="版本未知：加这条引用时没读到文件版本">
+						版本未知
+					</span>
+				) : (
+					<span className="shrink-0 font-mono text-[9px] text-ink-faint" title={`版本 ${item.version}`}>
+						版本 {shortVersion(item.version)}
+					</span>
+				))}
+			<button
+				type="button"
+				className="shrink-0 text-ink-faint hover:text-danger"
+				title={`移除 ${item.path}`}
+				onClick={onRemove}
+			>
+				×
+			</button>
+		</span>
+	);
 }
 
 function statusDot(s: string): string {
@@ -332,19 +382,11 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 								上下文
 							</span>
 							{contextItems.map(item => (
-								<span key={item.id} className="chip max-w-[260px] gap-1.5">
-									<span className="truncate font-mono" title={contextItemLabel(item)}>
-										{contextItemLabel(item)}
-									</span>
-									<button
-										type="button"
-										className="shrink-0 text-ink-faint hover:text-danger"
-										title={`移除 ${item.path}`}
-										onClick={() => getFileWorkflow().removeContextItem(item.id)}
-									>
-										×
-									</button>
-								</span>
+								<ContextItemChip
+									key={item.id}
+									item={item}
+									onRemove={() => getFileWorkflow().removeContextItem(item.id)}
+								/>
 							))}
 							<button type="button" className="link" onClick={() => getFileWorkflow().clearContextItems()}>
 								清空

@@ -9,11 +9,11 @@ import type {
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
+import { SCOPE_LABELS } from "../../lib/scope-display";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
 	SKILL_ACTIVATION_LABELS,
-	SKILL_SCOPE_LABELS,
 	SKILL_STATUS_LABELS,
 	skillStatusClass,
 	skillVersionText,
@@ -812,7 +812,7 @@ function SkillLine({ row, dimmed }: { row: SkillScopeRowDto; dimmed?: boolean })
 				</span>
 			</div>
 			<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-ink-faint">
-				<span className="rounded bg-surface-2 px-1.5 py-0.5">{SKILL_SCOPE_LABELS[row.scope]}</span>
+				<span className="rounded bg-surface-2 px-1.5 py-0.5">{SCOPE_LABELS[row.scope]}</span>
 				<span>
 					{row.providerName ?? row.provider} · {row.source}
 				</span>

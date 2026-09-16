@@ -3,7 +3,6 @@ import type {
 	EvolvedSkillsDto,
 	SkillActivation,
 	SkillBlockedDto,
-	SkillScope,
 	SkillScopeRowDto,
 	SkillStatus,
 } from "@cornfield/wire";
@@ -19,10 +18,10 @@ import type {
  *
  * 域里**没有**的事实不得在这里出现：技能域没有「权限」，也没有一个叫「冲突状态」的状态 ——
  * 同名落选者只有 serve 给的原因（{@link skillBlockedDetail}）与覆盖规则（{@link SKILL_OVERRIDE_RULE}）。
+ *
+ * scope 的词不在这里：范围不是技能专有的事实（composer 的上下文条目也说同一种范围），
+ * 词表在 `lib/scope-display.ts`，两处共用一份。
  */
-
-/** 范围 scope：Agent 自己的家 / 会话所在的 Project / 两者之外（全局用户库等发现源）。 */
-export const SKILL_SCOPE_LABELS: Record<SkillScope, string> = { agent: "Agent", project: "Project", global: "全局" };
 
 /** 激活态 activation：进没进这次会话。 */
 export const SKILL_ACTIVATION_LABELS: Record<SkillActivation, string> = {

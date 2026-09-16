@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
-import type { ContextItem } from "../lib/context-items";
+import type { ContextItem, ContextItemFacts, ContextItemKind } from "../lib/context-items";
 import {
+	contextItemFacts,
 	dedupeContextItems,
 	makeFileContextItem,
 	makeSelectionContextItem,
@@ -84,6 +85,7 @@ export interface FileWorkflowView {
 	/** 当前会话身份（`agentId|sessionFile`）；未连接时为空串。 */
 	identity: string;
 	open: OpenFile | null;
+	/** 待带走的下一条消息的上下文条目（每条带 scope 与 version —— 见下面的创建处）。 */
 	contextItems: ContextItem[];
 	diff: DiffReview | null;
 	pendingOpen: PendingOpen | null;
@@ -92,7 +94,14 @@ export interface FileWorkflowView {
 /** 本 store 从会话视图读到的全部字段（SessionView 满足）。 */
 export type FileWorkflowSessionView = Pick<
 	SessionView,
-	"activeAgentId" | "sessionId" | "sessionFile" | "isStreaming" | "agents"
+	| "activeAgentId"
+	| "sessionId"
+	| "sessionFile"
+	| "isStreaming"
+	| "agents"
+	// 范围判定的锚点：条目归属 Agent 的家（agents[].agentDir）+ 会话所属 Project 的 root。
+	| "projects"
+	| "currentProjectId"
 >;
 
 /** store 依赖：只需要它用到的三条 fs 命令 + 会话身份/回合信号。 */
@@ -357,12 +366,36 @@ export class FileWorkflowStore {
 	// ── 选区 / 文件上下文项（供下一条消息带走）──
 
 	addFileContext(path: string): void {
-		this.#pushContext(makeFileContextItem(path));
+		this.#pushContext(makeFileContextItem(path, this.#factsFor("file", path)));
 	}
 
 	addSelectionContext(input: { path: string; text: string; lineStart: number; lineEnd: number }): void {
 		if (input.text.trim().length === 0) return; // 空选区不是一个引用
-		this.#pushContext(makeSelectionContextItem(input));
+		this.#pushContext(makeSelectionContextItem(input, this.#factsFor("selection", input.path)));
+	}
+
+	/**
+	 * 条目的两件随附事实（票 22）：范围与文件版本。两件都是**现有事实**的搬运，不是重算：
+	 *
+	 *   scope   路径落在哪个锚点下 —— 用 wire 的共享规则判（技能页同一份）；锚点/路径不够就不判。
+	 *   version 打开这份文件时读到的 baseVersion —— 没读到（还在读、读失败、只读了半份）就是缺省。
+	 *
+	 * 归属 Agent：路径就是当前打开的那份文件时用它的 agentId（路径是相对**它的**家解析的）；
+	 * 否则用当前焦点 Agent —— 条目会被当前会话带走，而相对路径正是相对那个工作区解析的。
+	 */
+	#factsFor(kind: ContextItemKind, path: string): ContextItemFacts {
+		const view = this.#deps?.sessions.getSnapshot();
+		const open = this.#view.open;
+		const ownerId = open && open.path === path ? open.agentId : view ? activeAgentIdOf(view) : undefined;
+		const agentDir = view?.agents.find(agent => agent.id === ownerId)?.agentDir;
+		const projectRoot = view?.projects?.find(project => project.projectId === view.currentProjectId)?.root;
+		return contextItemFacts({
+			kind,
+			path,
+			...(agentDir === undefined ? {} : { agentDir }),
+			...(projectRoot === undefined ? {} : { projectRoot }),
+			...(open && open.path === path ? { version: open.baseVersion } : {}),
+		});
 	}
 
 	/**
@@ -396,8 +429,17 @@ export class FileWorkflowStore {
 		this.#notify();
 	}
 
+	/**
+	 * 同一条引用再加一次 = **刷新它的事实**（版本会变：文件被改过就是另一个版本），不是再加一条。
+	 * 位置不动（它是同一条引用）；留着旧版本就是让模型拿一个不成立的版本对着运行时刚注入的内容。
+	 * 身份判定仍只由 dedupeContextItems 负责，这里只是把同 id 的那条换掉。
+	 */
 	#pushContext(item: ContextItem): void {
-		this.#view = { ...this.#view, contextItems: dedupeContextItems([...this.#view.contextItems, item]) };
+		const current = this.#view.contextItems;
+		const next = current.some(entry => entry.id === item.id)
+			? current.map(entry => (entry.id === item.id ? item : entry))
+			: [...current, item];
+		this.#view = { ...this.#view, contextItems: dedupeContextItems(next) };
 		this.#notify();
 	}
 

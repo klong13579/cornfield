@@ -15,7 +15,6 @@ import type {
 	SkillActivation,
 	SkillBlockedDto,
 	SkillLoadErrorDto,
-	SkillScope,
 	SkillScopeFactsDto,
 	SkillScopeRowDto,
 	SkillStatus,
@@ -25,6 +24,7 @@ import type { AgentTodoDto } from "../src/results/agent-todos";
 import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
 import type { ProjectDeleteDto, ProjectRecordDto, ProjectUpsertDto } from "../src/results/projects";
 import type { ChildSessionStatusDto, DelegateChildInput, DelegatedChildDto } from "../src/results/session-tree";
+import type { Scope } from "../src/scope";
 
 /**
  * 协议形状锁定（P0，参照 codex schema_fixtures）：
@@ -233,7 +233,7 @@ type _AssertSkillRow = _SkillRow extends {
 	level: "user" | "project" | "native";
 	provider: string;
 	path: string;
-	scope: SkillScope;
+	scope: Scope;
 	activation: SkillActivation;
 	status: SkillStatus;
 }

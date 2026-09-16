@@ -18,12 +18,13 @@ import { describe, expect, it } from "bun:test";
 import type {
 	EvolvedSkillDto,
 	EvolvedSkillsDto,
+	Scope,
 	SkillActivation,
 	SkillBlockedDto,
-	SkillScope,
 	SkillScopeRowDto,
 	SkillStatus,
 } from "@cornfield/wire";
+import { SCOPE_LABELS } from "../src/lib/scope-display";
 import {
 	evolvedDeprecationText,
 	evolvedGroupState,
@@ -33,7 +34,6 @@ import {
 	evolvedVersionText,
 	SKILL_ACTIVATION_LABELS,
 	SKILL_OVERRIDE_RULE,
-	SKILL_SCOPE_LABELS,
 	SKILL_STATUS_LABELS,
 	skillBlockedDetail,
 	skillDayText,
@@ -42,8 +42,8 @@ import {
 	skillVersionText,
 } from "../src/pages/skills/skill-display";
 
-/** wire 的 `SkillScope` 全集；这里按类型穷举，新增成员时这个数组必须先改。 */
-const SCOPES: readonly SkillScope[] = ["agent", "project", "global"];
+/** wire 的 `Scope` 全集；这里按类型穷举，新增成员时这个数组必须先改。 */
+const SCOPES: readonly Scope[] = ["agent", "project", "global"];
 const ACTIVATIONS: readonly SkillActivation[] = ["loaded", "discoverable", "blocked"];
 const STATUSES: readonly SkillStatus[] = ["enabled", "disabled", "deprecated", "unavailable"];
 
@@ -81,16 +81,16 @@ function evolved(fields: Partial<EvolvedSkillDto>): EvolvedSkillDto {
 
 describe("技能展示词表", () => {
 	it("scope / activation / status 的每一个成员都有显示词（没有 undefined 会渲染出来）", () => {
-		expect(Object.keys(SKILL_SCOPE_LABELS).sort()).toEqual([...SCOPES].sort());
+		expect(Object.keys(SCOPE_LABELS).sort()).toEqual([...SCOPES].sort());
 		expect(Object.keys(SKILL_ACTIVATION_LABELS).sort()).toEqual([...ACTIVATIONS].sort());
 		expect(Object.keys(SKILL_STATUS_LABELS).sort()).toEqual([...STATUSES].sort());
-		for (const labels of [SKILL_SCOPE_LABELS, SKILL_ACTIVATION_LABELS, SKILL_STATUS_LABELS]) {
+		for (const labels of [SCOPE_LABELS, SKILL_ACTIVATION_LABELS, SKILL_STATUS_LABELS]) {
 			for (const text of Object.values(labels)) expect(text.length).toBeGreaterThan(0);
 		}
 	});
 
 	it("同一事实在不同页面上是同一个词（词表唯一，不各自维护一套）", () => {
-		expect(SKILL_SCOPE_LABELS.project).toBe("Project");
+		expect(SCOPE_LABELS.project).toBe("Project");
 		expect(SKILL_ACTIVATION_LABELS.blocked).toBe("受阻");
 		expect(SKILL_STATUS_LABELS.unavailable).toBe("读不到");
 	});
@@ -172,7 +172,7 @@ describe("同名落选者与覆盖规则", () => {
 
 	it("技能域没有「权限」，也没有一个叫「冲突状态」的状态；受阻只有原因 + 规则", () => {
 		const vocabulary = [
-			...Object.values(SKILL_SCOPE_LABELS),
+			...Object.values(SCOPE_LABELS),
 			...Object.values(SKILL_ACTIVATION_LABELS),
 			...Object.values(SKILL_STATUS_LABELS),
 			SKILL_OVERRIDE_RULE,

@@ -4,7 +4,9 @@
  * 页面要回答五个问题，每一个都必须来自既有事实源 —— 这里不建第二套技能登记表，
  * 也不重跑一次 discovery 去猜运行时状态：
  *
- *   范围 scope       ← SKILL.md 路径相对 agentDir / 会话 Project root 的位置
+ * 范围 scope       ← SKILL.md 路径相对 agentDir / 会话 Project root 的位置
+ *                      （判定规则在 `@cornfield/wire` 的 `classifyScope` —— 与 composer 的上下文
+ *                      条目共用同一份；本模块只把 serve 侧的锚点与包含判定 pathIsWithin 递进去）
  *   来源 source      ← discovery 的 `provider:level`（`Skill.source`，与运行时同一份）
  *   版本 version     ← frontmatter 声明（多数技能没有）+ 内容指纹 + mtime（文件系统真相）
  *   激活 activation  ← session.skills（本次会话真的加载了）/ settings 停用名单 / 发现警告
@@ -23,11 +25,13 @@
 
 import * as path from "node:path";
 import { isEnoent, parseFrontmatter, pathIsWithin } from "@cornfield/utils";
-import type { SkillBlockedDto, SkillLoadErrorDto, SkillScope, SkillScopeRowDto } from "@cornfield/wire";
+import { classifyScope, type SkillBlockedDto, type SkillLoadErrorDto, type SkillScopeRowDto } from "@cornfield/wire";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 
 /**
  * 范围判定的依据（全部是绝对路径；两个根都由调用方按 Agent/Project 解析后传入）。
+ * 三个路径锚点正是 wire `ScopeAnchors` 要的全部输入（多出的 `agentId` 是「查的是谁的技能」，
+ * 不参与路径判定），所以本对象结构上满足 `ScopeAnchors`，直接递给 `classifyScope`。
  * 与 wire 的 `SkillScopeFactsDto` 不同：那个是**响应里**回给客户端的锚点（带 projectError），
  * 这个是判定**输入**。
  */
@@ -53,18 +57,6 @@ export interface SkillFileFacts {
 	fingerprint: string;
 	/** mtimeMs。 */
 	updatedAt: number;
-}
-
-/**
- * 范围判定。顺序即优先级：agentDir 在项目里时（registry agent 的会话 cwd = agentDir）
- * 「属于这个 Agent」比「落在某个项目路径下」更具体，所以先判 agentDir。
- * 包含判定用 utils 的 `pathIsWithin`（symlink 归一 + 分隔符边界），不另写一份比字符串的。
- */
-export function classifySkillScope(filePath: string, anchor: SkillScopeAnchor): SkillScope {
-	if (pathIsWithin(anchor.agentDir, filePath)) return "agent";
-	if (anchor.projectRoot && pathIsWithin(anchor.projectRoot, filePath)) return "project";
-	if (pathIsWithin(anchor.sessionCwd, filePath)) return "project";
-	return "global";
 }
 
 /** 读 SKILL.md 的事实（不存在/读不了返回 error，由调用方决定是 unavailable 还是跳过）。 */
@@ -110,7 +102,7 @@ export async function projectLoadedSkills(
 			level: skill._source?.level ?? "native",
 			provider: skill._source?.provider ?? "native",
 			path: filePath,
-			scope: classifySkillScope(filePath, anchor),
+			scope: classifyScope(filePath, anchor, pathIsWithin),
 			activation: "loaded",
 			status: "enabled",
 		};
@@ -185,7 +177,7 @@ export async function projectDisabledSkills(
 			level: target.level,
 			provider: "native",
 			path: target.path,
-			scope: classifySkillScope(target.path, anchor),
+			scope: classifyScope(target.path, anchor, pathIsWithin),
 			activation: "discoverable",
 			status: "disabled",
 			reason: item.reason,

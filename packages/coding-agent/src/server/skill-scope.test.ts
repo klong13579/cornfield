@@ -8,9 +8,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathIsWithin } from "@cornfield/utils";
+import { classifyScope } from "@cornfield/wire";
 import type { Skill } from "../extensibility/skills";
 import {
-	classifySkillScope,
 	collectDisabledInputs,
 	projectDisabledSkills,
 	projectLoadedSkills,
@@ -42,41 +43,57 @@ function facts(
 	return { agentId: "hr", ...overrides };
 }
 
+/**
+ * serve 侧的判定入口 = 共享规则（wire 的 `classifyScope`）+ 本运行时的包含判定
+ * （utils 的 `pathIsWithin`，realpath 归一 + 分隔符边界）。技能行里的 scope 就是它算出来的，
+ * 所以这里断言的是这条组合（规则本身的行为在 `packages/pi-wire/test/scope.test.ts`）。
+ */
+const scopeOf = (filePath: string, anchor: SkillScopeAnchor) => classifyScope(filePath, anchor, pathIsWithin);
+
 afterEach(async () => {
 	await Promise.all(cleanups.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
-describe("classifySkillScope — 范围判定", () => {
+describe("技能范围判定（共享规则 + serve 侧包含判定）", () => {
 	test("agentDir / projectRoot / 其他三分，且同名前缀目录不算在内", async () => {
 		const root = await tmpDir("scope-classify-");
 		const agentDir = path.join(root, "agents", "hr");
 		const projectRoot = path.join(root, "cornfield");
 		const context = facts({ agentDir, sessionCwd: projectRoot, projectRoot });
 
-		expect(classifySkillScope(path.join(agentDir, ".cornfield", "skills", "a", "SKILL.md"), context)).toBe("agent");
-		expect(classifySkillScope(path.join(projectRoot, ".cornfield", "skills", "b", "SKILL.md"), context)).toBe(
-			"project",
-		);
+		expect(scopeOf(path.join(agentDir, ".cornfield", "skills", "a", "SKILL.md"), context)).toBe("agent");
+		expect(scopeOf(path.join(projectRoot, ".cornfield", "skills", "b", "SKILL.md"), context)).toBe("project");
 		// 兄弟目录：/root/cornfield-next 不应被当成 /root/cornfield 内
-		expect(
-			classifySkillScope(path.join(root, "cornfield-next", ".cornfield", "skills", "c", "SKILL.md"), context),
-		).toBe("global");
-		expect(classifySkillScope(path.join(root, "home", ".claude", "skills", "d", "SKILL.md"), context)).toBe("global");
+		expect(scopeOf(path.join(root, "cornfield-next", ".cornfield", "skills", "c", "SKILL.md"), context)).toBe(
+			"global",
+		);
+		expect(scopeOf(path.join(root, "home", ".claude", "skills", "d", "SKILL.md"), context)).toBe("global");
 	});
 
 	test("没有 Project 归属时会话 cwd 自己也算 project 范围", async () => {
 		const root = await tmpDir("scope-session-");
 		const context = facts({ agentDir: path.join(root, "agent"), sessionCwd: path.join(root, "repo") });
-		expect(classifySkillScope(path.join(root, "repo", ".cornfield", "skills", "x", "SKILL.md"), context)).toBe(
-			"project",
-		);
+		expect(scopeOf(path.join(root, "repo", ".cornfield", "skills", "x", "SKILL.md"), context)).toBe("project");
 	});
 
 	test("registry agent 的会话根 = 它的 agentDir 时，优先算 agent 而不是 project", async () => {
 		const root = await tmpDir("scope-agentdir-");
 		const agentDir = path.join(root, "agents", "hr");
 		const context = facts({ agentDir, sessionCwd: agentDir, projectRoot: agentDir });
-		expect(classifySkillScope(path.join(agentDir, ".cornfield", "skills", "x", "SKILL.md"), context)).toBe("agent");
+		expect(scopeOf(path.join(agentDir, ".cornfield", "skills", "x", "SKILL.md"), context)).toBe("agent");
+	});
+
+	test("包含判定走 pathIsWithin：symlink 两侧归一后算同一处（serve 的归一能力，浏览器做不到）", async () => {
+		const root = await tmpDir("scope-symlink-");
+		const realAgentDir = path.join(root, "agents", "hr");
+		const linkedRoot = path.join(root, "link");
+		// 文件真的存在于 agentDir 里（不存在的路径 realpath 会落到字面量，就测不到归一）
+		const skillFile = await writeSkill(path.join(realAgentDir, "skills"), "x", "---\ndescription: 冒烟\n---\n正文\n");
+		await fs.symlink(root, linkedRoot, "dir");
+		// 锚点是真实目录，文件路径走 symlink：只有 realpath 归一才会判成 agent
+		const context = facts({ agentDir: realAgentDir, sessionCwd: linkedRoot });
+		expect(scopeOf(skillFile, context)).toBe("agent");
+		expect(scopeOf(path.join(linkedRoot, "agents", "hr", "skills", "x", "SKILL.md"), context)).toBe("agent");
 	});
 });
 

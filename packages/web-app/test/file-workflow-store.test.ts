@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import type { AgentInfoDto, ProjectRecordDto } from "@cornfield/wire";
 import type { FsDiffResult, FsReadResult, FsWriteResult, PiClient } from "../src/lib/pi-client-api";
 import { FsConflictError } from "../src/lib/pi-client-api";
 import type { FileWorkflowSessionView } from "../src/state/file-workflow-store";
@@ -93,7 +94,9 @@ class FakeSessions {
 		sessionId: "default",
 		sessionFile: "/sessions/a.jsonl",
 		isStreaming: false,
-		agents: [],
+		agents: [DEFAULT_AGENT],
+		projects: [PROJECT],
+		currentProjectId: PROJECT.projectId,
 	};
 	#listeners = new Set<() => void>();
 
@@ -112,6 +115,23 @@ class FakeSessions {
 		for (const listener of this.#listeners) listener();
 	}
 }
+
+/** 条目归属 Agent 的家：范围判定的锚点（与 serve 的 fs 路径解析同一把尺子）。 */
+const AGENT_DIR = "/work/agents/default";
+/** 会话所属 Project 的 root。 */
+const PROJECT_ROOT = "/work/cornfield";
+
+const DEFAULT_AGENT: AgentInfoDto = {
+	id: "default",
+	name: "default",
+	face: "D",
+	workspace: "cornfield",
+	kind: "coding",
+	status: "idle",
+	agentDir: AGENT_DIR,
+};
+
+const PROJECT: ProjectRecordDto = { projectId: "p-cornfield", root: PROJECT_ROOT, name: "cornfield" };
 
 let serve: FakeServe;
 let sessions: FakeSessions;
@@ -519,6 +539,95 @@ describe("选区与文件上下文项", () => {
 		expect(store.getSnapshot().contextItems.map(i => i.path)).toEqual(["src/b.ts"]);
 		store.clearContextItems();
 		expect(store.getSnapshot().contextItems).toEqual([]);
+	});
+});
+
+describe("上下文条目的 scope 与 version（票 22）", () => {
+	test("文件条目：带上打开那份文件的真实版本与范围（都不是重算的）", async () => {
+		serve.seed("src/a.ts", "one\n");
+		open();
+		await settle();
+		store.addFileContext("src/a.ts");
+		const item = store.getSnapshot().contextItems[0];
+		expect(item?.version).toBe(versionOf("one\n"));
+		expect(item?.scope).toBe("agent");
+	});
+
+	test("选区条目：同一条版本来源（两条创建路径都要带）", async () => {
+		serve.seed("src/a.ts", "line1\nline2\n");
+		open();
+		await settle();
+		expect(store.addSelectionFromOffsets("src/a.ts", "line1\nline2\n", 0, 5)).toBe(true);
+		const item = store.getSnapshot().contextItems[0];
+		expect(item?.kind).toBe("selection");
+		expect(item?.version).toBe(versionOf("line1\nline2\n"));
+		expect(item?.scope).toBe("agent");
+	});
+
+	test("不是打开的那份文件：版本未知（缺省，不是空串），范围仍按当前 Agent 的工作区算", async () => {
+		serve.seed("src/a.ts", "one\n");
+		open();
+		await settle();
+		store.addFileContext("src/other.ts");
+		const item = store.getSnapshot().contextItems[0];
+		expect(item?.version).toBeUndefined();
+		expect("version" in (item ?? {})).toBe(false);
+		expect(item?.scope).toBe("agent");
+	});
+
+	test("读文件失败（版本拿不到）时同样只说「不知道」，不写假版本", async () => {
+		serve.failNextRead = true;
+		open("src/a.ts");
+		await settle();
+		expect(store.getSnapshot().open?.error).toContain("read failed");
+		store.addFileContext("src/a.ts");
+		expect(store.getSnapshot().contextItems[0]?.version).toBeUndefined();
+	});
+
+	test("Agent 没有 agentDir ⇒ 范围未知（不编一个 global 也不编一个 agent）", () => {
+		sessions.update({ agents: [{ ...DEFAULT_AGENT, agentDir: undefined }] });
+		store.addFileContext("src/a.ts");
+		const item = store.getSnapshot().contextItems[0];
+		expect(item?.scope).toBeUndefined();
+		expect("scope" in (item ?? {})).toBe(false);
+	});
+
+	test("同一条引用再加一次 = 刷新事实：文件被改过，版本跟着走（不留在旧版本上）", async () => {
+		serve.seed("src/a.ts", "one\n");
+		open();
+		await settle();
+		store.addFileContext("src/a.ts");
+		expect(store.getSnapshot().contextItems[0]?.version).toBe(versionOf("one\n"));
+
+		serve.seed("src/a.ts", "two\n");
+		store.reload();
+		await settle();
+		expect(store.getSnapshot().open?.baseVersion).toBe(versionOf("two\n"));
+		store.addFileContext("src/a.ts");
+
+		const items = store.getSnapshot().contextItems;
+		expect(items).toHaveLength(1); // 同一条引用，不是第二条
+		expect(items[0]?.version).toBe(versionOf("two\n"));
+	});
+
+	test("换会话后新加的条目用的是新锚点的事实，不是上一条的残留", async () => {
+		serve.seed("src/a.ts", "one\n");
+		open();
+		await settle();
+		store.addFileContext("src/a.ts");
+		expect(store.getSnapshot().contextItems[0]?.version).toBe(versionOf("one\n"));
+
+		// 换会话 + 换 Agent（新 Agent 没有 agentDir）：旧条目清空、新条目不带旧事实
+		sessions.update({
+			sessionFile: "/sessions/b.jsonl",
+			activeAgentId: "other",
+			agents: [{ ...DEFAULT_AGENT, id: "other", agentDir: undefined }],
+		});
+		expect(store.getSnapshot().contextItems).toEqual([]);
+		store.addFileContext("src/a.ts");
+		const item = store.getSnapshot().contextItems[0];
+		expect(item?.scope).toBeUndefined();
+		expect(item?.version).toBeUndefined();
 	});
 });
 

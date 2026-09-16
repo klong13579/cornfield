@@ -4,10 +4,11 @@ import type {
 	EvolvedSkillDto,
 	EvolvedSkillsDto,
 	RemoteSkillItemDto,
-	SkillScope,
+	Scope,
 	SkillScopeRowDto,
 	SkillsResultDto,
 } from "../../lib/pi-client-api";
+import { SCOPE_LABELS } from "../../lib/scope-display";
 import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -20,7 +21,6 @@ import {
 	evolvedVersionText,
 	SKILL_ACTIVATION_LABELS,
 	SKILL_OVERRIDE_RULE,
-	SKILL_SCOPE_LABELS,
 	SKILL_STATUS_LABELS,
 	skillBlockedDetail,
 	skillDayText,
@@ -52,7 +52,7 @@ import {
  */
 
 /** 范围分组的展示顺序（本页专有：Agent 详情页不按范围分组）。 */
-const SCOPE_ORDER: SkillScope[] = ["agent", "project", "global"];
+const SCOPE_ORDER: Scope[] = ["agent", "project", "global"];
 
 export function SkillsView(): React.JSX.Element {
 	const view = useSession();
@@ -590,7 +590,7 @@ export function SkillsView(): React.JSX.Element {
 								▶
 							</span>
 							<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">
-								{SKILL_SCOPE_LABELS[group.scope]}
+								{SCOPE_LABELS[group.scope]}
 							</span>
 							<span className="ml-auto font-mono text-xs text-ink-faint">{group.rows.length}</span>
 						</button>
@@ -694,7 +694,7 @@ export function SkillsView(): React.JSX.Element {
 														{SKILL_STATUS_LABELS[row.status]}
 													</span>
 													<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
-														{SKILL_SCOPE_LABELS[row.scope]}
+														{SCOPE_LABELS[row.scope]}
 													</span>
 												</div>
 												{row.description && (

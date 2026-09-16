@@ -12,8 +12,7 @@
  *   errors        blocked（具体技能被挡）+ errors（扫描级失败）
  */
 
-/** 技能范围：Agent 自己的家 / 会话所在的 Project / 两者之外（全局用户库等发现源）。 */
-export type SkillScope = "agent" | "project" | "global";
+import type { Scope } from "../scope";
 
 /** 激活态：进没进这次会话。 */
 export type SkillActivation = "loaded" | "discoverable" | "blocked";
@@ -40,7 +39,8 @@ export interface SkillScopeRowDto {
 	providerName?: string;
 	/** SKILL.md 绝对路径（来源）；名单里只剩名字、磁盘上找不到时为空串。 */
 	path: string;
-	scope: SkillScope;
+	/** Agent 自己的家 / 会话所在的 Project / 两者之外；判定规则见 `scope.ts`（与 composer 的上下文条目同一份）。 */
+	scope: Scope;
 	activation: SkillActivation;
 	status: SkillStatus;
 	/** frontmatter 声明的版本（缺省 = 没声明，不是空字符串）。 */
