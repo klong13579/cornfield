@@ -419,13 +419,14 @@ describe("失败要说真话：不建会话、不落回任何默认根", () => {
 
 describe("agent 列表的边界", () => {
 	it(
-		"绑 Project 的附件不冒充 agent 行；agent 行只报它自己根上的附件",
+		"一行一个 Agent：绑 Project 的附件不冒充 agent 行，agent 行只报它自己根上的附件",
 		async () => {
 			const rootA = path.join(home, "repo-a");
 			await declareProject("proj-a", rootA);
 			const registry = makeRegistry(rootSessionFactory());
 			registry.registerMeta(hrMeta());
 
+			// 只绑了 Project 时，agent 行说的是它自己根上那个附件（还没建）—— 不拿绑定那个顶替。
 			const projectAttachment = await registry.attach("hr", "proj-a");
 			expect(registry.buildSessionList(new Set())).toEqual([
 				{
@@ -442,9 +443,9 @@ describe("agent 列表的边界", () => {
 			const ownRoot = await registry.attach("hr");
 			const rows = registry.buildSessionList(new Set(["hr"]));
 			expect(rows).toHaveLength(1);
-			expect(rows[0]?.attached).toBe(true);
-			expect(rows[0]?.active).toBe(true);
+			expect(rows[0]).toMatchObject({ id: "hr", attached: true, active: true });
 			expect(rows[0]?.sessionFile).toBe(ownRoot.session.sessionFile);
+			// 那个绑 Project 的附件仍在（只是不在 agent 行里冒充）：按域身份取得到。
 			expect(registry.getAttached("hr", "proj-a")).toBe(projectAttachment);
 			expect(projectAttachment.address).toBe(attachmentKey("hr", rootA));
 		},

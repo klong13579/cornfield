@@ -364,10 +364,15 @@ export class SessionRegistry {
 	 * 组装 server_snapshot 的列表（含运行态字段）。
 	 * activeIds：当前需要标记 active 的 agent（由调用方按连接焦点决定）。
 	 *
-	 * 一行 = 一个 Agent（DTO 是 agent 列表：id/name/role/skillCount/dingtalk 全是 agent 的事实），
-	 * 运行态字段取「这个 Agent 自己 agentDir 上的附件」。绑定 Project 的附件**不在这里冒充 agent 行**
-	 * —— 它是另一个根上的会话，归属由会话索引/归属投影（`list_sessions` 的权威 projectId）负责展示；
-	 * 需要全部附件时读 `listAttached()`。
+	 * **一行 = 一个 Agent**（DTO 是 agent 列表：id/name/role/skillCount/dingtalk 全是 agent 的事实），
+	 * 运行态字段取「这个 Agent 自己 agentDir 上的附件」。绑 Project 的附件**不在这里冒充 agent 行**：
+	 * 它的 `id` 是同一个 agent、名字也是同一个，而消费方是按 `id` 建索引的（`SessionSidebar` 的
+	 * `new Map(agents.map(a => [a.id, a.name]))`、`insights-scope` 的 `find(a => a.id === identity)`）
+	 * —— 多一行同 id 不是「多看见一个」，而是把 agent 自己那行覆盖掉。
+	 *
+	 * 所以「哪个 Project 上开着哪个会话」由**会话索引**回答：`list_sessions` 每条 entry 带
+	 * 会话头里的权威 `projectId`（绑 Project 的会话 JSONL 就写在 `<agentDir>/sessions` 下，一定被扫到）。
+	 * 要看全部附件读 `listAttached()`。
 	 */
 	buildSessionList(activeIds: ReadonlySet<string>): SessionListEntry[] {
 		return this.listMetas().map(meta => {
