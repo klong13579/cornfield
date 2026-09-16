@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-09-16
+
 ### Added
 
 - `writeStdout()` in `cli.ts` (`@cornfield/utils/cli`): the single stdout exit for command output.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-09-16
+
 ### Added
 
 - **ad-hoc `python -c` 被拦下并指向 `python` tool**（`src/config/settings-schema.ts`、`test/bash-interceptor.test.ts`）：`python` 是 `discoverable`，在 `createTools` 里被搬进 `session.xdevDevices`、不进 `toolRegistry`，所以一条 `tool: "python"` 的拦截规则在生产里**永不触发**（接线修复见 Fixed 那条），而 `bun test` 里是绿的。规则只认解释器后面紧跟的 `-c`：`python script.py -c x`、`python -m pip install`、`python3 - <<'PY'` 一律不动；`node -e` / `bun -e` **故意不写**——还没有 `js` runtime tool 可指，而规则只在它的 `tool` 可用时才生效。回归 8 条：`python` / `python3` / `ipython` 三种拼写、`-u -c` 前置 flag、裸 `python -c`、`ls && python -c` 与 `FOO=1 python -c`、`script.py -c` / `-m` / `-V` / `--version` 不误伤、heredoc 即豁免、`python` 不可用时放行。消息里点名了 `cells: [{ code }]` 的形状：会话语料里出现过模型把 `{"command": "python3 -c …"}` 直接喂给 `python` 工具而被 schema 拒的实例（python 工具的 13 个错误里 9 个是 `cells` 参数形状错），拦截后要模型自己翻译成 `cells`，所以把形状写在消息里。**注意 `bashInterceptor.enabled` 的 schema 默认是 `false`**（本机 config 里是 `true`），与既有 8 条一样只在显式打开时生效。
