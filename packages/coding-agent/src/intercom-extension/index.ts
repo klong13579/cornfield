@@ -452,7 +452,7 @@ function duplicateSessionNames(sessions: SessionInfo[]): Set<string> {
 			.filter((name, index, names) => names.indexOf(name) !== index),
 	);
 }
-function sessionIdPrefixes(sessions: SessionInfo[]): Map<string, string> {
+function sessionIdPrefixes(sessions: readonly SessionInfo[]): Map<string, string> {
 	const prefixes = new Map<string, string>();
 	for (const session of sessions) {
 		let longestSharedPrefix = 0;
@@ -735,6 +735,26 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 	let client: IntercomClient | null = null;
 	/** Last-known online roster, kept fresh by list / join / leave / presence events; feeds `/intercom` completions. */
 	let knownSessions: SessionInfo[] = [];
+	/**
+	 * True once a broker list has seeded `knownSessions` for the CURRENT
+	 * connection. Before that the table is empty, and after a disconnect it
+	 * describes a broker session that no longer exists — in neither state may it
+	 * answer "who is online", so target resolution falls back to a fresh list.
+	 *
+	 * The incremental handlers (session_joined / presence_update / session_left)
+	 * refine the table but never seed it: one event is not the whole roster.
+	 */
+	let rosterSeeded = false;
+	/** Replace the warm roster with a broker snapshot — the only way to seed it. */
+	function adoptRoster(sessions: SessionInfo[]): void {
+		knownSessions = sessions;
+		rosterSeeded = true;
+	}
+	/** Drop the warm roster: it describes a broker connection we no longer have. */
+	function clearRoster(): void {
+		knownSessions = [];
+		rosterSeeded = false;
+	}
 	const config: IntercomConfig = loadConfig();
 	const askTimeoutMs = getAskTimeoutMs();
 	const localExtensions = new Map<
@@ -1390,6 +1410,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 				emitLocalExtensionEvent(namespace, { type: "owner" });
 			}
 			client = null;
+			clearRoster();
 			if (!shuttingDown && !disposed) {
 				clearReconnectTimer();
 				scheduleReconnect();
@@ -1492,31 +1513,76 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		reconnectPromiseGeneration = generationAtStart;
 		return nextReconnectPromise;
 	}
-	async function resolveSessionTarget(activeClient: IntercomClient, nameOrId: string): Promise<string | null> {
-		const sessions = await activeClient.listSessions();
+	type SessionTargetMatch =
+		| { kind: "found"; id: string }
+		| { kind: "missing" }
+		| { kind: "ambiguous"; message: string };
+
+	/**
+	 * Pure name/id → session-id resolution over a roster snapshot. Returns a
+	 * discriminated result instead of throwing so the caller can tell an
+	 * inconclusive answer apart from a wrong one: a miss or an ambiguity in the
+	 * warm table is not the same fact as the broker's own answer.
+	 */
+	function matchSessionTarget(sessions: readonly SessionInfo[], nameOrId: string): SessionTargetMatch {
 		const byId = sessions.find(s => s.id === nameOrId);
 		if (byId) {
-			return byId.id;
+			return { kind: "found", id: byId.id };
 		}
 		const lowerName = nameOrId.toLowerCase();
 		const byName = sessions.filter(s => s.name?.toLowerCase() === lowerName);
 		if (byName.length > 1) {
 			const prefixes = sessionIdPrefixes(sessions);
 			const ids = byName.map(session => prefixes.get(session.id)!).join(", ");
-			throw new Error(
-				`Multiple sessions named "${nameOrId}" are connected. Address one by the id shown in parentheses by "list" (${ids}).`,
-			);
+			return {
+				kind: "ambiguous",
+				message: `Multiple sessions named "${nameOrId}" are connected. Address one by the id shown in parentheses by "list" (${ids}).`,
+			};
 		}
 		if (byName.length === 1) {
-			return byName[0]!.id;
+			return { kind: "found", id: byName[0]!.id };
 		}
 
 		const byIdPrefix = sessions.filter(s => s.id.startsWith(nameOrId));
 		if (byIdPrefix.length === 1) {
-			return byIdPrefix[0]!.id;
+			return { kind: "found", id: byIdPrefix[0]!.id };
 		}
 		if (byIdPrefix.length > 1) {
-			throw new Error(`Multiple sessions match ID prefix "${nameOrId}". Use a longer session ID prefix.`);
+			return {
+				kind: "ambiguous",
+				message: `Multiple sessions match ID prefix "${nameOrId}". Use a longer session ID prefix.`,
+			};
+		}
+		return { kind: "missing" };
+	}
+
+	/**
+	 * Resolve a peer name/id to a session id, consulting the warm roster first.
+	 *
+	 * Why the warm table comes first: the broker is hosted inside
+	 * cornfield-gateway (broker/paths.ts), so a stalled gateway event loop makes
+	 * `list` miss its 5s budget and turns a healthy `send` into "Failed to send:
+	 * List sessions timeout" even though the roster was known locally all along.
+	 *
+	 * Only a unique hit is answered locally. A cold table (no list yet on this
+	 * connection) knows nothing, and neither a miss nor an ambiguity in the warm
+	 * table can be settled without the broker — those fall through to it.
+	 */
+	async function resolveSessionTarget(activeClient: IntercomClient, nameOrId: string): Promise<string | null> {
+		if (rosterSeeded) {
+			const warm = matchSessionTarget(knownSessions, nameOrId);
+			if (warm.kind === "found") {
+				return warm.id;
+			}
+		}
+		const sessions = await activeClient.listSessions();
+		adoptRoster(sessions);
+		const match = matchSessionTarget(sessions, nameOrId);
+		if (match.kind === "found") {
+			return match.id;
+		}
+		if (match.kind === "ambiguous") {
+			throw new Error(match.message);
 		}
 		return null;
 	}
@@ -1570,7 +1636,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			if (client !== activeClient || !getLiveContext(runtimeContext, generation)) {
 				return;
 			}
-			knownSessions = sessions;
+			adoptRoster(sessions);
 			for (const session of sessions) {
 				if (sessionIsChildOfThis(session)) {
 					childSessions.set(session.id, session);
@@ -1658,6 +1724,25 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			index: String(childPaneLaunchSeq),
 		};
 	}
+	/**
+	 * Roster snapshot for "who is online right now" decisions: the warm table
+	 * when a list has seeded it, otherwise a fresh one from the broker.
+	 *
+	 * Not every caller may use the warm table — `waitForProjectSession` polls for
+	 * a session that does not exist yet and must keep asking. For lookups the
+	 * warm table is complete: the broker broadcasts every join/leave/presence to
+	 * connected peers, so it lags an established session by at most one in-flight
+	 * event, which is cheaper than a round-trip whose broker can stall (see
+	 * resolveSessionTarget).
+	 */
+	async function resolveRoster(activeClient: IntercomClient): Promise<SessionInfo[]> {
+		if (rosterSeeded) {
+			return knownSessions;
+		}
+		const sessions = await activeClient.listSessions();
+		adoptRoster(sessions);
+		return sessions;
+	}
 	async function resolveCwdDeliveryTarget(
 		activeClient: IntercomClient,
 		options: {
@@ -1669,7 +1754,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 			signal?: AbortSignal;
 		},
 	): Promise<DeliveryTarget> {
-		const sessions = await activeClient.listSessions();
+		const sessions = await resolveRoster(activeClient);
 		const currentSessionId = activeClient.sessionId;
 		if (!currentSessionId) throw new Error("Current session is not registered with intercom.");
 		const currentSession = sessions.find(session => session.id === currentSessionId);
@@ -1769,6 +1854,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		replyTracker.reset();
 		if (previousClient) {
 			client = null;
+			clearRoster();
 			void previousClient.disconnect().catch(() => undefined);
 		}
 		runtimeContext = ctx;
@@ -2513,7 +2599,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
-							knownSessions = sessions;
+							adoptRoster(sessions);
 							const currentSession = sessions.find(s => s.id === mySessionId);
 							const otherSessions = sessions.filter(s => s.id !== mySessionId);
 
@@ -2547,7 +2633,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
-							knownSessions = sessions;
+							adoptRoster(sessions);
 							const currentSession = sessions.find(s => s.id === mySessionId);
 
 							if (!currentSession) {
@@ -2592,7 +2678,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
-							knownSessions = sessions;
+							adoptRoster(sessions);
 							const currentSession = sessions.find(s => s.id === mySessionId);
 
 							if (!currentSession) {
@@ -3090,7 +3176,7 @@ Usage:
 						try {
 							const mySessionId = connectedClient.sessionId;
 							const sessions = await connectedClient.listSessions();
-							knownSessions = sessions;
+							adoptRoster(sessions);
 							return {
 								content: [
 									{

@@ -55,6 +55,25 @@ function getLivenessTimeoutMs(): number {
 	return Number.isFinite(raw) && raw > 0 ? Math.min(raw, getLivenessIntervalMs()) : 5_000;
 }
 
+/**
+ * Consecutive probe misses tolerated before the socket is torn down.
+ *
+ * One miss is ambiguous. The broker is hosted inside cornfield-gateway
+ * (broker/paths.ts), so it shares that process's event loop: unrelated gateway
+ * work can hold a reply past the probe budget while the connection is perfectly
+ * healthy. Observed in the wild as callers reporting "Failed to send: List
+ * sessions timeout" from sessions whose connection answered fine seconds later.
+ * Destroying on the first miss turns such a stall into a full reconnect, and
+ * each teardown shows up on the broker as a write failure ("This socket has
+ * been ended by the other party"). Two consecutive misses — a full heartbeat
+ * interval apart, so no single stall explains both — are evidence of a dead
+ * peer rather than a busy one.
+ */
+function getLivenessMissesBeforeTeardown(): number {
+	const raw = Number.parseInt(process.env.PI_INTERCOM_LIVENESS_MISSES ?? "", 10);
+	return Number.isFinite(raw) && raw > 0 ? raw : 2;
+}
+
 function connectToBrokerTarget(target: BrokerConnectTarget): net.Socket {
 	return typeof target === "string" ? net.connect(target) : net.connect({ host: target.host, port: target.port });
 }
@@ -74,6 +93,8 @@ export class IntercomClient extends EventEmitter {
 	private disconnectError: Error | null = null;
 	private livenessTimer: NodeJS.Timeout | null = null;
 	private livenessInFlight = false;
+	/** Consecutive liveness probes that went unanswered on a still-usable socket. */
+	private livenessMisses = 0;
 	/**
 	 * Broker error text received before registration (e.g. registry full).
 	 * connect() rejects with this instead of letting the raw frame throw out
@@ -137,6 +158,9 @@ export class IntercomClient extends EventEmitter {
 			this.livenessTimer = null;
 		}
 		this.livenessInFlight = false;
+		// No heartbeat, no miss streak: startLivenessHeartbeat re-arms on every
+		// registration, so a reconnect always begins with a clean count.
+		this.livenessMisses = 0;
 	}
 
 	private async runLivenessProbe(): Promise<void> {
@@ -146,10 +170,21 @@ export class IntercomClient extends EventEmitter {
 		this.livenessInFlight = true;
 		try {
 			await this.listSessions({ timeoutMs: getLivenessTimeoutMs() });
+			this.livenessMisses = 0;
 		} catch (error) {
-			// A timeout or write error means the socket is half-open: the broker is
-			// gone but the OS never delivered a close event. Destroy the socket so
-			// the onClose handler emits "disconnected" and the extension reconnects.
+			// A miss on a socket that still looks usable is ambiguous: the broker
+			// shares the gateway's event loop, so unrelated gateway work can hold a
+			// reply past the probe budget while the connection is healthy. Tear down
+			// only once the misses accumulate; a failure that left the socket
+			// unusable is definitive and acts immediately.
+			if (this.isConnected()) {
+				this.livenessMisses += 1;
+				if (this.livenessMisses < getLivenessMissesBeforeTeardown()) {
+					return;
+				}
+			}
+			// The peer is gone but the OS never delivered a close event. Destroy the
+			// socket so onClose emits "disconnected" and the extension reconnects.
 			const socket = this.socket;
 			if (socket && !socket.destroyed) {
 				this.disconnectError = toError(error);
