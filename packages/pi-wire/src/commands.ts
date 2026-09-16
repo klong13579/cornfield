@@ -328,9 +328,10 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_session_messages"; sessionFile: string }
 	/**
-	 * 只读列出 agent workspace 目录（Agent 详情页文件系统 tab）。
-	 * path 相对 agentDir；省略 = agentDir 根。返回条目（目录在前，名/类型/大小）。
-	 * 路径约束：必须解析在 agentDir 内（防任意读）；越界 ok:false + error。
+	 * 只读列出会话工作面里的目录（Agent 详情页文件系统 tab）。
+	 * path 是相对路径（省略 = 第一个存在的根）；返回条目（目录在前，名/类型/大小）。
+	 * 路径约束：必须落在会话的 workspace roots 内（Project root + agentDir 声明的 attachedRoots +
+	 * agentDir；未绑定 Project 的会话就是 [agentDir]）。`..` 逃逸与符号链接逃逸照旧拒；越界 ok:false + error。
 	 */
 	| { id?: string; type: "fs_list"; sessionId?: string; path?: string }
 	/** 只读读一个 workspace 文件（文本，utf-8；> 128KB 截断到 128KB）。路径约束同上。 */
@@ -476,7 +477,7 @@ export type WireExtensionCommand =
 	/**
 	 * 产物列表（R-ARTIFACTS）：从该 agent 最近会话 JSONL 的工具调用（write / edit /
 	 * puppeteer screenshot）提取写出文件，返回可预览产物（html / image / markdown / text）。
-	 * 路径约束与 fs_read 同（resolveFsPath：必须解析在 agentDir 内）。
+	 * 路径约束与 fs_read 同（会话的 workspace roots 边界）。
 	 * 响应 { artifacts: ArtifactDto[] }；静态预览走 /preview/<agentId>/<relpath>（serve 端路由）。
 	 *
 	 * sessionFile（可选）：定向到单个会话文件，只提取该会话的产物（按会话隔离视图，
@@ -499,7 +500,7 @@ export type WireExtensionCommand =
 	| { id?: string; type: "test_mcp_server"; name: string }
 	/**
 	 * fs 写命令面（票 01）：整段写一个 workspace 文件（UTF-8）。
-	 * 路径约束与 fs_read 同（必须解析在 agentDir 内，越界 ok:false）；写后走 LSP
+	 * 路径约束与 fs_read 同（会话的 workspace roots 内，越界 ok:false）；写后走 LSP
 	 * writethrough（didChange 同步 + notifySaved），格式化/诊断状态不丢。
 	 */
 	| { id?: string; type: "fs_write"; sessionId?: string; path: string; content: string }
@@ -517,7 +518,7 @@ export type WireExtensionCommand =
 			input?: string;
 	  }
 	/**
-	 * 前后内容统一 diff（供前端 diff 视图）。path+content：agentDir 内文件 vs 待写 content；
+	 * 前后内容统一 diff（供前端 diff 视图）。path+content：会话工作面内的文件 vs 待写 content；
 	 * before+after：纯文本 diff（不落地）。
 	 */
 	| {
