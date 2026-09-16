@@ -1,5 +1,5 @@
 /**
- * `omp agent <subcommand>` — manage agentDir workspaces.
+ * `cornfield agent <subcommand>` — manage agentDir workspaces.
  *
  * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
  *   - init <name>     create a new agentDir
@@ -47,7 +47,7 @@ export default class Agent extends Command {
 			required: false,
 		}),
 		// Positional shortcut for `--dir` (init action). Lets users write
-		// `omp agent init hr-bot ./` instead of `omp agent init hr-bot --dir ./`.
+		// `cornfield agent init hr-bot ./` instead of `cornfield agent init hr-bot --dir ./`.
 		// For other actions, this is ignored — use `--dir` flag.
 		dir: Args.string({
 			description: "Positional shortcut for --dir (init only)",
@@ -73,30 +73,30 @@ export default class Agent extends Command {
 	static examples = [
 		"",
 		"  ======== 创建 ========",
-		"  omp agent init hr-bot                          Create ~/.cornfield/agents/hr-bot/ with default template",
-		"  omp agent init hr-bot --dir /opt/agents         Custom parent directory",
-		"  omp agent init hr-bot --mission ./mission.md    Seed from existing mission.md",
-		"  omp agent init hr-bot --template default        Explicit template (default only, for now)",
+		"  cornfield agent init hr-bot                         Create ~/.cornfield/agents/hr-bot/ with default template",
+		"  cornfield agent init hr-bot --dir /opt/agents       Custom parent directory",
+		"  cornfield agent init hr-bot --mission ./mission.md  Seed from existing mission.md",
+		"  cornfield agent init hr-bot --template default      Explicit template (default only, for now)",
 		"",
 		"  ======== 查看 ========",
-		"  omp agent list                                  List all agentDirs under ~/.cornfield/agents/",
-		"  omp agent list --json                           List as JSON",
-		"  omp agent show hr-bot                           Show identity, tools, skills, cron, sessions",
-		"  omp agent show hr-bot --json                    Show as JSON",
+		"  cornfield agent list                                List all agentDirs under ~/.cornfield/agents/",
+		"  cornfield agent list --json                         List as JSON",
+		"  cornfield agent show hr-bot                         Show identity, tools, skills, cron, sessions",
+		"  cornfield agent show hr-bot --json                  Show as JSON",
 		"",
 		"  ======== 校验 ========",
-		"  omp agent validate --dir ~/.cornfield/agents/hr-bot        Check always-on + runtime hard deps",
-		"  omp agent validate --dir .                            Check current directory",
-		"  omp agent validate --dir ~/.cornfield/agents/hr-bot --json  Output as JSON",
-		"  omp agent validate --dir . --fix                         Auto-repair MECE violations + skeleton gaps",
-		"  omp agent validate --dir . --semantic                   Run LLM semantic audit (needs model+key)",
+		"  cornfield agent validate --dir ~/.cornfield/agents/hr-bot  Check always-on + runtime hard deps",
+		"  cornfield agent validate --dir .                    Check current directory",
+		"  cornfield agent validate --dir ~/.cornfield/agents/hr-bot --json  Output as JSON",
+		"  cornfield agent validate --dir . --fix              Auto-repair MECE violations + skeleton gaps",
+		"  cornfield agent validate --dir . --semantic         Run LLM semantic audit (needs model+key)",
 		"",
 		"  ======== 注册表 ========",
-		"  omp agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.cornfield/agent/registry.json",
-		"  omp agent register hr3 /path/to/hr3              Positional shortcut for --dir",
-		"  omp agent unregister hr3                          Remove hr3 from the registry (does not delete files)",
-		"  omp agent unregister hr3 --delete-files           Also rm -rf the agentDir on disk",
-		"  omp agent reconcile                               Prune stale entries; re-register any in default location",
+		"  cornfield agent register hr3 --dir /path/to/hr3     Add an existing agentDir to ~/.cornfield/agent/registry.json",
+		"  cornfield agent register hr3 /path/to/hr3           Positional shortcut for --dir",
+		"  cornfield agent unregister hr3                      Remove hr3 from the registry (does not delete files)",
+		"  cornfield agent unregister hr3 --delete-files       Also rm -rf the agentDir on disk",
+		"  cornfield agent reconcile                           Prune stale entries; re-register any in default location",
 		"",
 	];
 
@@ -130,7 +130,9 @@ export default class Agent extends Command {
 		switch (action) {
 			case "init": {
 				if (!name) {
-					console.error("Usage: omp agent init <name> [--dir <path>] [--template default] [--mission <file>]");
+					console.error(
+						"Usage: cornfield agent init <name> [--dir <path>] [--template default] [--mission <file>]",
+					);
 					process.exitCode = 1;
 					return;
 				}
@@ -152,7 +154,9 @@ export default class Agent extends Command {
 						: `✓ AgentDir exists at ${result.agentDir} (additive update — existing files preserved)`,
 				);
 				if (result.created) writeStdout(`  ${result.filesWritten} content files written`);
-				writeStdout(`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`omp agent show ${name}\``);
+				writeStdout(
+					`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`cornfield agent show ${name}\``,
+				);
 				return;
 			}
 			case "list": {
@@ -162,7 +166,7 @@ export default class Agent extends Command {
 			}
 			case "show": {
 				if (!name) {
-					console.error("Usage: omp agent show <name> [--dir <path>] [--json]");
+					console.error("Usage: cornfield agent show <name> [--dir <path>] [--json]");
 					process.exitCode = 1;
 					return;
 				}
@@ -176,7 +180,7 @@ export default class Agent extends Command {
 			}
 			case "validate": {
 				if (!dirResolved) {
-					console.error("Usage: omp agent validate --dir <agentDir> [--fix] [--json]");
+					console.error("Usage: cornfield agent validate --dir <agentDir> [--fix] [--json]");
 					process.exitCode = 1;
 					return;
 				}
@@ -193,7 +197,7 @@ export default class Agent extends Command {
 			case "register": {
 				if (!name) {
 					console.error(
-						"Usage: omp agent register <name> --dir <path>  (or positional: omp agent register <name> <dir>)",
+						"Usage: cornfield agent register <name> --dir <path>  (or positional: cornfield agent register <name> <dir>)",
 					);
 					process.exitCode = 1;
 					return;
@@ -205,7 +209,7 @@ export default class Agent extends Command {
 			}
 			case "unregister": {
 				if (!name) {
-					console.error("Usage: omp agent unregister <name> [--delete-files]");
+					console.error("Usage: cornfield agent unregister <name> [--delete-files]");
 					process.exitCode = 1;
 					return;
 				}

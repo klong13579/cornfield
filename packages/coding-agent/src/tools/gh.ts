@@ -69,6 +69,7 @@ import {
 	type GithubInput,
 	githubSchema,
 } from "./gh-types";
+import { type CacheStatus, formatCacheNotice, getOrFetchView } from "./github-cache";
 import { ToolError, throwIfAborted } from "./tool-errors";
 import { toolResult } from "./tool-result";
 
@@ -1715,6 +1716,92 @@ async function githubIssueJsonWithStateReasonFallback<T>(
 	}
 }
 
+const ISSUE_URL_PATTERN = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/.*)?$/;
+
+/**
+ * The identity a view row is keyed on. Both parts must be knowable *before*
+ * the fetch: a branch name (or no `pr` at all) names nothing `gh` would resolve
+ * the same way twice, and a bare number only becomes an identity once the
+ * repository is known. Requests without an identity go straight to `gh`.
+ */
+interface ViewTarget {
+	repo: string | undefined;
+	number: number | undefined;
+}
+
+/** A bare decimal identifier; undefined for URLs, branch names, and anything else. */
+function parseNumericIdentifier(value: string | undefined): number | undefined {
+	const trimmed = normalizeOptionalString(value);
+	if (!trimmed || !/^\d+$/.test(trimmed)) return undefined;
+	const parsed = Number(trimmed);
+	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/** Issue number and repo, from a bare number or a full issue URL. */
+function parseIssueTarget(identifier: string, repo: string | undefined): ViewTarget {
+	const fromUrl = identifier.match(ISSUE_URL_PATTERN);
+	if (fromUrl) return { repo: fromUrl[1], number: Number(fromUrl[2]) };
+	return { repo, number: parseNumericIdentifier(identifier) };
+}
+
+/** Pull request number and repo, from a bare number or a full pull request URL. */
+function parsePrTarget(identifier: string | undefined, repo: string | undefined): ViewTarget {
+	const fromUrl = parsePullRequestUrl(identifier);
+	if (fromUrl.prNumber !== undefined) return { repo: fromUrl.repo ?? repo, number: fromUrl.prNumber };
+	return { repo, number: parseNumericIdentifier(identifier) };
+}
+
+/**
+ * Resolve the repository `gh` would pick for this checkout — at most once per
+ * call, and only to key the cache. The fetch itself keeps invoking `gh` exactly
+ * as before, so remote selection and error messages are unchanged. A resolution
+ * failure means "no identity": the call's own fetch then reports gh's error
+ * rather than a friendlier one invented here.
+ */
+function createDefaultRepoResolver(cwd: string, signal: AbortSignal | undefined): () => Promise<string | undefined> {
+	let pending: Promise<string | undefined> | undefined;
+	return () => {
+		pending ??= resolveGitHubRepo(cwd, undefined, undefined, signal).catch(() => undefined);
+		return pending;
+	};
+}
+
+/**
+ * Give a numeric target that named no repository one, so the row has an
+ * identity to key on. A request that named a branch, or whose repository cannot
+ * be resolved, stays identity-less and is therefore never cached.
+ */
+async function withResolvedRepo(
+	target: ViewTarget,
+	resolveRepo: () => Promise<string | undefined>,
+): Promise<ViewTarget> {
+	if (target.repo !== undefined || target.number === undefined) return target;
+	return { repo: await resolveRepo(), number: target.number };
+}
+
+/**
+ * The parts of a `pr_diff` request that change the fetched bytes without
+ * changing the pull request they describe. The cache key carries them so a
+ * `--name-only` or narrowed `--exclude` call is never answered by a differently
+ * shaped row.
+ */
+function prDiffVariant(params: GithubInput): string {
+	const parts = [params.nameOnly ? "name-only" : "full"];
+	for (const pattern of (params.exclude ?? [])
+		.map(entry => entry.trim())
+		.filter(Boolean)
+		.sort()) {
+		parts.push(`exclude=${pattern}`);
+	}
+	return parts.join("|");
+}
+
+/** Append the cache provenance marker so a cached view never reads as live data. */
+function withCacheNotice(text: string, status: CacheStatus, fetchedAt: number): string {
+	const notice = formatCacheNotice(status, fetchedAt);
+	return notice ? `${text}\n\n${notice}` : text;
+}
+
 async function executeIssueView(
 	session: ToolSession,
 	params: GithubInput,
@@ -1727,10 +1814,30 @@ async function executeIssueView(
 	appendRepoFlag(args, repo, issue);
 	args.push("--json", (includeComments ? GH_ISSUE_FIELDS : GH_ISSUE_FIELDS_NO_COMMENTS).join(","));
 
-	const data = await githubIssueJsonWithStateReasonFallback<GhIssueViewData>(session.cwd, args, signal, {
-		repoProvided: Boolean(repo),
+	const fetchFresh = () =>
+		githubIssueJsonWithStateReasonFallback<GhIssueViewData>(session.cwd, args, signal, {
+			repoProvided: Boolean(repo),
+		});
+
+	const parsed = parseIssueTarget(issue, repo);
+	const target = await withResolvedRepo(parsed, createDefaultRepoResolver(session.cwd, signal));
+
+	const view = await getOrFetchView<GhIssueViewData>({
+		repo: target.repo,
+		kind: "issue",
+		number: target.number,
+		includeComments,
+		settings: session.settings,
+		fetchFresh,
 	});
-	return buildTextResult(formatIssueView(data, { issue, repo, comments: includeComments }), data.url);
+	return buildTextResult(
+		withCacheNotice(
+			formatIssueView(view.payload, { issue, repo, comments: includeComments }),
+			view.status,
+			view.fetchedAt,
+		),
+		view.payload.url,
+	);
 }
 
 async function executePrView(
@@ -1742,35 +1849,54 @@ async function executePrView(
 	const includeComments = params.comments ?? true;
 	const prList = normalizePrIdentifierList(params.pr);
 	const prRefs: (string | undefined)[] = prList.length > 0 ? prList : [undefined];
+	const resolveDefaultRepo = createDefaultRepoResolver(session.cwd, signal);
 
 	const views = await Promise.all(
 		prRefs.map(async prRef => {
-			const args = ["pr", "view"];
-			if (prRef) args.push(prRef);
-			appendRepoFlag(args, repo, prRef);
-			args.push("--json", (includeComments ? GH_PR_FIELDS : GH_PR_FIELDS_NO_COMMENTS).join(","));
+			const fetchFresh = async (): Promise<GhPrViewData> => {
+				const args = ["pr", "view"];
+				if (prRef) args.push(prRef);
+				appendRepoFlag(args, repo, prRef);
+				args.push("--json", (includeComments ? GH_PR_FIELDS : GH_PR_FIELDS_NO_COMMENTS).join(","));
 
-			const data = await git.github.json<GhPrViewData>(session.cwd, args, signal, {
-				repoProvided: Boolean(repo),
+				const data = await git.github.json<GhPrViewData>(session.cwd, args, signal, {
+					repoProvided: Boolean(repo),
+				});
+				const resolvedRepo = repo ?? parsePullRequestUrl(data.url).repo;
+				if (includeComments && resolvedRepo && typeof data.number === "number") {
+					data.reviewComments = await fetchPrReviewComments(session.cwd, resolvedRepo, data.number, signal);
+				}
+				return data;
+			};
+
+			const parsed = parsePrTarget(prRef, repo);
+			const target = await withResolvedRepo(parsed, resolveDefaultRepo);
+
+			const view = await getOrFetchView<GhPrViewData>({
+				repo: target.repo,
+				kind: "pr",
+				number: target.number,
+				includeComments,
+				settings: session.settings,
+				fetchFresh,
 			});
-			const resolvedRepo = repo ?? parsePullRequestUrl(data.url).repo;
-			if (includeComments && resolvedRepo && typeof data.number === "number") {
-				data.reviewComments = await fetchPrReviewComments(session.cwd, resolvedRepo, data.number, signal);
-			}
-			return { prRef, data };
+			return { prRef, data: view.payload, status: view.status, fetchedAt: view.fetchedAt };
 		}),
 	);
 
+	const render = (view: (typeof views)[number]): string =>
+		withCacheNotice(
+			formatPrView(view.data, { pr: view.prRef, repo, comments: includeComments }),
+			view.status,
+			view.fetchedAt,
+		);
+
 	if (views.length === 1) {
 		const [view] = views;
-		return buildTextResult(
-			formatPrView(view.data, { pr: view.prRef, repo, comments: includeComments }),
-			view.data.url,
-		);
+		return buildTextResult(render(view), view.data.url);
 	}
 
-	const sections = views.map(view => formatPrView(view.data, { pr: view.prRef, repo, comments: includeComments }));
-	const text = [`# ${views.length} Pull Requests`, "", ...joinSections(sections)].join("\n").trim();
+	const text = [`# ${views.length} Pull Requests`, "", ...joinSections(views.map(render))].join("\n").trim();
 	return buildTextResult(text);
 }
 
@@ -1782,22 +1908,39 @@ async function executePrDiff(
 	const repo = normalizeOptionalString(params.repo);
 	const prList = normalizePrIdentifierList(params.pr);
 	const prRefs: (string | undefined)[] = prList.length > 0 ? prList : [undefined];
+	const variant = prDiffVariant(params);
+	const resolveDefaultRepo = createDefaultRepoResolver(session.cwd, signal);
 
 	const diffs = await Promise.all(
 		prRefs.map(async prRef => {
-			const args = ["pr", "diff"];
-			if (prRef) args.push(prRef);
-			appendRepoFlag(args, repo, prRef);
-			args.push("--color", "never");
-			if (params.nameOnly) args.push("--name-only");
-			for (const pattern of params.exclude ?? []) {
-				args.push("--exclude", requireNonEmpty(pattern, "exclude pattern"));
-			}
-			const output = await git.github.text(session.cwd, args, signal, {
-				repoProvided: Boolean(repo),
-				trimOutput: false,
+			const fetchFresh = async (): Promise<string> => {
+				const args = ["pr", "diff"];
+				if (prRef) args.push(prRef);
+				appendRepoFlag(args, repo, prRef);
+				args.push("--color", "never");
+				if (params.nameOnly) args.push("--name-only");
+				for (const pattern of params.exclude ?? []) {
+					args.push("--exclude", requireNonEmpty(pattern, "exclude pattern"));
+				}
+				return await git.github.text(session.cwd, args, signal, {
+					repoProvided: Boolean(repo),
+					trimOutput: false,
+				});
+			};
+
+			const parsed = parsePrTarget(prRef, repo);
+			const target = await withResolvedRepo(parsed, resolveDefaultRepo);
+
+			const view = await getOrFetchView<string>({
+				repo: target.repo,
+				kind: "pr-diff",
+				number: target.number,
+				variant,
+				includeComments: false,
+				settings: session.settings,
+				fetchFresh,
 			});
-			return { prRef, output };
+			return { prRef, output: view.payload, status: view.status, fetchedAt: view.fetchedAt };
 		}),
 	);
 
@@ -1807,7 +1950,7 @@ async function executePrDiff(
 	if (diffs.length === 1) {
 		const [diff] = diffs;
 		const body = diff.output.length > 0 ? diff.output : emptyBody;
-		return buildTextResult(`${singleTitle}\n\n${body}`);
+		return buildTextResult(withCacheNotice(`${singleTitle}\n\n${body}`, diff.status, diff.fetchedAt));
 	}
 
 	const header = params.nameOnly
@@ -1816,7 +1959,7 @@ async function executePrDiff(
 	const sections = diffs.map(diff => {
 		const label = diff.prRef ? `PR ${diff.prRef}` : "PR (current branch)";
 		const body = diff.output.length > 0 ? diff.output : emptyBody;
-		return `## ${label}\n\n${body}`;
+		return withCacheNotice(`## ${label}\n\n${body}`, diff.status, diff.fetchedAt);
 	});
 	const text = [header, "", ...joinSections(sections)].join("\n").trim();
 	return buildTextResult(text);

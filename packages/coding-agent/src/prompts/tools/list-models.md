@@ -1,4 +1,4 @@
-List all LLM models the current omp session can call.
+List all LLM models the current CornField session can call.
 
 <instruction>
 - Returns a markdown table of `provider / model / context / reasoning` plus the current model.

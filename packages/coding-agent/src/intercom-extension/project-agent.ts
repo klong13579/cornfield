@@ -40,7 +40,7 @@ export interface ProjectPaneLaunch {
 }
 
 /**
- * Orchestrator metadata passed to a freshly launched child omp via env vars, so
+ * Orchestrator metadata passed to a freshly launched child cornfield process via env vars, so
  * the child registers with the parent edge on the intercom broker, gets the
  * contact_supervisor tool, and auto-reports task-round completion back.
  * Mirrors pi-subagents bridge metadata (PI_SUBAGENT_* env vars).

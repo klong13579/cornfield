@@ -836,15 +836,15 @@ export async function listClaudePluginRoots(
 		}
 	}
 
-	// ── OMP installed plugins registry ───────────────────────────────────────
-	// OMP registry is authoritative: its entries replace Claude's entries for the same plugin ID.
+	// ── CornField installed plugins registry ─────────────────────────────────
+	// CornField registry is authoritative: its entries replace Claude's entries for the same plugin ID.
 	// Path derived from `home` (not os.homedir()) so test isolation works when home is overridden.
-	const ompRegistryPath = path.join(home, getConfigDirName(), "plugins", "installed_plugins.json");
-	const ompContent = await readFile(ompRegistryPath);
-	if (ompContent) {
-		const ompRegistry = parseClaudePluginsRegistry(ompContent);
-		if (ompRegistry) {
-			for (const [pluginId, entries] of Object.entries(ompRegistry.plugins)) {
+	const pluginRegistryPath = path.join(home, getConfigDirName(), "plugins", "installed_plugins.json");
+	const registryContent = await readFile(pluginRegistryPath);
+	if (registryContent) {
+		const pluginRegistry = parseClaudePluginsRegistry(registryContent);
+		if (pluginRegistry) {
+			for (const [pluginId, entries] of Object.entries(pluginRegistry.plugins)) {
 				if (!Array.isArray(entries) || entries.length === 0) continue;
 
 				const atIndex = pluginId.lastIndexOf("@");
@@ -855,7 +855,7 @@ export async function listClaudePluginRoots(
 				const pluginName = pluginId.slice(0, atIndex);
 				const marketplace = pluginId.slice(atIndex + 1);
 
-				// OMP is authoritative: drop all Claude-sourced entries for this plugin ID
+				// CornField is authoritative: drop all Claude-sourced entries for this plugin ID
 				const filtered = roots.filter(r => r.id !== pluginId);
 				roots.length = 0;
 				roots.push(...filtered);
@@ -880,11 +880,11 @@ export async function listClaudePluginRoots(
 				}
 			}
 		} else {
-			warnings.push(`Failed to parse OMP plugin registry: ${ompRegistryPath}`);
+			warnings.push(`Failed to parse CornField plugin registry: ${pluginRegistryPath}`);
 		}
 	}
 
-	// ── Project-scoped OMP registry ────────────────────────────────────────
+	// ── Project-scoped CornField registry ──────────────────────────────────
 	// Loaded from the nearest .cornfield/plugins/installed_plugins.json relative to cwd.
 	// Project entries take precedence over user entries for the same plugin ID.
 	if (resolvedProjectPath) {
@@ -1000,7 +1000,7 @@ export function getPreloadedPluginRoots(): readonly ClaudePluginRoot[] {
 
 /**
  * Inject synthetic plugin roots from --plugin-dir paths.
- * These are prepended to the cache with highest precedence (before OMP/Claude entries).
+ * These are prepended to the cache with highest precedence (before CornField/Claude entries).
  * Must be called before any listClaudePluginRoots() access.
  */
 export async function injectPluginDirRoots(home: string, dirs: string[], cwd?: string): Promise<void> {

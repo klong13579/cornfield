@@ -3,7 +3,7 @@
  *
  * Consumed by:
  *   - `cornfield-gateway` (account install, gateway startup)
- *   - `omp agent init` (future CLI per design §6.2)
+ *   - `cornfield agent init` (future CLI per design §6.2)
  *
  * Asset content lives in `./assets/*.md` etc. and is statically imported via Bun —
  * do not read those files at runtime.

@@ -76,7 +76,7 @@ intercom({ action: "list" })
 
 ### Pattern 2b: Parent-Child Orchestration (monitoring children)
 
-When a session declares a parent (a child omp launched via `send`/`ask` with
+When a session declares a parent (a child cornfield session launched via `send`/`ask` with
 `openProjectPaneIfMissing: true` registers automatically as your child, and
 any session launched with `PI_SUBAGENT_ORCHESTRATOR_*` env does too):
 

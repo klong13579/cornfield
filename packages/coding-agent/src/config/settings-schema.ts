@@ -2008,6 +2008,38 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"github.cache.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "GitHub View Cache",
+			description:
+				"Cache fetched issue/PR/diff views so repeated reads of the same number skip the GitHub round trip",
+		},
+	},
+
+	"github.cache.softTtlSec": {
+		type: "number",
+		default: 300,
+		ui: {
+			tab: "tools",
+			label: "GitHub Cache Soft TTL",
+			description: "Within this window a cached view is returned as-is (seconds; default 5 minutes)",
+		},
+	},
+
+	"github.cache.hardTtlSec": {
+		type: "number",
+		default: 604800,
+		ui: {
+			tab: "tools",
+			label: "GitHub Cache Hard TTL",
+			description:
+				"Past the soft TTL a cached view is refreshed; past this one it is dropped before the live fetch (seconds; default 7 days)",
+		},
+	},
+
 	"web_search.enabled": {
 		type: "boolean",
 		default: true,

@@ -324,6 +324,11 @@ export function getStatsDbPath(): string {
 	return dirs.rootSubdir("stats.db", "data");
 }
 
+/** Get the GitHub view cache database path (~/.cornfield/github-cache.db). */
+export function getGithubCacheDbPath(): string {
+	return dirs.rootSubdir("github-cache.db", "cache");
+}
+
 // =============================================================================
 // Agent subdirectories (~/.cornfield/agent/*)
 // =============================================================================

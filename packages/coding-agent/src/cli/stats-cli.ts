@@ -1,7 +1,7 @@
 /**
  * Stats CLI command handlers.
  *
- * Handles `omp stats` subcommand for viewing AI usage statistics.
+ * Handles `cornfield stats` subcommand for viewing AI usage statistics.
  */
 
 import { APP_NAME, formatDuration, formatNumber, formatPercent } from "@cornfield/utils";

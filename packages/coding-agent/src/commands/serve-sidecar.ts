@@ -1,7 +1,7 @@
 /**
- * `omp serve` sidecar 监督逻辑（从 packages/desktop/src/sidecar.ts 平搬）。
+ * `cornfield serve` sidecar 监督逻辑（从 packages/desktop/src/sidecar.ts 平搬）。
  *
- * 职责：确保 `127.0.0.1:7891` 上有一个 `omp serve` sidecar 在跑，并负责其
+ * 职责：确保 `127.0.0.1:7891` 上有一个 `cornfield serve` sidecar 在跑，并负责其
  * spawn / 守护 / 崩溃重启 / 版本（二进制解析）的对外语义。桌面壳（Electron）
  * 与原生壳（Zed fork 的 zomp_shell）共享同一套 spawn/守护契约：
  * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）；
@@ -27,7 +27,7 @@ const PORT_FREE_POLL_INTERVAL_MS = 200;
 const PORT_FREE_TIMEOUT_MS = 5000;
 
 export interface SidecarOptions {
-	/** sidecar（`omp serve`）的工作目录，对应 web-app「工作目录」设置。 */
+	/** sidecar（`cornfield serve`）的工作目录，对应 web-app「工作目录」设置。 */
 	workspaceDir: string;
 	/** 打包后的 resources 目录（Electron `process.resourcesPath`），用于定位打包内嵌的 cornfield 二进制。 */
 	resourcesPath: string;
@@ -153,7 +153,7 @@ function spawnSidecar(options: SidecarOptions): childProcess.ChildProcess {
 		stdio: "ignore",
 	});
 	child.on("error", err => {
-		logger.error("serve: failed to spawn omp serve sidecar", { bin, error: String(err) });
+		logger.error("serve: failed to spawn cornfield serve sidecar", { bin, error: String(err) });
 	});
 	return child;
 }
@@ -180,7 +180,7 @@ async function waitForPortFree(): Promise<void> {
 }
 
 /**
- * 确保 7891 上有一个 `omp serve` sidecar：
+ * 确保 7891 上有一个 `cornfield serve` sidecar：
  * - 空闲 → spawn 新 sidecar（cwd=工作目录，注入 CORNFIELD_SIDECAR=1）；
  * - 被遗留的我方 sidecar 占用 → 接管：SIGTERM 后重启；
  * - 被非我方进程占用 → 复用，不杀、不重启（返回 `{ state: "reused" }`）。

@@ -1,7 +1,7 @@
 /**
  * Setup CLI command handler.
  *
- * Handles `omp setup <component>` to install dependencies for optional features.
+ * Handles `cornfield setup <component>` to install dependencies for optional features.
  */
 import * as path from "node:path";
 import { $which, APP_NAME, getPythonEnvDir } from "@cornfield/utils";
