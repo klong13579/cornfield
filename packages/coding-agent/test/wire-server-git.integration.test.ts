@@ -35,6 +35,7 @@ async function pickPort(): Promise<number> {
 
 async function spawnServe(
 	cwd: string,
+	isolatedHome: string,
 ): Promise<{ proc: ReturnType<typeof Bun.spawn>; info: { url: string; token: string } }> {
 	const port = await pickPort();
 	const proc = Bun.spawn(
@@ -48,7 +49,10 @@ async function spawnServe(
 			"127.0.0.1",
 			"--no-extensions",
 		],
-		{ cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, PI_NO_TITLE: "1" } },
+		// 隔离 HOME：不隔离时子进程会加载运行者的真实配置与会话，默认会话的 cwd 落回
+		// 那个旧会话所在的目录→ git 命令报 “not a git repository”（2026-09-16 本地复现；
+		// CI 只是碰巧 runner 的 HOME 干净）。同目录其余 6 个兄弟文件本就隔离 HOME。
+		{ cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" } },
 	);
 	const info = await waitForServe(proc, port, 60_000);
 	return { proc, info };
@@ -57,8 +61,10 @@ async function spawnServe(
 describe("git 最小集 — 有改动 + 多分支仓库", () => {
 	let proc: ReturnType<typeof Bun.spawn> | undefined;
 	let info = { url: "", token: "" };
+	let isolatedHome: string;
 
 	beforeAll(async () => {
+		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-rich-home-"));
 		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-rich-"));
 		await runGit(repo, ["init", "-b", "main"]);
 		await runGit(repo, ["config", "user.email", "test@example.com"]);
@@ -75,7 +81,7 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 		await Bun.write(path.join(repo, "a.txt"), "alpha\nbeta\ngamma\n");
 		await Bun.write(path.join(repo, "b.txt"), "untracked\n");
 
-		const spawned = await spawnServe(repo);
+		const spawned = await spawnServe(repo, isolatedHome);
 		proc = spawned.proc;
 		info = spawned.info;
 	}, 70_000);
@@ -85,6 +91,7 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 			proc.kill();
 			await proc.exited;
 		}
+		await fs.rm(isolatedHome, { recursive: true, force: true });
 	});
 
 	test("git_status：当前分支 + staged/unstaged/untracked 列表", async () => {
@@ -168,13 +175,15 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 describe("git 最小集 — 空仓库（无 commit）", () => {
 	let proc: ReturnType<typeof Bun.spawn> | undefined;
 	let info = { url: "", token: "" };
+	let isolatedHome: string;
 
 	beforeAll(async () => {
+		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-home-"));
 		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-"));
 		await runGit(repo, ["init", "-b", "main"]);
 		await Bun.write(path.join(repo, "seed.txt"), "seed\n");
 
-		const spawned = await spawnServe(repo);
+		const spawned = await spawnServe(repo, isolatedHome);
 		proc = spawned.proc;
 		info = spawned.info;
 	}, 70_000);
@@ -184,6 +193,7 @@ describe("git 最小集 — 空仓库（无 commit）", () => {
 			proc.kill();
 			await proc.exited;
 		}
+		await fs.rm(isolatedHome, { recursive: true, force: true });
 	});
 
 	test("git_log：空仓库返回空 commits（不报错）", async () => {
