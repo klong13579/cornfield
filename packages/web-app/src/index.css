@@ -317,6 +317,53 @@ h1, h2, h3 {
 	font-weight: 500;
 }
 
+/* chip 里会变长的只读值（工作区路径 / 会话名）—— 顶栏是一行 flex，被挤窄时
+   宁可省略号，也不能把 chip 挤成竖排字（实测被挤到 48px 高）。 */
+.chip-truncate {
+	max-width: 220px;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ── chip 内的原生控件（AgentSwitcher 的 <select> / ProjectSwitcher 的 <summary>）──
+   外观由 .chip 提供：控件自己不带边框与背景，只保留语义与交互。 */
+.chip > select,
+summary.chip {
+	appearance: none;
+	background: transparent;
+	border: none;
+	font: inherit;
+	color: var(--color-ink);
+	font-weight: 500;
+	cursor: pointer;
+	outline: none;
+}
+.chip > select {
+	padding: 0;
+}
+.chip > select:disabled {
+	color: var(--color-ink-faint);
+	cursor: default;
+}
+.chip > select option {
+	background: var(--color-surface);
+	color: var(--color-ink);
+	font-weight: 400;
+}
+summary.chip {
+	list-style: none;
+}
+summary.chip::-webkit-details-marker {
+	display: none;
+}
+/* 展开态：chip 保持“按下”的样子，别让弹出的面板看起来与它无关 */
+details[open] > summary.chip {
+	border-color: var(--color-hairline-strong);
+	color: var(--color-ink);
+}
+
 /* ── kbd ── */
 .kbd {
 	font-family: var(--font-mono);

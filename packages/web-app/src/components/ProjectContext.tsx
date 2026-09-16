@@ -1,4 +1,4 @@
-import { FolderTree, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { ProjectRecordDto } from "../lib/pi-client-api";
 import type { SessionView } from "../state/session-store";
 
@@ -11,9 +11,13 @@ import type { SessionView } from "../state/session-store";
  *   - **未声明**：读到了空列表，是明确的事实；
  *   - **未归属**：声明了 Project，但当前会话不在任何一个是（归属由 serve 按域里的 root
  *     匹配规则算，前端不自己猜）。
+ *
+ * 本模块只做「读模型 → 文案/清单」这一件事，两处外壳共用同一份判据与同一份清单：
+ *   - `ProjectSection`（首页的区块，带标题与刷新钮）；
+ *   - `ProjectSwitcher`（工作台顶栏的上下文控件，见 layout/ProjectSwitcher.tsx）。
  */
 
-/** 上下文条用的短标签 + 悬停说明。 */
+/** 上下文条/控件上的短标签 + 悬停说明。 */
 export function projectLabelOf(view: SessionView): { label: string; title: string } {
 	if (view.projectsError) {
 		return { label: "读取失败", title: `Project registry 读不出来：${view.projectsError}` };
@@ -33,17 +37,6 @@ export function projectLabelOf(view: SessionView): { label: string; title: strin
 		label: "未归属",
 		title: `已声明 ${view.projects.length} 个 Project，当前会话不在其中任何一个里`,
 	};
-}
-
-/** 上下文条里的一格（与 Agent / 工作区 / 会话同排）。 */
-export function ProjectCell({ view }: { view: SessionView }): React.JSX.Element {
-	const { label, title } = projectLabelOf(view);
-	return (
-		<span className="chip" title={title}>
-			<FolderTree size={13} strokeWidth={1.5} />
-			<b>{label}</b>
-		</span>
-	);
 }
 
 /** 一个已声明 Project 的一行（名称 + 当前标记 + 默认 Agent + root）。 */
@@ -72,7 +65,53 @@ function ProjectRow({ project, current }: { project: ProjectRecordDto; current: 
 }
 
 /**
- * 已声明 Project 的列表块（列表 / 空态 / 错误态）。
+ * 已声明 Project 的清单块（列表 / 空态 / 读取中 / 错误态 / 未连接）—— 两块外壳共用。
+ * 这里是只读读数：清单行不是可点的（见 ProjectSwitcher 的说明）。
+ */
+export function ProjectList({ view }: { view: SessionView }): React.JSX.Element {
+	if (!view.connected) {
+		return <p className="text-[12.5px] text-ink-faint">未连接——Project registry 不可用</p>;
+	}
+
+	if (view.projectsError) {
+		return (
+			<div className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+				Project 读取失败：{view.projectsError}
+				<span className="mt-0.5 block text-[11px] text-ink-subtle">
+					读不到和「没声明过」不是一回事，这里不显示空态。
+				</span>
+			</div>
+		);
+	}
+
+	if (view.projects === undefined) {
+		return <p className="text-[12.5px] text-ink-faint">读取中…</p>;
+	}
+
+	if (view.projects.length === 0) {
+		return (
+			<p className="text-[12.5px] text-ink-faint">
+				未声明任何 Project。声明文件：
+				<span className="font-mono text-[11px]">~/.cornfield/agent/projects.json</span>
+			</p>
+		);
+	}
+
+	return (
+		<div className="rounded-lg border border-hairline bg-surface-2 px-2 py-1">
+			{view.projects.map(project => (
+				<ProjectRow
+					key={project.projectId}
+					project={project}
+					current={project.projectId === view.currentProjectId}
+				/>
+			))}
+		</div>
+	);
+}
+
+/**
+ * 已声明 Project 的区块（首页用）：标题 + 刷新钮 + 清单。
  * `onRefresh` 缺省时不显示刷新钮（调用方没有重读入口时不要给一个点了没反应的按钮）。
  */
 export function ProjectSection({ view, onRefresh }: { view: SessionView; onRefresh?: () => void }): React.JSX.Element {
@@ -93,40 +132,7 @@ export function ProjectSection({ view, onRefresh }: { view: SessionView; onRefre
 					</button>
 				)}
 			</div>
-
-			{!view.connected && <p className="text-[12.5px] text-ink-faint">未连接——Project registry 不可用</p>}
-
-			{view.connected && view.projectsError && (
-				<div className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
-					Project 读取失败：{view.projectsError}
-					<span className="mt-0.5 block text-[11px] text-ink-subtle">
-						读不到和「没声明过」不是一回事，这里不显示空态。
-					</span>
-				</div>
-			)}
-
-			{view.connected && !view.projectsError && view.projects === undefined && (
-				<p className="text-[12.5px] text-ink-faint">读取中…</p>
-			)}
-
-			{view.connected && !view.projectsError && view.projects?.length === 0 && (
-				<p className="text-[12.5px] text-ink-faint">
-					未声明任何 Project。声明文件：
-					<span className="font-mono text-[11px]">~/.cornfield/agent/projects.json</span>
-				</p>
-			)}
-
-			{view.connected && !view.projectsError && view.projects && view.projects.length > 0 && (
-				<div className="rounded-lg border border-hairline bg-surface-2 px-2 py-1">
-					{view.projects.map(project => (
-						<ProjectRow
-							key={project.projectId}
-							project={project}
-							current={project.projectId === view.currentProjectId}
-						/>
-					))}
-				</div>
-			)}
+			<ProjectList view={view} />
 		</section>
 	);
 }

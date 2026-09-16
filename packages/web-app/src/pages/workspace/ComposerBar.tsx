@@ -417,8 +417,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 															onClick={() => {
 																setAgentId(a.id);
 																setBlockedMsg(null);
-																store.attach(a.id); // lazy attach（幂等）
-																store.switchSession(a.id); // 切 active：后续 prompt 默认发往该 agent
+																store.focusAgent(a.id); // attach + 切 active：后续 prompt 默认发往该 agent
 																setShowAgentMenu(false);
 															}}
 														>
