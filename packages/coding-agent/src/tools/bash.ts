@@ -27,6 +27,7 @@ import { extractLeadingCdTarget } from "./shell-tokenize";
 import { ToolAbortError, ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout, TOOL_TIMEOUTS } from "./tool-timeouts";
+import { replaceableToolNames } from "./xdev";
 
 export const BASH_DEFAULT_PREVIEW_LINES = 10;
 
@@ -576,8 +577,11 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		if (this.session.settings.get("bashInterceptor.enabled")) {
 			const rules = this.session.settings.getBashInterceptorRules();
 			const commandsToCheck = rawCommand === command ? [command] : [rawCommand, command];
+			// A rule may name a mounted device (e.g. `python`); the context carries the
+			// top-level set only, so the Discoverable Tool Set is added here.
+			const replaceableTools = replaceableToolNames(ctx?.toolNames ?? [], this.session.xdevDevices);
 			for (const commandToCheck of commandsToCheck) {
-				const interception = checkBashInterception(commandToCheck, ctx?.toolNames ?? [], rules, rawCommand);
+				const interception = checkBashInterception(commandToCheck, replaceableTools, rules, rawCommand);
 				if (interception.block) {
 					throw new ToolError(interception.message ?? "Command blocked");
 				}

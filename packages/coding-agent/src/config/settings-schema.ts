@@ -2421,7 +2421,18 @@ export const SETTINGS_SCHEMA = {
 			tab: "providers",
 			label: "Web Search Timeout",
 			description:
-				"Hard ceiling in seconds for one web search provider request (1-300). A slow request is abandoned and the next provider is tried",
+				"Hard ceiling in seconds for a provider that synthesizes its answer (Anthropic, Gemini, Codex, Perplexity, Kimi). A slow request is abandoned and the next provider is tried (1-300)",
+			submenu: true,
+		},
+	},
+	"providers.webSearchIndexTimeoutSeconds": {
+		type: "number",
+		default: 20,
+		ui: {
+			tab: "providers",
+			label: "Web Search Timeout (Index)",
+			description:
+				"Hard ceiling in seconds for a provider that answers from a search index (Brave, Exa, Jina, Kagi, Parallel, SearXNG, Synthetic, Tavily, Z.AI). Kept short so an unreachable provider cannot spend a synthesis-sized budget before the next one runs (1-300)",
 			submenu: true,
 		},
 	},

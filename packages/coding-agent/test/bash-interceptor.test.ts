@@ -173,3 +173,52 @@ describe("bash-interceptor: segments whose stdin is not a path", () => {
 		expect(checkBashInterception("cat > notes.md <<'EOF'\nhi\nEOF", ALL_TOOLS).block).toBe(true);
 	});
 });
+
+describe("bash-interceptor: ad-hoc python is redirected to the python tool", () => {
+	// `python` is a mounted device, so it is absent from the top-level list these
+	// unit tests otherwise use. See replaceableToolNames and the case in
+	// scripts/verify-xdev-mounting.ts that proves the wiring outside bun test.
+	const PY_TOOLS = [...ALL_TOOLS, "python"];
+
+	it("blocks `python -c ...` and points at the python tool", () => {
+		const result = checkBashInterception('python -c "print(1)"', PY_TOOLS);
+		expect(result.block).toBe(true);
+		expect(result.suggestedTool).toBe("python");
+		expect(result.message).toContain("persistent IPython kernel");
+	});
+
+	it("blocks the python3 / ipython spellings and a leading flag", () => {
+		expect(checkBashInterception("python3 -c 'print(1)'", PY_TOOLS).suggestedTool).toBe("python");
+		expect(checkBashInterception('ipython -c "print(1)"', PY_TOOLS).suggestedTool).toBe("python");
+		expect(checkBashInterception('python -u -c "print(1)"', PY_TOOLS).suggestedTool).toBe("python");
+		expect(checkBashInterception("python -BIs -c x", PY_TOOLS).suggestedTool).toBe("python");
+	});
+
+	it("blocks a bare `python -c` with no body", () => {
+		expect(checkBashInterception("python -c", PY_TOOLS).block).toBe(true);
+	});
+
+	it("blocks it as a later segment and after environment assignments", () => {
+		expect(checkBashInterception('ls && python -c "x"', PY_TOOLS).suggestedTool).toBe("python");
+		expect(checkBashInterception('FOO=1 python -c "x"', PY_TOOLS).suggestedTool).toBe("python");
+	});
+
+	it("does NOT block a script file whose own flags include -c", () => {
+		expect(checkBashInterception("python script.py -c foo", PY_TOOLS).block).toBe(false);
+		expect(checkBashInterception("python skill://my-skill/scripts/init.py", PY_TOOLS).block).toBe(false);
+	});
+
+	it("does NOT block `-m`, `-V`, or `--version` (package runs and probes stay allowed)", () => {
+		expect(checkBashInterception("python -m pip install foo", PY_TOOLS).block).toBe(false);
+		expect(checkBashInterception("python -V", PY_TOOLS).block).toBe(false);
+		expect(checkBashInterception("python3 --version", PY_TOOLS).block).toBe(false);
+	});
+
+	it("does NOT block a heredoc feed (stdin is not a path, so nothing can replace it)", () => {
+		expect(checkBashInterception("python3 - <<'PY'\nprint(1)\nPY", PY_TOOLS).block).toBe(false);
+	});
+
+	it("does NOT block when the python tool is unavailable (guard works)", () => {
+		expect(checkBashInterception('python -c "print(1)"', ALL_TOOLS).block).toBe(false);
+	});
+});
