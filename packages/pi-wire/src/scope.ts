@@ -79,6 +79,12 @@ function isSelfOrDescendant(root: string, targetPath: string): boolean {
  *   - 空串 root 跳过（前端词法归一可能产出空串：它不是任何路径的祖先）
  *   - `/a/b` 不是 `/a/bc` 的祖先（边界必须落在分隔符上）
  *   - 多个命中取最深者；同深并列（含同一 root 的两种写法）取声明在前的那一个，结果稳定
+ *   - 尾随分隔符不参与判定（`/a/b/` ≡ `/a/b`）：前端词法归一常留尾斜杠，到这里必须等价
+ *
+ * `/` 与 `\` **都算分隔符**，这是有意的，不是漏了平台分支：serve 的归一（`resolveEquivalentPath`）
+ * 在 Windows 上产出 `C:\a\b` 形式，只认 `/` 会让那里的「后代匹配」整体失效。代价写在明处 ——
+ * POSIX 上文件名里真的含 `\` 时（例如 `/a/b\c`），它会被当成两段，从而可能把 `/a/b` 判成祖先。
+ * 这是本规则的已知边界：换成按平台传分隔符，就得让浏览器知道 serve 跑在哪个平台，得不偿失。
  */
 export function pickDeepestRootIndex(roots: readonly string[], targetPath: string): number {
 	let best = -1;
