@@ -14,9 +14,10 @@
  *   - messages from the parent to the child carry the child's parentId in
  *     the `from` session info (so the child can verify the sender is its
  *     declared parent)
- *   - duplicate registration: the same session id registered twice is a
- *     takeover of the identity, while sessions sharing a parentId — or a name —
- *     coexist without their message edges crossing (second describe block)
+ *   - duplicate registration: a session id held by a live connection is not
+ *     up for grabs (the second registration is refused), while sessions sharing
+ *     a parentId — or a name — coexist without their message edges crossing
+ *     (second describe block)
  *
  * The extension-side behaviours (auto completion report, ask→parent routing,
  * `intercom({action:"children"})` list) build on this broker contract and are
@@ -33,6 +34,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { IntercomClient } from "../../coding-agent/src/intercom-extension/broker/client";
 import { createIntercomLivenessProbe } from "../../coding-agent/src/intercom-extension/child-session-tree";
+import type { SessionInfo } from "../../coding-agent/src/intercom-extension/types";
 import { ChildSessionSupervisor } from "../../coding-agent/src/session/child-session-supervisor";
 import type { ChildSessionRecord } from "../../coding-agent/src/session/session-tree";
 import { SessionTreeManager } from "../../coding-agent/src/session/session-tree-manager";
@@ -110,7 +112,7 @@ describe("intercom parent-child broker edge", () => {
 		await Bun.sleep(50);
 
 		parent = new IntercomClient();
-		await parent.connect(registration("parent-session", { stableId: undefined }), "parent-stable-id");
+		await parent.connect(registration("parent-session"), "parent-stable-id");
 
 		child = new IntercomClient();
 		await child.connect(registration("child-session", { parentId: "parent-stable-id" }), "child-session-id");
@@ -380,36 +382,41 @@ describe("intercom parent-child broker edge", () => {
 });
 
 /**
- * ── Duplicate registration at the broker edge ────────────────────────────────
+ * ── One identity, one live process ───────────────────────────────────────────
  *
  * The broker keys a session by its **session id** — the identity a session pins
- * with `sessionId` / `stableId`. Never by its name, never by its parent edge.
- * Everything asserted below was observed against the real broker first; the line
- * references are the code that produces each behaviour.
+ * with `sessionId`. Never by its name, never by its parent edge. And an id is a
+ * claim held by a *process*: while the holder's socket is open, a second
+ * registration under that id is refused. That refusal is the fix this block
+ * pins — a process whose id came from a machine-global file (every session on
+ * the machine reading the same one) would otherwise displace a live session,
+ * end its socket and replace its whole `SessionInfo`, parent edge included,
+ * without a word; the parent could then no longer find it and marked a child
+ * that was still running `failed`.
  *
- *   1. **Same id means takeover, not refusal.** The successor's registration
- *      replaces the whole `SessionInfo`, ends the predecessor's socket, and
- *      broadcasts the identity again as `session_joined` — never as
- *      `session_left` (`broker-server.ts:603-654`). A roster that tracks joins
- *      and leaves therefore does not flap when an identity changes hands.
- *   2. **A shared `parentId` — or a shared name — is not a collision.** The
+ *   1. **A live holder keeps its id.** The newcomer's registration is refused
+ *      with an `error` frame naming the id and the holder's pid, and its socket
+ *      is closed before it is ever registered: no `session_joined`, no
+ *      `session_left`, no change to the holder's row, its edges or its
+ *      connection.
+ *   2. **A holder that is gone frees its id.** Its socket closes, its row is
+ *      reaped, and the next process registers normally — the resume path every
+ *      restarted child depends on.
+ *   3. **A shared `parentId` — or a shared name — is not a collision.** The
  *      sessions coexist; an addressed send lands on exactly one edge, and an
- *      ambiguous *name* is refused rather than misrouted
- *      (`broker-server.ts:867-874`).
- *   3. **The parent edge is an opaque string.** Only a blank one is rejected
- *      (`protocol.ts:198`), so a self-parent or a dangling parent is stored as
+ *      ambiguous *name* is refused rather than misrouted (`broker-server.ts`).
+ *   4. **The parent edge is an opaque string.** Only a blank one is rejected
+ *      (`protocol.ts`), so a self-parent or a dangling parent is stored as
  *      declared; keeping a foreign pid out of a parent's reconcile is the
  *      ledger's job, not the broker's — this block pins both sides of that.
  *
  * Division of labour with the layers above, deliberately not collapsed here: the
  * in-process supervisor **refuses** a second child with the same session id
- * (`child-session-supervisor.ts:333`, asserted in
+ * (`child-session-supervisor.ts`, asserted in
  * `coding-agent/test/session/child-session-supervisor.test.ts`), and the ledger
- * refuses a second delegation of the same id (`session-tree-manager.ts:329`,
- * `session-tree-manager.test.ts`). Those are one-process ownership rules. The
- * broker has no owner to consult — the predecessor may be another process, or a
- * dead one — so the rule it enforces is "newest registration wins, and the
- * parent reconciles from the roster".
+ * refuses a second delegation of the same id (`session-tree-manager.ts`,
+ * `session-tree-manager.test.ts`). Those are one-process ownership rules; the
+ * broker enforces the cross-process one, which no other layer can see.
  */
 describe("intercom broker duplicate registration", () => {
 	const PARENT_ID = "dup-parent-id";
@@ -417,8 +424,10 @@ describe("intercom broker duplicate registration", () => {
 	// Declared registration values, not OS processes: the broker stores whatever
 	// pid a session declares, and reconcile matches on that number.
 	const PARENT_PID = 1000;
-	const FIRST_PID = 1111;
-	const SECOND_PID = 2222;
+	/** The live holder of CHILD_ID. */
+	const HOLDER_PID = 1111;
+	/** Declares HOLDER_PID's id while HOLDER_PID is still connected, and is refused. */
+	const REFUSED_PID = 2222;
 	const SIBLING_A_PID = 3333;
 	const SIBLING_B_PID = 4444;
 	const SELF_PID = 6001;
@@ -427,17 +436,33 @@ describe("intercom broker duplicate registration", () => {
 	const EDGE_SECOND_PID = 7777;
 	const LIVE_PID = 8001;
 	const DEAD_PID = 8002;
+	const RESUME_FIRST_PID = 9001;
+	const RESUME_SECOND_PID = 9002;
+	/** A holder whose socket is already closed, and the process that takes its id. */
+	const GHOST_PID = 9101;
+	const GHOST_NEWCOMER_PID = 9102;
+	/** The row shape the broker reads when it decides whether an id is held. */
+	type ConnectedSessionShape = {
+		socket: net.Socket;
+		info: SessionInfo;
+		lastPresenceBroadcastAt: number;
+		ownerOrder: number;
+	};
 
 	let dupRuntimeDir: string;
 	let previousAgentDir: string | undefined;
 	let broker: InstanceType<typeof IntercomBroker>;
 	let parent: InstanceType<typeof IntercomClient>;
-	let firstOwner: InstanceType<typeof IntercomClient>;
-	let secondOwner: InstanceType<typeof IntercomClient>;
+	/** The live holder of CHILD_ID. */
+	let holder: InstanceType<typeof IntercomClient>;
+	/** Its refused challenger: one id, one live process. */
+	let challenger: InstanceType<typeof IntercomClient>;
+	/** What `challenger.connect()` rejected with. */
+	let refusal: Error | null = null;
 	/** Every client this block creates, torn down together in afterAll. */
 	const clients: Array<InstanceType<typeof IntercomClient>> = [];
 	const parentEvents: string[] = [];
-	const displacedEvents: string[] = [];
+	const holderEvents: string[] = [];
 
 	function client(): InstanceType<typeof IntercomClient> {
 		const instance = new IntercomClient();
@@ -467,14 +492,19 @@ describe("intercom broker duplicate registration", () => {
 		parent.on("session_left", sessionId => parentEvents.push(`left:${sessionId}`));
 		await parent.connect(registration("dup-parent", { pid: PARENT_PID }), PARENT_ID);
 
-		firstOwner = client();
-		firstOwner.on("disconnected", () => displacedEvents.push("disconnected"));
-		await firstOwner.connect(registration("dup-child", { pid: FIRST_PID, parentId: PARENT_ID }), CHILD_ID);
+		holder = client();
+		holder.on("disconnected", () => holderEvents.push("disconnected"));
+		await holder.connect(registration("dup-child", { pid: HOLDER_PID, parentId: PARENT_ID }), CHILD_ID);
 
-		// Same id, same declared name, same parent edge as the session above.
-		secondOwner = client();
-		await secondOwner.connect(registration("dup-child", { pid: SECOND_PID, parentId: PARENT_ID }), CHILD_ID);
-		await waitFor(() => displacedEvents.length > 0);
+		// The same id, same declared name and same parent edge, declared by a
+		// second process while the holder is still connected.
+		challenger = client();
+		refusal = await challenger
+			.connect(registration("dup-child", { pid: REFUSED_PID, parentId: PARENT_ID }), CHILD_ID)
+			.then(
+				() => null,
+				(cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))),
+			);
 	});
 
 	afterAll(async () => {
@@ -486,46 +516,37 @@ describe("intercom broker duplicate registration", () => {
 		await fs.rm(dupRuntimeDir, { recursive: true, force: true });
 	});
 
-	test("a second registration under the same session id takes over the identity", async () => {
+	test("a live holder keeps its id: the second registration is refused, naming the id and the pid", async () => {
+		expect(refusal?.message).toContain(CHILD_ID);
+		expect(refusal?.message).toContain(String(HOLDER_PID));
+
+		// One row, and it is still the holder's — a refusal is not a takeover.
 		const rows = (await parent.listSessions()).filter(session => session.id === CHILD_ID);
-		// One row, not two: identity is keyed by id, so the successor's registration
-		// replaced the predecessor's instead of adding a second session beside it.
 		expect(rows).toHaveLength(1);
-		expect(rows[0]?.pid).toBe(SECOND_PID);
+		expect(rows[0]?.pid).toBe(HOLDER_PID);
 		expect(rows[0]?.parentId).toBe(PARENT_ID);
-		// The predecessor is told it lost the identity, and can no longer act.
-		expect(displacedEvents).toEqual(["disconnected"]);
-		expect(firstOwner.sessionId).toBeNull();
-		expect(firstOwner.isConnected()).toBe(false);
-		expect(secondOwner.sessionId).toBe(CHILD_ID);
+
+		// The challenger never made it onto the roster, and the holder never
+		// noticed: it was not disconnected, and it still holds its id.
+		expect(challenger.sessionId).toBeNull();
+		expect(challenger.isConnected()).toBe(false);
+		expect(holder.sessionId).toBe(CHILD_ID);
+		expect(holder.isConnected()).toBe(true);
+		expect(holderEvents).toEqual([]);
 	});
 
-	test("a takeover is announced as a second session_joined and never as a session_left", async () => {
-		// The predecessor's socket close is inert: the close handler only clears a
-		// row whose socket is the one closing (broker-server.ts:471-476), which it is
-		// no longer. So the identity is never reported as having left.
-		expect(parentEvents).toEqual([`joined:${CHILD_ID}:${FIRST_PID}`, `joined:${CHILD_ID}:${SECOND_PID}`]);
+	test("a refusal announces nothing: one session_joined for the identity, never a session_left", async () => {
+		// Scoped to this identity: later cases in this block register other ids.
+		expect(parentEvents.filter(event => event.includes(CHILD_ID))).toEqual([`joined:${CHILD_ID}:${HOLDER_PID}`]);
 	});
 
-	test("the predecessor's teardown leaves the identity routing to its successor", async () => {
-		const seen = displacedEvents.length;
-		// A no-op locally (its socket was ended by the broker), which is the point:
-		// nothing the predecessor does may tear down the successor's session.
-		await firstOwner.disconnect();
-		expect(displacedEvents).toHaveLength(seen);
-
-		const rows = (await parent.listSessions()).filter(session => session.id === CHILD_ID);
-		expect(rows).toHaveLength(1);
-		expect(rows[0]?.pid).toBe(SECOND_PID);
-
-		// The row is not merely present — it still routes to the successor.
+	test("the holder's message edge survives the refusal", async () => {
 		const received: string[] = [];
-		secondOwner.on("message", (_from, message) => received.push(message.content.text));
-		const delivered = await parent.send(CHILD_ID, { text: "still here?" });
+		holder.on("message", (_from, message) => received.push(message.content.text));
+		const delivered = await parent.send(CHILD_ID, { text: "still yours?" });
 		expect(delivered.delivered).toBe(true);
 		await waitFor(() => received.length === 1);
-		expect(received).toEqual(["still here?"]);
-		expect(parentEvents.filter(event => event.startsWith("left:"))).toEqual([]);
+		expect(received).toEqual(["still yours?"]);
 	});
 
 	test("children sharing a parent id coexist and their edges do not cross", async () => {
@@ -543,13 +564,13 @@ describe("intercom broker duplicate registration", () => {
 			.map(session => [session.id, session.pid])
 			.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 		expect(underParent).toEqual([
-			[CHILD_ID, SECOND_PID],
+			[CHILD_ID, HOLDER_PID],
 			["dup-sibling-a", SIBLING_A_PID],
 			["dup-sibling-b", SIBLING_B_PID],
 		]);
 		// One parentId, three distinct edges — and the parent itself is not in the set.
 		expect((await liveChildPids(PARENT_ID)).sort((a, b) => a - b)).toEqual(
-			[SECOND_PID, SIBLING_A_PID, SIBLING_B_PID].sort((a, b) => a - b),
+			[HOLDER_PID, SIBLING_A_PID, SIBLING_B_PID].sort((a, b) => a - b),
 		);
 
 		// Addressed by id: exactly one edge receives it.
@@ -576,23 +597,61 @@ describe("intercom broker duplicate registration", () => {
 		expect(receivedA).toEqual(["for-a-only"]);
 	});
 
-	test("re-registering an identity without a parent edge drops it out of the parent's roster", async () => {
+	test("a refused re-registration does not rewrite the holder's parent edge", async () => {
 		const declared = client();
 		await declared.connect(registration("dup-edge", { pid: EDGE_FIRST_PID, parentId: PARENT_ID }), "dup-edge-id");
 		expect(await liveChildPids(PARENT_ID)).toContain(EDGE_FIRST_PID);
 
-		// The same identity registers again, this time parentless — the path a
-		// process takes when it pins a machine-global stableId and is not a child.
+		// The same identity registers again, this time parentless — the shape a
+		// second process takes when it claims an id another process holds.
 		const parentless = client();
-		await parentless.connect(registration("dup-edge", { pid: EDGE_SECOND_PID }), "dup-edge-id");
+		const refused = await parentless.connect(registration("dup-edge", { pid: EDGE_SECOND_PID }), "dup-edge-id").then(
+			() => null,
+			(cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))),
+		);
+		expect(refused?.message).toContain("dup-edge-id");
+		expect(refused?.message).toContain(String(EDGE_FIRST_PID));
 
-		// Identity is the key, so the edge was replaced along with everything else.
+		// The edge the holder declared is the edge it keeps: a refused newcomer
+		// cannot drop a live child out of its parent's roster.
 		const row = (await parent.listSessions()).find(session => session.id === "dup-edge-id");
-		expect(row?.pid).toBe(EDGE_SECOND_PID);
-		expect(row?.parentId).toBeUndefined();
+		expect(row?.pid).toBe(EDGE_FIRST_PID);
+		expect(row?.parentId).toBe(PARENT_ID);
 		const pids = await liveChildPids(PARENT_ID);
-		expect(pids).not.toContain(EDGE_FIRST_PID);
+		expect(pids).toContain(EDGE_FIRST_PID);
 		expect(pids).not.toContain(EDGE_SECOND_PID);
+	});
+
+	test("a holder that is gone frees its id: the next process registers normally", async () => {
+		const first = client();
+		await first.connect(registration("dup-resume", { pid: RESUME_FIRST_PID, parentId: PARENT_ID }), "dup-resume-id");
+		expect(await liveChildPids(PARENT_ID)).toContain(RESUME_FIRST_PID);
+
+		// The holder's process exited, so its socket is closed and the identity is
+		// free. Refusing here would strand every restarted child.
+		await first.disconnect();
+		await waitFor(() => !first.isConnected());
+
+		const resumed = client();
+		await resumed.connect(
+			registration("dup-resume", { pid: RESUME_SECOND_PID, parentId: PARENT_ID }),
+			"dup-resume-id",
+		);
+
+		const row = (await parent.listSessions()).find(session => session.id === "dup-resume-id");
+		expect(row?.pid).toBe(RESUME_SECOND_PID);
+		expect(row?.parentId).toBe(PARENT_ID);
+		const pids = await liveChildPids(PARENT_ID);
+		expect(pids).toContain(RESUME_SECOND_PID);
+		expect(pids).not.toContain(RESUME_FIRST_PID);
+
+		// The resumed process is reachable under the id its predecessor used.
+		const received: string[] = [];
+		resumed.on("message", (_from, message) => received.push(message.content.text));
+		const delivered = await parent.send("dup-resume-id", { text: "back?" });
+		expect(delivered.delivered).toBe(true);
+		await waitFor(() => received.length === 1);
+		expect(received).toEqual(["back?"]);
 	});
 
 	test("the broker stores the parent edge as an opaque string", async () => {
@@ -682,17 +741,60 @@ describe("intercom broker duplicate registration", () => {
 			]);
 
 			// The pids that verdict was drawn from — this parent's own edges only:
-			// `dup-live-child` and the taken-over identity are both under PARENT_ID,
-			// while a child on another edge and one whose edge a takeover erased are
-			// not in the set at all.
+			// `dup-live-child` and the holder of the contested id are both under
+			// PARENT_ID, while a child on another edge and a would-be successor that
+			// was refused registration are not in the set at all.
 			const pids = await liveChildPids(PARENT_ID);
 			expect(pids).toContain(LIVE_PID);
-			expect(pids).toContain(SECOND_PID);
-			// ...a child on another edge and one whose edge a takeover erased are not.
+			expect(pids).toContain(HOLDER_PID);
+			// ...a child on another edge and one that never got registered are not.
 			expect(pids).not.toContain(DANGLING_PID);
 			expect(pids).not.toContain(EDGE_SECOND_PID);
 		} finally {
 			await supervisor.stopAll();
 		}
+	});
+
+	/**
+	 * 一行「socket 已经关掉、close 还没被 broker 处理掉」的会话。真实世界里那是持有者刚死、或
+	 * 被 broker 自己掐掉（限流剔除、读帧失败），新进程立刻用同一个 id 上线的那一瞬 —— 宽度只有
+	 * 一拍，从 socket 外面碰不到。这里直接把那一行做出来，是为了让「持有者没了 ⇒ 接管照旧」
+	 * 这条分支真的被执行到，而不是靠时序碰运气。
+	 */
+	test("a holder whose socket is already closed is taken over, not refused", async () => {
+		const ghostSocket = net.connect(path.join(dupRuntimeDir, "intercom", "broker.sock"));
+		await new Promise<void>(resolve => ghostSocket.once("connect", () => resolve()));
+		ghostSocket.destroy();
+		await new Promise<void>(resolve => ghostSocket.once("close", () => resolve()));
+
+		const sessions = (broker as unknown as { sessions: Map<string, ConnectedSessionShape> }).sessions;
+		sessions.set("dup-ghost-id", {
+			socket: ghostSocket,
+			info: {
+				id: "dup-ghost-id",
+				name: "dup-ghost",
+				cwd: process.cwd(),
+				model: "test-model",
+				pid: GHOST_PID,
+				startedAt: Date.now(),
+				lastActivity: Date.now(),
+				parentId: PARENT_ID,
+			},
+			lastPresenceBroadcastAt: Date.now(),
+			ownerOrder: 0,
+		});
+
+		// Taking an id whose holder is gone is what resume is: it registers
+		// normally, and the row becomes the newcomer's.
+		const resumed = client();
+		await resumed.connect(
+			registration("dup-ghost", { pid: GHOST_NEWCOMER_PID, parentId: PARENT_ID }),
+			"dup-ghost-id",
+		);
+
+		const row = (await parent.listSessions()).find(session => session.id === "dup-ghost-id");
+		expect(row?.pid).toBe(GHOST_NEWCOMER_PID);
+		expect(row?.parentId).toBe(PARENT_ID);
+		expect(resumed.sessionId).toBe("dup-ghost-id");
 	});
 });

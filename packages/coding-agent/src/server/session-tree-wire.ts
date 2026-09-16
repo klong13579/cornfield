@@ -54,7 +54,7 @@ import {
 	type ChildSessionReportSource,
 	createIntercomLivenessProbe,
 } from "../intercom-extension/child-session-tree";
-import { loadConfig } from "../intercom-extension/config";
+import { resolveIntercomSessionId } from "../intercom-extension/identity";
 import type { SessionInfo, SessionRegistration } from "../intercom-extension/types";
 import type { AgentSession } from "../session/agent-session";
 import type { ChildSessionCommand } from "../session/child-session-process";
@@ -388,14 +388,12 @@ export function formatChildResultInjection(record: ChildSessionRecord, content: 
 /**
  * 父边 id：子会话把哪条边当作它的 parent。
  *
- * 会话自己的 intercom 身份由运行时决定（`PI_INTERCOM_STABLE_ID` → config.json 的 stableId
- * → 会话 id），这里跟着同一套优先级，再加一个后缀。后缀不是装饰：本会话自己的连接属于
- * 会话运行时，broker 对同一个 id 的再次注册会**顶掉**前一条连接，serve 用同一个 id 上线
- * 就等于把会话自己的 intercom 掐了。
+ * 会话自己的 intercom 身份只有一个来源（`resolveIntercomSessionId`），这里跟着它，再加一个
+ * 后缀。后缀不是装饰：本会话自己的连接属于会话运行时，serve 用同一个 id 上线就是第二个进程
+ * 来抢同一个身份 —— broker 会拒绝，这条边也就永远上不了线。
  */
 function parentEdgeId(session: AgentSession): string {
-	const configured = process.env.PI_INTERCOM_STABLE_ID?.trim() || loadConfig().stableId || session.sessionId;
-	return `${configured}-tree`;
+	return `${resolveIntercomSessionId(session.sessionId)}-tree`;
 }
 
 /** 账本记录 → `delegate_child` 的回执（只投影「真的发生了」的那几个事实）。 */
