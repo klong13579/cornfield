@@ -10,7 +10,7 @@ import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { findCredential, isApiKeyAvailable } from "./utils";
+import { findCredential, isApiKeyAvailable, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const SYNTHETIC_SEARCH_URL = "https://api.synthetic.new/v2/search";
 
@@ -35,6 +35,7 @@ async function callSyntheticSearch(
 	apiKey: string,
 	query: string,
 	signal?: AbortSignal,
+	timeoutMs?: number,
 ): Promise<SyntheticSearchResponse> {
 	const response = await fetch(SYNTHETIC_SEARCH_URL, {
 		method: "POST",
@@ -43,11 +44,11 @@ async function callSyntheticSearch(
 			Authorization: `Bearer ${apiKey}`,
 		},
 		body: JSON.stringify({ query }),
-		signal,
+		signal: withHardTimeout(signal, timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "synthetic", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError(
 			"synthetic",
 			`Synthetic API error (${response.status}): ${errorText}`,
@@ -63,13 +64,14 @@ export async function searchSynthetic(params: {
 	query: string;
 	num_results?: number;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }): Promise<SearchResponse> {
 	const apiKey = await findApiKey();
 	if (!apiKey) {
 		throw new Error("Synthetic credentials not found. Set SYNTHETIC_API_KEY or login with 'omp /login synthetic'.");
 	}
 
-	const data = await callSyntheticSearch(apiKey, params.query, params.signal);
+	const data = await callSyntheticSearch(apiKey, params.query, params.signal, params.timeoutMs);
 	const sources: SearchSource[] = [];
 
 	for (const result of data.results ?? []) {
@@ -104,6 +106,7 @@ export class SyntheticProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

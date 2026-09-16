@@ -1,5 +1,5 @@
 import { getEnvApiKey } from "@cornfield/ai";
-import { findCredential } from "./search/providers/utils";
+import { findCredential, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./search/providers/utils";
 
 const KAGI_SEARCH_URL = "https://kagi.com/api/v0/search";
 
@@ -98,6 +98,7 @@ function parseKagiErrorResponse(statusCode: number, responseText: string): KagiA
 export interface KagiSearchOptions {
 	limit?: number;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 export interface KagiSearchSource {
@@ -138,10 +139,13 @@ export async function searchWithKagi(query: string, options: KagiSearchOptions =
 
 	const response = await fetch(requestUrl, {
 		headers: getAuthHeaders(apiKey),
-		signal: options.signal,
+		signal: withHardTimeout(options.signal, options.timeoutMs),
 	});
 	if (!response.ok) {
-		throw parseKagiErrorResponse(response.status, await response.text());
+		throw parseKagiErrorResponse(
+			response.status,
+			await readLimitedText(response, "kagi", MAX_SEARCH_ERROR_BYTES, true),
+		);
 	}
 
 	const payload = (await response.json()) as KagiSearchResponse;

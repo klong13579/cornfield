@@ -10,7 +10,7 @@ import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { isApiKeyAvailable } from "./utils";
+import { isApiKeyAvailable, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const JINA_SEARCH_URL = "https://s.jina.ai";
 
@@ -19,6 +19,7 @@ export interface JinaSearchParams {
 	num_results?: number;
 	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 interface JinaSearchResult {
@@ -35,18 +36,23 @@ export function findApiKey(): string | null {
 }
 
 /** Call Jina Reader search API. */
-async function callJinaSearch(apiKey: string, query: string, signal?: AbortSignal): Promise<JinaSearchResponse> {
+async function callJinaSearch(
+	apiKey: string,
+	query: string,
+	signal?: AbortSignal,
+	timeoutMs?: number,
+): Promise<JinaSearchResponse> {
 	const requestUrl = `${JINA_SEARCH_URL}/${encodeURIComponent(query)}`;
 	const response = await fetch(requestUrl, {
 		headers: {
 			Accept: "application/json",
 			Authorization: `Bearer ${apiKey}`,
 		},
-		signal,
+		signal: withHardTimeout(signal, timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "jina", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError("jina", `Jina API error (${response.status}): ${errorText}`, response.status);
 	}
 
@@ -61,7 +67,7 @@ export async function searchJina(params: JinaSearchParams): Promise<SearchRespon
 		throw new Error("JINA_API_KEY not found. Set it in environment or .env file.");
 	}
 
-	const response = await callJinaSearch(apiKey, params.query, params.signal);
+	const response = await callJinaSearch(apiKey, params.query, params.signal, params.timeoutMs);
 	const sources: SearchSource[] = [];
 
 	for (const result of response) {
@@ -95,6 +101,7 @@ export class JinaProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

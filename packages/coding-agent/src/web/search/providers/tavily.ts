@@ -10,7 +10,7 @@ import { SearchProviderError } from "../../../web/search/types";
 import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { findCredential, isApiKeyAvailable } from "./utils";
+import { findCredential, isApiKeyAvailable, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 const DEFAULT_NUM_RESULTS = 5;
@@ -21,6 +21,7 @@ export interface TavilySearchParams {
 	num_results?: number;
 	recency?: "day" | "week" | "month" | "year";
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 interface TavilySearchResult {
@@ -92,11 +93,11 @@ async function callTavilySearch(apiKey: string, params: TavilySearchParams): Pro
 			Authorization: `Bearer ${apiKey}`,
 		},
 		body: JSON.stringify(buildRequestBody(params)),
-		signal: params.signal,
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "tavily", MAX_SEARCH_ERROR_BYTES, true);
 		let message = errorText.trim();
 		if (message.length === 0) {
 			message = response.statusText;
@@ -161,6 +162,7 @@ export class TavilyProvider extends SearchProvider {
 			num_results: params.numSearchResults ?? params.limit,
 			recency: params.recency,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

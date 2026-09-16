@@ -20,6 +20,12 @@ export interface SearchParams {
 	recency?: "day" | "week" | "month" | "year";
 	systemPrompt: string;
 	signal?: AbortSignal;
+	/**
+	 * Hard ceiling for this provider's outbound transport, in milliseconds.
+	 * A provider MUST compose it with `signal` (see `withHardTimeout`) so a
+	 * stalled connection cannot hold back the providers behind it.
+	 */
+	timeoutMs?: number;
 	maxOutputTokens?: number;
 	numSearchResults?: number;
 	temperature?: number;

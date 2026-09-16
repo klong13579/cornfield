@@ -1,5 +1,5 @@
 import { getEnvApiKey } from "@cornfield/ai";
-import { findCredential } from "./search/providers/utils";
+import { findCredential, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./search/providers/utils";
 
 const PARALLEL_API_URL = "https://api.parallel.ai";
 const PARALLEL_SEARCH_URL = `${PARALLEL_API_URL}/v1beta/search`;
@@ -53,6 +53,7 @@ export interface ParallelSearchOptions {
 	mode?: "fast" | "research";
 	maxCharsPerResult?: number;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 export interface ParallelExtractOptions {
@@ -61,6 +62,7 @@ export interface ParallelExtractOptions {
 	excerpts?: boolean;
 	fullContent?: boolean;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 export class ParallelApiError extends Error {
@@ -304,10 +306,13 @@ export async function searchWithParallel(
 				max_chars_per_result: options.maxCharsPerResult ?? 10_000,
 			},
 		}),
-		signal: options.signal,
+		signal: withHardTimeout(options.signal, options.timeoutMs),
 	});
 	if (!response.ok) {
-		throw parseParallelErrorResponse(response.status, await response.text());
+		throw parseParallelErrorResponse(
+			response.status,
+			await readLimitedText(response, "parallel", MAX_SEARCH_ERROR_BYTES, true),
+		);
 	}
 
 	const payload: unknown = await response.json();
@@ -335,10 +340,13 @@ export async function extractWithParallel(
 			excerpts: options.excerpts ?? true,
 			full_content: options.fullContent ?? false,
 		}),
-		signal: options.signal,
+		signal: withHardTimeout(options.signal, options.timeoutMs),
 	});
 	if (!response.ok) {
-		throw parseParallelErrorResponse(response.status, await response.text());
+		throw parseParallelErrorResponse(
+			response.status,
+			await readLimitedText(response, "parallel", MAX_SEARCH_ERROR_BYTES, true),
+		);
 	}
 
 	const payload: unknown = await response.json();

@@ -14,6 +14,7 @@ import { SearchProviderError } from "../../../web/search/types";
 import { dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
+import { MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const EXA_API_URL = "https://api.exa.ai/search";
 
@@ -26,6 +27,7 @@ export interface ExaSearchParams {
 	num_results?: number;
 	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	type?: ExaSearchParamType;
 	include_domains?: string[];
 	exclude_domains?: string[];
@@ -181,11 +183,11 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 			"x-api-key": apiKey,
 		},
 		body: JSON.stringify(body),
-		signal: params.signal,
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "exa", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError("exa", `Exa API error (${response.status}): ${errorText}`, response.status);
 	}
 
@@ -194,8 +196,13 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 
 async function callExaMcpSearch(params: ExaSearchParams): Promise<ExaSearchResponse> {
 	// Note: the MCP path does not propagate the abort signal (transport-level
-	// limitation); the direct API path above does.
-	const response = await callExaTool("web_search_exa", { ...params }, findApiKey());
+	// limitation); the direct API path above does. Transport-only fields never
+	// belong in the tool arguments, so they are dropped here.
+	const toolArgs: Record<string, unknown> = { ...params };
+	delete toolArgs.signal;
+	delete toolArgs.timeoutMs;
+
+	const response = await callExaTool("web_search_exa", toolArgs, findApiKey());
 	if (isSearchResponse(response)) {
 		return response as ExaSearchResponse;
 	}
@@ -265,6 +272,7 @@ export class ExaProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

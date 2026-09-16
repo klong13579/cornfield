@@ -15,6 +15,7 @@ import type { SearchResponse, SearchSource } from "../../../web/search/types";
 import { SearchProviderError } from "../../../web/search/types";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
+import { MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CODEX_RESPONSES_PATH = "/codex/responses";
@@ -45,6 +46,7 @@ function getModel(): string {
 
 export interface CodexSearchParams {
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	query: string;
 	system_prompt?: string;
 	num_results?: number;
@@ -300,7 +302,12 @@ function buildCodexHeaders(accessToken: string, accountId: string): Record<strin
 async function callCodexSearch(
 	auth: { accessToken: string; accountId: string },
 	query: string,
-	options: { signal?: AbortSignal; systemPrompt?: string; searchContextSize?: "low" | "medium" | "high" },
+	options: {
+		signal?: AbortSignal;
+		timeoutMs?: number;
+		systemPrompt?: string;
+		searchContextSize?: "low" | "medium" | "high";
+	},
 ): Promise<{
 	answer: string;
 	sources: SearchSource[];
@@ -338,11 +345,11 @@ async function callCodexSearch(
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
-		signal: options.signal,
+		signal: withHardTimeout(options.signal, options.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "codex", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError("codex", `Codex API error (${response.status}): ${errorText}`, response.status);
 	}
 
@@ -467,6 +474,7 @@ export async function searchCodex(params: CodexSearchParams): Promise<SearchResp
 	const result = await callCodexSearch(auth, params.query, {
 		systemPrompt: params.system_prompt,
 		searchContextSize: params.search_context_size ?? "high",
+		timeoutMs: params.timeoutMs,
 	});
 
 	let sources = result.sources;
@@ -513,6 +521,7 @@ export class CodexProvider extends SearchProvider {
 	search(params: SearchParams): Promise<SearchResponse> {
 		return searchCodex({
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 			query: params.query,
 			system_prompt: params.systemPrompt,
 			num_results: params.numSearchResults ?? params.limit,

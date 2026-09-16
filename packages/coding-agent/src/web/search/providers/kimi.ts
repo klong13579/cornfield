@@ -11,7 +11,7 @@ import { SearchProviderError } from "../../../web/search/types";
 import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { findCredential, isApiKeyAvailable } from "./utils";
+import { findCredential, isApiKeyAvailable, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const KIMI_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
 
@@ -24,6 +24,7 @@ export interface KimiSearchParams {
 	num_results?: number;
 	include_content?: boolean;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 interface KimiSearchResult {
@@ -63,7 +64,7 @@ async function findApiKey(): Promise<string | null> {
 
 async function callKimiSearch(
 	apiKey: string,
-	params: { query: string; limit: number; includeContent: boolean; signal?: AbortSignal },
+	params: { query: string; limit: number; includeContent: boolean; signal?: AbortSignal; timeoutMs?: number },
 ): Promise<{ response: KimiSearchResponse; requestId?: string }> {
 	const response = await fetch(resolveBaseUrl(), {
 		method: "POST",
@@ -78,11 +79,11 @@ async function callKimiSearch(
 			enable_page_crawling: params.includeContent,
 			timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
 		}),
-		signal: params.signal,
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "kimi", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError(
 			"kimi",
 			`Kimi search API error (${response.status}): ${errorText}`,
@@ -110,6 +111,7 @@ export async function searchKimi(params: KimiSearchParams): Promise<SearchRespon
 		limit,
 		includeContent: params.include_content ?? false,
 		signal: params.signal,
+		timeoutMs: params.timeoutMs,
 	});
 	const sources: SearchSource[] = [];
 
@@ -148,6 +150,7 @@ export class KimiProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

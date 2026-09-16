@@ -11,7 +11,14 @@ import { SearchProviderError } from "../../../web/search/types";
 import { dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { findCredential, isApiKeyAvailable } from "./utils";
+import {
+	findCredential,
+	isApiKeyAvailable,
+	MAX_SEARCH_ERROR_BYTES,
+	MAX_SEARCH_RESPONSE_BYTES,
+	readLimitedText,
+	withHardTimeout,
+} from "./utils";
 
 const ZAI_MCP_URL = "https://api.z.ai/api/mcp/web_search_prime/mcp";
 const ZAI_TOOL_NAME = "web_search_prime";
@@ -22,6 +29,7 @@ export interface ZaiSearchParams {
 	num_results?: number;
 	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 interface ZaiSearchResult {
@@ -57,7 +65,12 @@ export async function findApiKey(): Promise<string | null> {
 	return findCredential(getEnvApiKey("zai"), "zai");
 }
 
-async function callZaiTool(apiKey: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+async function callZaiTool(
+	apiKey: string,
+	args: Record<string, unknown>,
+	signal?: AbortSignal,
+	timeoutMs?: number,
+): Promise<unknown> {
 	const response = await fetch(ZAI_MCP_URL, {
 		method: "POST",
 		headers: {
@@ -74,15 +87,15 @@ async function callZaiTool(apiKey: string, args: Record<string, unknown>, signal
 				arguments: args,
 			},
 		}),
-		signal,
+		signal: withHardTimeout(signal, timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "zai", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError("zai", `Z.AI MCP error (${response.status}): ${errorText}`, response.status);
 	}
 
-	const rawText = await response.text();
+	const rawText = await readLimitedText(response, "zai", MAX_SEARCH_RESPONSE_BYTES);
 
 	const parsedMessages: unknown[] = [];
 	for (const line of rawText.split("\n")) {
@@ -160,7 +173,7 @@ async function callZaiSearch(apiKey: string, params: ZaiSearchParams): Promise<u
 	let lastError: unknown;
 	for (let i = 0; i < attempts.length; i++) {
 		try {
-			return await callZaiTool(apiKey, attempts[i], params.signal);
+			return await callZaiTool(apiKey, attempts[i], params.signal, params.timeoutMs);
 		} catch (error) {
 			// Never fall through to the next attempt shape on an abort.
 			if (params.signal?.aborted) throw error;
@@ -308,6 +321,7 @@ export class ZaiProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

@@ -9,6 +9,7 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import { StringEnum } from "@cornfield/ai";
 import { prompt } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
+import { settings } from "../../config/settings";
 import type { CustomTool, CustomToolContext, RenderResultOptions } from "../../extensibility/custom-tools/types";
 import type { Theme } from "../../modes/theme/theme";
 import webSearchSystemPrompt from "../../prompts/system/web-search.md" with { type: "text" };
@@ -16,6 +17,7 @@ import webSearchDescription from "../../prompts/tools/web-search.md" with { type
 import type { ToolSession } from "../../tools";
 import { formatAge } from "../../tools/render-utils";
 import { getSearchProvider, resolveProviderChain, type SearchProvider } from "./provider";
+import { MAX_SEARCH_HARD_TIMEOUT_MS, SEARCH_HARD_TIMEOUT_MS } from "./providers/utils";
 import { renderSearchCall, renderSearchResult, type SearchRenderDetails } from "./render";
 import type { SearchProviderId, SearchResponse } from "./types";
 import { SearchProviderError } from "./types";
@@ -50,10 +52,6 @@ export interface SearchQueryParams extends SearchToolParams {
 	provider?: SearchProviderId | "auto";
 }
 
-function formatProviderList(providers: SearchProvider[]): string {
-	return providers.map(provider => provider.label).join(", ");
-}
-
 function formatProviderError(error: unknown, provider: SearchProvider): string {
 	if (error instanceof SearchProviderError) {
 		if (error.provider === "anthropic" && error.status === 404) {
@@ -69,6 +67,63 @@ function formatProviderError(error: unknown, provider: SearchProvider): string {
 	}
 	if (error instanceof Error) return error.message;
 	return `Unknown error from ${provider.label}`;
+}
+
+/** One provider's failure, kept so the final report can name every cause. */
+interface SearchFailure {
+	provider: SearchProvider;
+	error: unknown;
+}
+
+/** Longest single failure message kept in the combined failure report. */
+const MAX_FAILURE_CHARS = 300;
+
+/**
+ * True when a response carries anything the model can use.
+ *
+ * A 200 with no answer, sources, citations, or queries is indistinguishable
+ * from success when returned verbatim, so the chain treats it as a failure and
+ * tries the next provider instead.
+ */
+function hasRenderableContent(response: SearchResponse): boolean {
+	if (response.answer?.trim()) return true;
+	if (response.sources.length > 0) return true;
+	if (response.citations?.length) return true;
+	if (response.relatedQuestions?.some(question => question.trim())) return true;
+	if (response.searchQueries?.some(query => query.trim())) return true;
+	return false;
+}
+
+/**
+ * Hard ceiling for one provider request, in milliseconds, from settings.
+ *
+ * Falls back to the built-in default when Settings is not initialized (the
+ * one-shot `q` CLI path and unit tests), so the chain never aborts before any
+ * provider has run.
+ */
+function resolveHardTimeoutMs(): number {
+	try {
+		const configuredSeconds = settings.get("providers.webSearchTimeoutSeconds");
+		if (Number.isFinite(configuredSeconds) && configuredSeconds > 0) {
+			return Math.min(configuredSeconds, MAX_SEARCH_HARD_TIMEOUT_MS / 1000) * 1000;
+		}
+	} catch {
+		// Settings unavailable; keep the built-in ceiling.
+	}
+	return SEARCH_HARD_TIMEOUT_MS;
+}
+
+/** Report every provider failure, not only the last one. */
+function formatFailures(failures: readonly SearchFailure[]): string {
+	const [first, ...rest] = failures;
+	if (!first) return "No web search provider configured.";
+	const firstMessage = truncateText(formatProviderError(first.error, first.provider), MAX_FAILURE_CHARS);
+	if (rest.length === 0) return firstMessage;
+	const parts = failures.map(
+		failure =>
+			`${failure.provider.id}: ${truncateText(formatProviderError(failure.error, failure.provider), MAX_FAILURE_CHARS)}`,
+	);
+	return `All ${failures.length} available web search providers failed — ${parts.join("; ")}`;
 }
 
 /** Truncate text for tool output */
@@ -152,11 +207,10 @@ async function executeSearch(
 		};
 	}
 
-	let lastError: unknown;
-	let lastProvider = providers[0];
+	const timeoutMs = resolveHardTimeoutMs();
+	const failures: SearchFailure[] = [];
 
 	for (const provider of providers) {
-		lastProvider = provider;
 		try {
 			const response = await provider.search({
 				query: params.query.replace(/202\d/g, String(new Date().getFullYear())), // LUL
@@ -167,7 +221,15 @@ async function executeSearch(
 				numSearchResults: params.num_search_results,
 				temperature: params.temperature,
 				signal,
+				timeoutMs,
 			});
+
+			// A 200 with nothing in it is not a result. Treat it as a provider
+			// failure so the chain advances, instead of handing the model an empty
+			// success it cannot tell apart from "the web has no answer".
+			if (!hasRenderableContent(response)) {
+				throw new SearchProviderError(provider.id, `${provider.label} returned no usable results`, 204);
+			}
 
 			const text = formatForLLM(response);
 
@@ -179,19 +241,15 @@ async function executeSearch(
 			// An abort must propagate — falling through would start the next
 			// provider and keep a cancelled turn alive (the 67s web_search case).
 			if (signal?.aborted) throw error;
-			lastError = error;
+			failures.push({ provider, error });
 		}
 	}
 
-	const baseMessage = formatProviderError(lastError, lastProvider);
-	const message =
-		providers.length > 1
-			? `All web search providers failed (${formatProviderList(providers)}). Last error: ${baseMessage}`
-			: baseMessage;
+	const message = formatFailures(failures);
 
 	return {
 		content: [{ type: "text" as const, text: `Error: ${message}` }],
-		details: { response: { provider: lastProvider.id, sources: [] }, error: message },
+		details: { response: { provider: failures.at(-1)?.provider.id ?? "none", sources: [] }, error: message },
 	};
 }
 

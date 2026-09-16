@@ -204,6 +204,18 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 		message:
 			"There is no `skill` shell command. To load a skill, use the read tool: `read skill://<name>`. To discover skills, use `read ~/.cornfield/agent/skills/`.",
 	},
+	{
+		// Ad-hoc `python -c` reimplements in bash what the `python` tool already is:
+		// a persistent kernel with structured output. The flags must sit directly
+		// after the interpreter, so `python script.py` and `python -m pip` stay
+		// untouched. There is deliberately no `node -e` / `bun -e` counterpart: a
+		// rule only fires when its `tool` is available, and nothing can replace
+		// ad-hoc JS until a JS runtime tool exists.
+		pattern: "^\\s*(python3?|ipython3?)\\s+(-[^\\s]+\\s+)*-[cC](\\s|$)",
+		tool: "python",
+		message:
+			"Use the `python` tool instead of `python -c`. It keeps imports, variables and functions across calls in a persistent IPython kernel, and renders structured output. Its input is `cells: [{ code }]`, not a `command` string.",
+	},
 ];
 
 export const SETTINGS_SCHEMA = {
@@ -2399,6 +2411,17 @@ export const SETTINGS_SCHEMA = {
 			tab: "providers",
 			label: "Web Search Provider",
 			description: "Provider for web search tool",
+			submenu: true,
+		},
+	},
+	"providers.webSearchTimeoutSeconds": {
+		type: "number",
+		default: 60,
+		ui: {
+			tab: "providers",
+			label: "Web Search Timeout",
+			description:
+				"Hard ceiling in seconds for one web search provider request (1-300). A slow request is abandoned and the next provider is tried",
 			submenu: true,
 		},
 	},
