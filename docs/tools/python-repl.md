@@ -11,6 +11,7 @@ It covers tool behavior, kernel/gateway lifecycle, environment handling, executi
 - Shared local gateway coordinator: `src/ipy/gateway-coordinator.ts`
 - Interactive-mode renderer for user-triggered Python runs: `src/modes/components/python-execution.ts`
 - Runtime/env filtering and Python resolution: `src/ipy/runtime.ts`
+- Kernel prelude helpers: `src/ipy/prelude.py`
 
 ## What the Python tool is
 
@@ -88,6 +89,35 @@ Kernel shutdown:
 - Deletes remote kernel via `DELETE /api/kernels/:id`
 - Closes websocket
 - Calls shared gateway release hook (no-op today)
+
+## Prelude helpers and the effect surface
+
+Kernel startup executes `PYTHON_PRELUDE` (`src/ipy/prelude.py`) into the kernel, so every cell can call these without importing anything:
+
+| Category | Helpers |
+|---|---|
+| Shell | `env`, `run(cmd, cwd=, timeout=)` |
+| File I/O | `read`, `write`, `append` |
+| File ops | `rm`, `mv`, `cp` |
+| Search | `find`, `grep`, `rgrep`, `glob_files` |
+| Find/Replace | `replace` |
+| Text | `sort_lines`, `uniq`, `counter`, `cols` |
+| Navigation | `tree`, `stat` |
+| Batch | `diff` |
+| Output | `display` (rich MIME, including `application/x-cornfield-status`) |
+
+`run` shells out via `subprocess.Popen(bash -c …)` in a new session group and SIGKILLs the group on timeout. The prelude also imports `os`, `subprocess`, `shutil`, and `json` into the kernel namespace.
+
+These are **implementations inside the kernel**, not bridges to the session's tools. Consequences:
+
+- A cell can spawn shells and mutate files with **no approval**: `python` declares no approval tier, and the serve-side gate (`createApprovalCanUseTool`, `src/server/permission-gate.ts`) admits every tool except `bash`.
+- `bash.patterns` / `bashInterceptor` gate the `bash` tool only. They do not see a shell the kernel spawns, nor a file the prelude writes.
+- Tool-pipeline concerns (approval, output-meta accounting, TUI rendering, `builtin-names` alias resolution) do not apply to anything these helpers do.
+- The read/write/search/file-op helpers are a **second implementation** of capabilities that already exist as tools, with no shared contract between them.
+
+The only mitigation today is the bash interceptor rule that redirects ad-hoc `python -c` to this tool (`src/config/settings-schema.ts`; note `bashInterceptor.enabled` defaults to `false`).
+
+**Decided 2026-09-16 (user):** neither a second approval gate for `python` nor the bridging rewrite above. Measured first, on 1494 `python` tool calls (747 CLI session files under `~/.cornfield/agent/sessions` + 344 files under the six gateway agent dirs): only 53 calls (3.5%) invoked any prelude helper. The per-helper distribution is `sh` 162, `env` 91, `replace` 62, `read` 2, `write` 1, `append` 2 — so the helpers whose semantics diverge from the tools (`read` / `write` / search / file ops) are effectively unused, and the only named helper worth bridging is `run()`, the one that needs an authorization decision first. Across the same corpus, 13 `python` calls failed (0.87%) and **none** of the failures came from a prelude helper or an internal URI (`skill://` appears in `python` arguments 11 times, 0 failures). The remaining exposure stays as documented above; it is a known, unfixed boundary rather than a pending plan. Re-measure before reopening: the numbers above are the whole argument.
 
 ## Session persistence semantics
 
