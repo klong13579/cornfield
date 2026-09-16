@@ -2906,9 +2906,15 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: this.persist ? previousSessionFile : undefined,
 		};
-		// Same cwd, same session lineage: the Project binding this session recorded is still true for
-		// the branch, so it travels with it (as in `fork`).
+		// Same cwd, same session lineage: what this session recorded is still true for the branch, so it
+		// travels with it (as in `fork`). That includes the Agent — the session's Agent is history, not
+		// a value re-decided per run (WP4) — and the Project binding. Neither is re-resolved here, and
+		// a source header that recorded neither leaves both absent.
 		const sourceHeader = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		if (sourceHeader?.agentId) {
+			header.agentId = sourceHeader.agentId;
+			header.agentSource = sourceHeader.agentSource;
+		}
 		if (sourceHeader?.projectId) {
 			header.projectId = sourceHeader.projectId;
 			header.projectSource = sourceHeader.projectSource;
