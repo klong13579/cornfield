@@ -41,6 +41,10 @@ import { STATUS_BADGE, STATUS_LABEL, shortTime } from "./session-tree-logic";
  *
  * `ready` 且 `data.changes` 为空 = **读到了，确实没有改动**；`error` 才是读不到 ——
  * 这两件事在面板上是两句不同的话。
+ *
+ * `ready` 但 `data` 缺失是**第四件事**：这一次读取既没交出清单、也没报错（写入方本不该产生它 ——
+ * session-store 只在同一步里同时落 data 或 error）。类型上它可表达，渲染上就不能靠
+ * 「不是 pending、不是 error」反推出一条清单 —— 卡片对它有专门的一句话，不得静默空白。
  */
 export type ChangesGroupStatus = "pending" | "error" | "ready";
 
@@ -323,6 +327,11 @@ function ChangesGroupCard({
 						重试
 					</button>
 				</div>
+			)}
+
+			{/* ready 但没拿到清单：既不能说「没有改动」，也不能什么都不说 —— 那是一个空白卡片。 */}
+			{status === "ready" && !data && (
+				<div className="px-3 py-3 text-[12px] text-ink-faint">改动状态未知：既没有读到清单，也没有报错</div>
 			)}
 
 			{status === "ready" && data && data.changes.length === 0 && (

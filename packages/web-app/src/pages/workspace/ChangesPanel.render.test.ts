@@ -189,6 +189,16 @@ describe("ChangesPanel 三种「没有」分开显示", () => {
 		expect(html).not.toContain("工作区没有改动");
 	});
 
+	it("读取结束了但既没有清单也没有错误 → 说状态未知，不得留一张空白卡片", () => {
+		// 这是 store 不该产出的组合（session-store 只在同一步里同时落 data 或 error），
+		// 但类型上可表达：面板不能靠「不是 pending、不是 error」反推出一条清单。
+		const html = render({ gitChangesPending: false, gitChanges: undefined, gitChangesError: undefined });
+		expect(html).toContain("改动状态未知：既没有读到清单，也没有报错");
+		expect(html).not.toContain("工作区没有改动");
+		expect(html).not.toContain("读取中");
+		expect(html).not.toContain("读不到改动");
+	});
+
 	it("读失败 → 原文照显 + 重试，不说没有改动", () => {
 		const html = render({ gitChangesPending: false, gitChangesError: "not a git repository" });
 		expect(html).toContain("读不到改动：not a git repository");

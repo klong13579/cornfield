@@ -592,9 +592,12 @@ test.describe("工作台右栏 产物 / 改动 两个 tab（真实 serve + 真�
 			});
 			await expect(deadPage.locator("aside").getByText("工作区没有改动")).toHaveCount(0);
 			await deadPage.getByRole("tab", { name: TAB_ARTIFACTS }).click();
-			// 存证：产物 tab 在这一态只渲染「暂无产物」——与上面两句都不是一回事（未连接 ≠ 没有产物）。
-			// 本 spec 不断言它（那是把缺陷钉死成预期）；根因坐标：ArtifactsPanel.tsx 把未挂载身份
-			// （空串）直接当成 ready+空清单，而文件/改动两个 tab 都按 view.connected 分开说。
+			// 三个 tab 在这一态说的是同一件事：未连接——读不到。产物 tab 此前只说「暂无产物」，
+			// 那是把「没问过」渲染成「没有」（未连接 ≠ 没有产物）—— 这一版按 connected 分开说。
+			await expect(deadPage.locator("aside").getByText("未连接——读不到产物清单")).toBeVisible({
+				timeout: 20_000,
+			});
+			await expect(deadPage.locator("aside").getByText("暂无产物")).toHaveCount(0);
 			await deadPage.screenshot({ path: `${SHOTS}/11-disconnected-tabs.png` });
 			await deadPage.close();
 		} finally {
