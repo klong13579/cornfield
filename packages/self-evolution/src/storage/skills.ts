@@ -12,22 +12,14 @@ export class SqliteSkillStore implements SkillStore {
 		const stmt = this.db.prepare(`SELECT * FROM skills WHERE name = ?`);
 		const row = stmt.get(name) as RawSkillRow | undefined;
 		stmt.finalize();
-		return row ? rowToSkill(row) : undefined;
+		return row ? projectSkillRow(row).skill : undefined;
 	}
 
 	async list(filter?: { deprecated?: boolean }): Promise<EvolvedSkill[]> {
-		let sql = `SELECT * FROM skills`;
-		const params: (string | number)[] = [];
-		if (filter?.deprecated !== undefined) {
-			sql += ` WHERE deprecated = ?`;
-			params.push(filter.deprecated ? 1 : 0);
-		}
-		sql += ` ORDER BY last_used_at DESC`;
-
-		const stmt = this.db.prepare(sql);
-		const rows = stmt.all(...params) as RawSkillRow[];
+		const stmt = this.db.prepare(buildSkillListSql(filter));
+		const rows = stmt.all(...skillListParams(filter)) as RawSkillRow[];
 		stmt.finalize();
-		return rows.map(rowToSkill);
+		return projectSkillRows(rows).skills;
 	}
 
 	async upsert(skill: EvolvedSkill): Promise<void> {
@@ -186,7 +178,7 @@ export class SqliteStatsStore implements StatsStore {
 	}
 }
 
-interface RawSkillRow {
+export interface RawSkillRow {
 	name: string;
 	description: string;
 	task_pattern: string;
@@ -208,23 +200,57 @@ interface RawSkillRow {
 	user_rating: number | null;
 }
 
-interface RawVersionRow {
-	name: string;
-	version: number;
-	skill_json: string;
-	changed_at: number;
-	change_type: string;
-	change_reason: string | null;
+/**
+ * 「这个库里的技能」的读语句 —— 一条，不是一个调用方一条。
+ *
+ * 存在理由与 {@link projectSkillRow} 相同：`SqliteSkillStore.list()`（演进管线自己读）与
+ * serve 侧的只读投影（技能页读）问的是同一个问题，各写一条 SQL 迟早会分叉成两个答案
+ * （排序一处改、过滤一处加，另一个调用方就悄悄读到了不同的集合）。
+ *
+ * `filter` 只影响 WHERE，排序恒为 `last_used_at DESC`（稳定：名字再兜一层，避免同一毫秒写入的
+ * 两行在两次读之间换位）。
+ */
+export function buildSkillListSql(filter?: { deprecated?: boolean }): string {
+	let sql = `SELECT * FROM skills`;
+	if (filter?.deprecated !== undefined) sql += ` WHERE deprecated = ?`;
+	return `${sql} ORDER BY last_used_at DESC, name ASC`;
 }
 
-function rowToSkill(row: RawSkillRow): EvolvedSkill {
-	return {
+/** {@link buildSkillListSql} 的绑定参数（与它的 WHERE 子句一一对应）。 */
+export function skillListParams(filter?: { deprecated?: boolean }): (string | number)[] {
+	return filter?.deprecated === undefined ? [] : [filter.deprecated ? 1 : 0];
+}
+
+/**
+ * 一行技能的投影结果：技能本身 + **这一行没能读全的事实**。
+ *
+ * 为什么把降级报出来而不是继续 `safeJsonParse` 一个空数组了事：`tools` / `pitfalls` 是 JSON
+ * 文本列，解析失败时「这条技能没有工具」与「这条技能的工具没读出来」在结果里长得一模一样。
+ * 前者是事实，后者是读丢了 —— 调用方要能不靠猜区分它们（serve 侧把它变成答复的 `error`）。
+ */
+export interface SkillRowProjection {
+	skill: EvolvedSkill;
+	/** 这一行没读全的地方（现在是 JSON 列解析失败 / 形状不对）；空数组 = 这一行读全了。 */
+	degradations: string[];
+}
+
+export interface SkillListProjection {
+	skills: EvolvedSkill[];
+	/** 所有行的降级原因汇总（空 = 这份清单是完整的）。 */
+	degradations: string[];
+}
+
+/** 把一个技能行投影成 {@link EvolvedSkill}，并如实报出读不出来的列。 */
+export function projectSkillRow(row: RawSkillRow): SkillRowProjection {
+	const tools = readStringArrayColumn(row.name, "tools", row.tools);
+	const pitfalls = readStringArrayColumn(row.name, "pitfalls", row.pitfalls);
+	const skill: EvolvedSkill = {
 		name: row.name,
 		description: row.description,
 		taskPattern: row.task_pattern,
 		approach: row.approach,
-		tools: safeJsonParse(row.tools, []),
-		pitfalls: safeJsonParse(row.pitfalls, []),
+		tools: tools.values,
+		pitfalls: pitfalls.values,
 		createdAt: row.created_at,
 		usageCount: row.usage_count,
 		lastUsedAt: row.last_used_at,
@@ -239,6 +265,51 @@ function rowToSkill(row: RawSkillRow): EvolvedSkill {
 		lastOptimizedAt: row.last_optimized_at ?? undefined,
 		userRating: row.user_rating ?? undefined,
 	};
+	return { skill, degradations: [...tools.degradations, ...pitfalls.degradations] };
+}
+
+/** 逐行投影（`list` 与只读投影共用：同一个行形状，同一套降级判定）。 */
+export function projectSkillRows(rows: readonly RawSkillRow[]): SkillListProjection {
+	const skills: EvolvedSkill[] = [];
+	const degradations: string[] = [];
+	for (const row of rows) {
+		const projection = projectSkillRow(row);
+		skills.push(projection.skill);
+		degradations.push(...projection.degradations);
+	}
+	return { skills, degradations };
+}
+
+/**
+ * `tools` / `pitfalls` 列的读取：**声明是 `string[]`，读出来不是 `string[]` 就是没读全**。
+ *
+ * 旧实现直接 `JSON.parse(...) as string[]`，于是一个存成对象/字符串、甚至被写坏的值会一路
+ * 冒充成 `string[]` 流到调用方（`for (const tool of skill.tools)` 才炸）。这里把「合法 JSON
+ * 但不是数组」「数组里混了非字符串」都当作降级：值退成能确定的那部分，原因报出去。
+ */
+function readStringArrayColumn(
+	skillName: string,
+	column: string,
+	raw: string,
+): { values: string[]; degradations: string[] } {
+	const parsed = safeJsonParse<unknown>(raw, undefined);
+	const prefix = `技能 ${JSON.stringify(skillName)} 的 ${column} 列`;
+	if (parsed === undefined) return { values: [], degradations: [`${prefix}不是合法 JSON`] };
+	if (!Array.isArray(parsed)) return { values: [], degradations: [`${prefix}不是数组`] };
+	const values = parsed.filter((item): item is string => typeof item === "string");
+	if (values.length !== parsed.length) {
+		return { values, degradations: [`${prefix}含非字符串元素`] };
+	}
+	return { values, degradations: [] };
+}
+
+interface RawVersionRow {
+	name: string;
+	version: number;
+	skill_json: string;
+	changed_at: number;
+	change_type: string;
+	change_reason: string | null;
 }
 
 function rowToVersion(row: RawVersionRow): SkillVersion {

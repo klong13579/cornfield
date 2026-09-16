@@ -81,6 +81,8 @@ import { dropAgentTodo, listAgentTodos, writeAgentTodo } from "./agent-todos-wir
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
+import { readEvolvedSkills } from "./evolution-skills-wire";
+import { readGitChanges } from "./git-wire";
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { buildMemoryScopeProjection } from "./memory-scope";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
@@ -926,6 +928,28 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					return;
 				}
+				case "get_evolved_skills": {
+					// 演化技能只读投影（T13）：与 get_memory 同一个库、同一条 scope 解析规则，两页读同一份事实。
+					// 与 get_skills（会话级、需要 attach）不同：这是全局库的读面，不 lazy attach 任何 agent。
+					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					try {
+						const anchor = await resolveAgentScope({
+							agentId,
+							meta,
+							attached: registry.getAttached(agentId),
+						});
+						done(await readEvolvedSkills(anchor.sessionCwd));
+					} catch (err) {
+						// 库在但读不出来（不是库 / 表结构不对）→ ok:false。空清单只用于「库还没生成」。
+						fail(`evolved skills unavailable: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
 				case "list_commands": {
 					// 协议批 B-3：TUI slash 命令表（BUILTIN_SLASH_COMMAND registry 同源）。
 					// 「能拿多少拿多少」：内置表 name/description；再补 active agent 会话挂载的
@@ -1057,6 +1081,24 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						done({ branch, staged, unstaged, untracked });
 					} catch (err) {
 						fail(`git_status failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "git_changes": {
+					// `git_status` 的逐条版本（T13）：同一个仓库（目标 agent 的工作目录）——
+					// 「几条」与「哪几条」必须说的是同一份事实，所以这里与上面三个 git 命令同一处取目录。
+					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					try {
+						done(await readGitChanges(meta.agentDir));
+					} catch (err) {
+						// 不是 git 仓库 / git 读不出来 / 整份输出无法解析 → ok:false；
+						// 空清单是「工作区确实干净」这个事实，不能拿来冒充读不到。
+						fail(`git_changes failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;
 				}
