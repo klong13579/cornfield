@@ -158,8 +158,9 @@ function axisState(letter: string): GitChangeStateDto | null | undefined {
 /**
  * 读一个目录所在仓库的 working tree 改动清单。
  *
- * `cwd` 是**目标 agent 的工作目录**（与 `git_status` / `git_diff` 同一个目录）—— 同一个仓库、
- * 同一份事实，所以「几条」和「哪几条」不会互相打架。worktree 是整棵（含 cwd 之外的路径），
+ * `cwd` 是**目标会话工作的那个根**（`src/server/wire-server.ts` 的 `resolveWorkRoot`：
+ * 绑定了 Project 就是它的 root，未绑定就是 agentDir）—— 与 `git_status` / `git_diff` 同一个目录，
+ * 同一个仓库、同一份事实，所以「几条」与「哪几条」不会互相打架。worktree 是整棵（含 cwd 之外的路径），
  * `path` 一律相对 `repoRoot`（git 自己就是这么给的，不按 cwd 相对化）。
  */
 export async function readGitChanges(cwd: string): Promise<GitChangesDto> {

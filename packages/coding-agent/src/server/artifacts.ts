@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "@cornfield/utils";
+import { logger, pathIsWithin, relativePathWithinRoot } from "@cornfield/utils";
 import type { ArtifactDto, ArtifactKind } from "@cornfield/wire";
 
 /**
@@ -11,7 +11,10 @@ import type { ArtifactDto, ArtifactKind } from "@cornfield/wire";
  * - puppeteer：arguments.action === "screenshot" 时的 arguments.path（截图产物）
  *
  * 路径语义：toolCall 的 path 相对 agent 会话 cwd（= agentDir）。绝对路径 /
- * file:// URL 归一化后再校验。产物必须解析在 agentDir 内（复用 fs_read 的路径约束）。
+ * file:// URL 归一化后再校验。产物必须解析在会话的**声明过的根**内——与 `fs_read` 同一条边界
+ * （Project root + agentDir 声明的额外根 + agentDir）。包含判定与 `src/server/wire-server.ts` 共用同一份
+ * 事实（`@cornfield/utils` 的 `pathIsWithin`，realpath 归一）；本模块与 `fs_read` 的区别只有两点：只收
+ * **已经存在的文件**，且相对路径算成**相对它所属的那个根**（前端拿它拼 /preview 的 URL）。
  *
  * 结果按 mtime 倒序，去重（同 path 只保留最新），上限 ARTIFACT_LIMIT。
  * 产物分类：html → html；图片扩展 → image；md → markdown；其余 → text。
@@ -85,13 +88,27 @@ async function extractSessionToolPaths(sessionFile: string): Promise<string[]> {
 	}
 }
 
-/** 归一化后规范化绝对路径（供 resolveFsPath 用同一约束判断）。 */
-function resolveFsPath(agentDir: string, rel: string): { ok: true; path: string } | { ok: false; error: string } {
-	const resolved = path.resolve(agentDir, rel);
-	if (resolved !== agentDir && !resolved.startsWith(agentDir + path.sep)) {
-		return { ok: false, error: `path escapes agentDir: ${rel}` };
+/**
+ * 一条工具路径落在哪个根里 —— 产物清单的边界。
+ *
+ * 产物只在**已经存在**的文件里挑（不存在的写完再删就是不用列），所以就是 `fs_read` 那条规则：
+ * 挨个根试，`pathIsWithin` 用 realpath 归一后仍在根内的第一个胜出（`..` 与符号链接逃逸都过不了），
+ * 相对路径相对**它所属的那个根**给出——前端拿它拼 `/preview/<agentId>/<rel>`，根写错了就点不开。
+ */
+async function fileWithinRoots(
+	roots: readonly string[],
+	raw: string,
+): Promise<{ ok: true; path: string; relative: string } | { ok: false }> {
+	for (const root of roots) {
+		const candidate = path.resolve(root, raw);
+		if (!pathIsWithin(root, candidate)) continue;
+		const stat = await fs.stat(candidate).catch(() => null);
+		if (!stat?.isFile()) continue;
+		const relative = relativePathWithinRoot(root, candidate);
+		if (relative === null) continue;
+		return { ok: true, path: candidate, relative };
 	}
-	return { ok: true, path: resolved };
+	return { ok: false };
 }
 
 function classifyArtifact(filePath: string): ArtifactKind {
@@ -121,22 +138,22 @@ async function listRecentSessionFiles(sessionsRoot: string, n: number): Promise<
 	return files.slice(0, n).map(f => f.path);
 }
 
-/** 从一组会话文件的 toolCall 提取产物路径（agentDir 内去重）。 */
+/** 从一组会话文件的 toolCall 提取产物路径（根内去重：同一条相对路径只留第一个命中的根）。 */
 async function collectArtifactPaths(
-	agentDir: string,
+	roots: readonly string[],
 	sessionFiles: string[],
 ): Promise<Map<string, { title: string; type: ArtifactKind; path: string }>> {
 	const byPath = new Map<string, { title: string; type: ArtifactKind; path: string }>();
 	for (const sessionFile of sessionFiles) {
 		const rawPaths = await extractSessionToolPaths(sessionFile);
 		for (const raw of rawPaths) {
-			const target = resolveFsPath(agentDir, normalizeToolPath(raw));
+			const target = await fileWithinRoots(roots, normalizeToolPath(raw));
 			if (!target.ok) continue;
 			if (byPath.has(target.path)) continue; // 去重：同 path 只保留首个（会话按 mtime 倒序，首个即最新）
 			byPath.set(target.path, {
 				title: path.basename(target.path),
 				type: classifyArtifact(target.path),
-				path: path.relative(agentDir, target.path),
+				path: target.relative,
 			});
 		}
 	}
@@ -169,22 +186,22 @@ async function finalizeArtifacts(
 }
 
 /**
- * 提取 agent 产物（agent 维度）。agentDir 用于路径约束；sessionsRoot 是会话根——
+ * 提取 agent 产物（agent 维度）。roots 是会话工作面的边界（同 fs_*）；sessionsRoot 是会话根——
  * default 必须传 cwd 编码子目录（getSessionsDir()/<encoded-cwd>，否则全局根下
  * 其它项目的新会话会挤掉本 agent 的会话）；registry 传 <agentDir>/sessions。
  */
-export async function listAgentArtifacts(agentDir: string, sessionsRoot: string): Promise<ArtifactDto[]> {
+export async function listAgentArtifacts(roots: readonly string[], sessionsRoot: string): Promise<ArtifactDto[]> {
 	const sessionFiles = await listRecentSessionFiles(sessionsRoot, SCAN_SESSION_LIMIT);
 	if (sessionFiles.length === 0) return [];
-	return finalizeArtifacts(await collectArtifactPaths(agentDir, sessionFiles));
+	return finalizeArtifacts(await collectArtifactPaths(roots, sessionFiles));
 }
 
 /**
  * 提取单个会话的产物（按会话隔离视图，前端产物 tab 随当前会话切换）。
- * sessionFile 为会话 JSONL 绝对路径；agentDir 用于路径约束。
+ * sessionFile 为会话 JSONL 绝对路径；roots 是会话工作面的边界（同 fs_*）。
  * 不存在/解析失败 → 空数组（调用方已校验存在性，这里双保险）。
  */
-export async function listSessionArtifacts(agentDir: string, sessionFile: string): Promise<ArtifactDto[]> {
-	const byPath = await collectArtifactPaths(agentDir, [sessionFile]);
+export async function listSessionArtifacts(roots: readonly string[], sessionFile: string): Promise<ArtifactDto[]> {
+	const byPath = await collectArtifactPaths(roots, [sessionFile]);
 	return finalizeArtifacts(byPath);
 }
