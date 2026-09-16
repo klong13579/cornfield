@@ -364,6 +364,17 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_skills"; sessionId?: string }
 	/**
+	 * 只读列出**演化技能**（self-evolution 从会话里提炼出来的技能，EvolvedSkillsDto）。
+	 *
+	 * 与 `get_skills` 是两件事：那个答「这次会话加载了哪些技能」（磁盘发现 + 启用/停用），
+	 * 这个答「演化系统沉淀了哪些技能」（`evolution.db` 的 `skills` 表：提炼、评分、使用统计）。
+	 * 同一个名字可能两边都有，来源不同，不合并。
+	 *
+	 * `sessionId` 定向 agent（缺省 = 本连接焦点）—— 库位置由 serve 解析（按项目/用户库），
+	 * 客户端不送路径。库不存在 = 明确空集；库在但读不出来 → ok:false，不得退化成空清单。
+	 */
+	| { id?: string; type: "get_evolved_skills"; sessionId?: string }
+	/**
 	 * 协议批 B-2：取消最近一条排队消息（steer/followUp 队列，LIFO）。
 	 * 空队列返回 { cancelled:false }；成功返回 { cancelled:true, text }（被取消的文本）。
 	 */
@@ -511,6 +522,17 @@ export type WireExtensionCommand =
 	  }
 	/** git 最小集（票 02）：当前分支 + staged/unstaged/untracked 列表。 */
 	| { id?: string; type: "git_status"; sessionId?: string }
+	/**
+	 * `git_status` 的逐条版本：工作区改动的**清单**（GitChangesDto）。
+	 *
+	 * `git_status` 给的是三个计数（staged/unstaged/untracked），答不了「改的是哪几个文件」；
+	 * 右栏的 Changes 视图要的是后者。两者各有各的用途，谁也不替代谁。
+	 *
+	 * `sessionId` 定向一个 agent（缺省 = 本连接焦点）—— 仓库是 serve 按目标 agent 解析出来的，
+	 * 客户端不送仓库路径（选哪个仓库不是调用方的权力）。不是 git 仓库 / git 失败 → ok:false，
+	 * **不得**退化成空清单：「没改动」与「读不到」是两件事。
+	 */
+	| { id?: string; type: "git_changes"; sessionId?: string }
 	/** working tree vs HEAD（或 staged）diff。 */
 	| { id?: string; type: "git_diff"; sessionId?: string; cached?: boolean; path?: string }
 	/** 最近 n 条 commit（hash/author/message）。 */

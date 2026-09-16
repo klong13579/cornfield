@@ -82,6 +82,7 @@ function viewOf(patch: Partial<SessionView>): SessionView {
 		historyLoading: false,
 		sessionTreeLoading: false,
 		agentTodosPending: false,
+		gitChangesPending: false,
 		projects: [PROJECT],
 		currentProjectId: PROJECT.projectId,
 		projectsPending: false,

@@ -13,6 +13,8 @@ import type {
 	DelegatedChildDto,
 	DingtalkAgentConfigDto,
 	EnvironmentSummaryDto,
+	EvolvedSkillsDto,
+	GitChangesDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
@@ -62,6 +64,8 @@ import type {
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
+	NewSessionOptions,
+	NewSessionResult,
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
@@ -238,8 +242,36 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "compact" }).then(() => undefined);
 	}
 
-	newSession(): Promise<void> {
-		return this.#req({ type: "new_session" }).then(() => undefined);
+	/**
+	 * 新建会话（new_session）。
+	 *
+	 * wire 的入参只有 `sessionId`（定向注册表里的 agent），所以三个入参里只有两个落得下去：
+	 * - `agentId` → `new_session.sessionId`（命令面所有状态命令的 `sessionId` 都是「哪个 agent」，
+	 *   serve 按它解析目标；目标 Agent 必须已 attach，否则 ok:false，错误原文上抛）
+	 * - `title`   → 创建成功后紧跟一次 `set_session_name`（wire 没有「创建时命名」这条命令）
+	 * - `projectId` → **落不下去**：归属是 serve 按会话 cwd 匹配 Project root 算出来的，没有指派入口。
+	 *   它只会出现在 `notApplied` 里，不会被塞进命令载荷冒充已生效。
+	 *
+	 * `cancelled:true`（serve 拒了这次新建，如上一回合还没收尾）不当成功：**标题那一跳必须跳过**
+	 * —— 否则改的是**上一个**会话的名字。这不是修饰：`created:false` 时调用方手上没有新会话。
+	 */
+	async newSession(opts?: NewSessionOptions): Promise<NewSessionResult> {
+		const target = opts?.agentId;
+		const result = await this.#req<{ cancelled?: boolean }>({
+			type: "new_session",
+			...(target ? { sessionId: target } : {}),
+		});
+		const created = result?.cancelled !== true;
+		if (created && opts?.title) {
+			await this.#req({
+				type: "set_session_name",
+				name: opts.title,
+				...(target ? { sessionId: target } : {}),
+			});
+		}
+		// `notApplied` 说的是**能力**（wire 有没有这条命令），不是结果：所以它只看入参，
+		// 不看 created —— 否则「这次没建成」会读成「projectId 落地了」。
+		return { created, notApplied: opts?.projectId === undefined ? [] : ["projectId"] };
 	}
 	forkFrom(entryId: string): Promise<void> {
 		return this.#req({ type: "fork_from", entryId }).then(() => undefined);
@@ -740,6 +772,32 @@ export class PiClientAdapter implements PiClient {
 		return { diff: result.diff ?? "", firstChangedLine: result.firstChangedLine ?? undefined };
 	}
 
+	/**
+	 * 一个 agent 工作区的改动清单（git_changes）。
+	 *
+	 * 不把读失败注水成空清单：`{changes: []}` 是「读到了，工作区确实干净」，它是命令的正常
+	 * 答案；读不到（不是 git 仓库 / git 失败 / 未知 agent）整条 ok:false 并招错 —— 两者在
+	 * 右栏要显示成两种不同的东西。
+	 *
+	 * 答复里可选的 `error` 是**降级**通道（serve 读到了一份不完整的清单，见 GitChangesDto）：
+	 * 原样透传，不吞也不当成失败 —— 吞了它就是把一份残清单冒充成完整的。
+	 */
+	async getGitChanges(sessionId?: string): Promise<GitChangesDto> {
+		const result = await this.#req<{
+			repoRoot?: string | null;
+			changes?: GitChangesDto["changes"] | null;
+			error?: string | null;
+		}>({
+			type: "git_changes",
+			...(sessionId ? { sessionId } : {}),
+		});
+		return {
+			repoRoot: result.repoRoot ?? "",
+			changes: result.changes ?? [],
+			...(result.error ? { error: result.error } : {}),
+		};
+	}
+
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限；FileExplorer 预览用）。 */
 	async fsReadImage(sessionId: string, path: string): Promise<FsImageResult> {
 		return this.#req<FsImageResult>({
@@ -825,6 +883,24 @@ export class PiClientAdapter implements PiClient {
 				projectRoot: null,
 				projectError: null,
 			},
+		};
+	}
+
+	/**
+	 * 演化系统沉淀的技能（get_evolved_skills；与 get_skills 是两件事，不合并）。
+	 *
+	 * 空清单 = 库读到了、里面确实没技能；库在但打不开 → ok:false 招错（读失败不是空集）。
+	 * 行里的字段原样透传（包括可选的 error 降级通道），不在这里补默认值 —— 补一个假值
+	 * 就让「没记过」和「记了个空」长得一模一样。
+	 */
+	async getEvolvedSkills(sessionId?: string): Promise<EvolvedSkillsDto> {
+		const result = await this.#req<{ skills?: EvolvedSkillsDto["skills"] | null; error?: string | null }>({
+			type: "get_evolved_skills",
+			...(sessionId ? { sessionId } : {}),
+		});
+		return {
+			skills: result.skills ?? [],
+			...(result.error ? { error: result.error } : {}),
 		};
 	}
 

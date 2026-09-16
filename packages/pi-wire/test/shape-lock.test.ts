@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { WireCommand, WireCommandOfType } from "../src/commands";
 import type {
+	EvolvedSkillDto,
+	EvolvedSkillsDto,
+	GitChangeDto,
+	GitChangeStateDto,
+	GitChangesDto,
 	MemoryFileZoneDto,
 	MemoryProjectionDto,
 	MemoryResolutionDto,
@@ -262,6 +267,44 @@ type _AssertMemoryProjection = _MemoryProjection extends {
 	: never;
 const _memoryProjectionShape: _AssertMemoryProjection = true;
 
+// ── git_changes / get_evolved_skills（T12）：两条命令 + 两个新形状 + 降级通道 ──
+type _GitChanges = WireCommandOfType<"git_changes">;
+type _AssertGitChanges = _GitChanges extends { type: "git_changes"; sessionId?: string } ? true : never;
+const _gitChangesShape: _AssertGitChanges = true;
+
+type _GetEvolvedSkills = WireCommandOfType<"get_evolved_skills">;
+type _AssertGetEvolvedSkills = _GetEvolvedSkills extends { type: "get_evolved_skills"; sessionId?: string }
+	? true
+	: never;
+const _getEvolvedSkillsShape: _AssertGetEvolvedSkills = true;
+
+// 改动是**两条轴**：X（HEAD→index）与 Y（index→worktree）各自可以为空。
+// 合成一个 status 就会把「已 staged 又改了一版」（porcelain `MM`）压成一种。
+const _gitChangeShape: _Equal<
+	GitChangeDto,
+	{ path: string; oldPath?: string; index: GitChangeStateDto | null; worktree: GitChangeStateDto | null }
+> = true;
+
+// 清单**必填**：读失败只能走 ok:false（或同一张答复里的 error），
+// 不许把它表达成「省掉 changes」或「空 changes」。
+const _gitChangesListRequired: _Equal<Pick<GitChangesDto, "changes">, { changes: GitChangeDto[] }> = true;
+const _gitChangesError: _Equal<GitChangesDto["error"], string | undefined> = true;
+
+// 演化技能是 self-evolution 的 `EvolvedSkill` 投影：提炼结果 + 使用统计都要留住。
+const _evolvedSkillShape: _Equal<
+	Pick<EvolvedSkillDto, "name" | "taskPattern" | "approach" | "tools" | "pitfalls" | "version">,
+	{
+		name: string;
+		taskPattern: string;
+		approach: string;
+		tools: string[];
+		pitfalls: string[];
+		version: number;
+	}
+> = true;
+const _evolvedSkillsListRequired: _Equal<Pick<EvolvedSkillsDto, "skills">, { skills: EvolvedSkillDto[] }> = true;
+const _evolvedSkillsError: _Equal<EvolvedSkillsDto["error"], string | undefined> = true;
+
 // ── T10C：调度写命令使用 canonical 输入，不能丢失 Agent 绑定与可靠性字段 ──
 type _CronCreate = WireCommandOfType<"cron_create">;
 type _CronUpdate = WireCommandOfType<"cron_update">;
@@ -426,6 +469,9 @@ const COMMAND_TYPES = [
 	"list_agent_todos",
 	"set_agent_todo",
 	"delete_agent_todo",
+	// 右栏 Changes / 技能页演化分组（T12）：读不到了走 ok:false，不拿空清单冒充
+	"git_changes",
+	"get_evolved_skills",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */
@@ -441,6 +487,63 @@ describe("WireCommand shape lock", () => {
 		expect(new Set(COMMAND_TYPES).size).toBe(COMMAND_TYPES.length); // no duplicates
 	});
 
+	it("git_changes：降级答复不作废 payload，且空清单不带 error", () => {
+		const degraded: GitChangesDto = {
+			repoRoot: "/repo",
+			changes: [{ path: "a.ts", index: "modified", worktree: null }],
+			error: "untracked 枚举被上限截断",
+		};
+		expect(degraded.error).toBe("untracked 枚举被上限截断");
+		expect(degraded.changes).toHaveLength(1);
+
+		// 「工作区确实干净」不带 error —— 它与「有一项没读到」必须能分开。
+		const clean: GitChangesDto = { repoRoot: "/repo", changes: [] };
+		expect(clean.error).toBeUndefined();
+		expect(clean.changes).toEqual([]);
+	});
+
+	it("GitChangeDto：未跟踪只落在 worktree 轴，另一轴是 null 而不是空串", () => {
+		const untracked: GitChangeDto = { path: "new.ts", index: null, worktree: "untracked" };
+		expect(untracked.index).toBeNull();
+		expect(untracked.worktree).toBe("untracked");
+
+		// 两轴同时有值（porcelain `MM`）：staged 与工作区各算一件事，不能合成一个。
+		const bothAxes: GitChangeDto = { path: "b.ts", index: "modified", worktree: "modified" };
+		expect(bothAxes.index).toBe("modified");
+		expect(bothAxes.worktree).toBe("modified");
+
+		// rename 的来源路径与目标路径是两个事实。
+		const renamed: GitChangeDto = { path: "new.ts", oldPath: "old.ts", index: "renamed", worktree: null };
+		expect(renamed.oldPath).toBe("old.ts");
+	});
+
+	it("get_evolved_skills：空清单与读失败分开表达", () => {
+		const empty: EvolvedSkillsDto = { skills: [] };
+		expect(empty.error).toBeUndefined();
+
+		const degraded: EvolvedSkillsDto = {
+			skills: [
+				{
+					name: "s",
+					description: "",
+					taskPattern: "",
+					approach: "",
+					tools: [],
+					pitfalls: [],
+					version: 1,
+					createdAt: 0,
+					usageCount: 0,
+					lastUsedAt: 0,
+					successCount: 0,
+					failureCount: 0,
+				},
+			],
+			error: "1 行的 tools 列解析失败",
+		};
+		expect(degraded.skills).toHaveLength(1);
+		expect(degraded.error).toContain("解析失败");
+	});
+
 	it("covers every type in the union at compile time", () => {
 		// 编译期 _noMissing/_noExtra 断言；运行时只验证清单自洽。
 		expect(COMMAND_TYPES).toContain("set_mcp_server");
@@ -450,5 +553,7 @@ describe("WireCommand shape lock", () => {
 		expect(COMMAND_TYPES).toContain("delegate_child");
 		expect(COMMAND_TYPES).toContain("set_project");
 		expect(COMMAND_TYPES).toContain("delete_project");
+		expect(COMMAND_TYPES).toContain("git_changes");
+		expect(COMMAND_TYPES).toContain("get_evolved_skills");
 	});
 });
