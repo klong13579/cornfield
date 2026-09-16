@@ -28,6 +28,7 @@ import * as sdkModule from "../../src/sdk";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../../src/sdk";
 import {
 	type AgentMeta,
+	attachmentKey,
 	attachmentRoot,
 	type SessionFactory,
 	SessionRegistry,
@@ -226,6 +227,10 @@ describe("装配：工作根 / session 目录 / 配置根", () => {
 
 			expect(assembly.calls[0]?.cwd).toBe(agentDir);
 			expect(assembly.calls[0]?.agentDir).toBe(agentDir);
+			// 未绑定的地址就是 agentId 本身 —— 今天的 key，事件路由与 getAttached(agentId) 逐字节不变。
+			expect(attached.address).toBe("hr");
+			expect(attached.root).toBe(agentDir);
+			expect(attached.projectId).toBeUndefined();
 			expect(manager.getCwd()).toBe(agentDir);
 			expect(attached.session.settings.getCwd()).toBe(agentDir);
 			expect(attached.session.settings.getAgentDir()).toBe(agentDir);
@@ -265,17 +270,26 @@ describe("并存：一个 Agent 服务两个 Project", () => {
 			expect(first.session.sessionManager.getCwd()).toBe(rootA);
 			expect(second.session.sessionManager.getCwd()).toBe(rootB);
 
-			// 两个都能按地址取到；不带 root 的取值只认「这个 Agent 自己根上的附件」。
-			expect(registry.getAttached("hr", rootA)).toBe(first);
-			expect(registry.getAttached("hr", rootB)).toBe(second);
+			// 地址是附件自己报出来的事实：绑了 Project 带工作根，条目上也带 projectId。
+			expect(first.address).toBe(attachmentKey("hr", rootA));
+			expect(second.address).toBe(attachmentKey("hr", rootB));
+			expect(first.address).not.toBe(second.address);
+			expect(first.root).toBe(rootA);
+			expect(second.root).toBe(rootB);
+			expect(first.projectId).toBe("proj-a");
+			expect(second.projectId).toBe("proj-b");
+
+			// 取值只按 (Agent, Project)；不带 projectId 的取值只认「这个 Agent 自己根上的附件」。
+			expect(registry.getAttached("hr", "proj-a")).toBe(first);
+			expect(registry.getAttached("hr", "proj-b")).toBe(second);
 			expect(registry.getAttached("hr")).toBeUndefined();
-			expect(registry.isAttached("hr", rootA)).toBe(true);
+			expect(registry.isAttached("hr", "proj-a")).toBe(true);
 			expect(registry.listAttached()).toHaveLength(2);
 
 			// 释放一个不影响另一个。
-			await registry.detach("hr", rootA);
-			expect(registry.getAttached("hr", rootA)).toBeUndefined();
-			expect(registry.getAttached("hr", rootB)).toBe(second);
+			await registry.detach("hr", "proj-a");
+			expect(registry.getAttached("hr", "proj-a")).toBeUndefined();
+			expect(registry.getAttached("hr", "proj-b")).toBe(second);
 			expect(disposeFirst).toHaveBeenCalledTimes(1);
 		},
 		SESSION_TEST_TIMEOUT,
@@ -315,6 +329,29 @@ describe("并存：一个 Agent 服务两个 Project", () => {
 			const [a, b] = await Promise.all([registry.attach("hr", "proj-a"), registry.attach("hr", "proj-a")]);
 			expect(a).toBe(b);
 			expect(built).toHaveLength(1);
+		},
+		SESSION_TEST_TIMEOUT,
+	);
+});
+
+describe("事件里的地址", () => {
+	it(
+		"attached/detached 带的是附件地址：未绑定 = agentId（今天不变），绑了 Project = 带工作根",
+		async () => {
+			const rootA = path.join(home, "repo-a");
+			await declareProject("proj-a", rootA);
+			const registry = makeRegistry(rootSessionFactory());
+			registry.registerMeta(hrMeta());
+			const addresses: string[] = [];
+			registry.subscribe(event => {
+				if (event.kind !== "snapshot") addresses.push(event.sessionId);
+			});
+
+			await registry.attach("hr");
+			await registry.attach("hr", "proj-a");
+			await registry.detach("hr", "proj-a");
+
+			expect(addresses).toEqual(["hr", attachmentKey("hr", rootA), attachmentKey("hr", rootA)]);
 		},
 		SESSION_TEST_TIMEOUT,
 	);
@@ -368,7 +405,7 @@ describe("失败要说真话：不建会话、不落回任何默认根", () => {
 			expect(assembly.sessions).toHaveLength(1);
 			expect(dispose).toHaveBeenCalledTimes(1);
 			expect(registry.listAttached()).toEqual([]);
-			expect(registry.isAttached("hr", path.join(home, "repo-a"))).toBe(false);
+			expect(registry.isAttached("hr", "proj-a")).toBe(false);
 		},
 		SESSION_TEST_TIMEOUT,
 	);
@@ -408,7 +445,8 @@ describe("agent 列表的边界", () => {
 			expect(rows[0]?.attached).toBe(true);
 			expect(rows[0]?.active).toBe(true);
 			expect(rows[0]?.sessionFile).toBe(ownRoot.session.sessionFile);
-			expect(registry.getAttached("hr", rootA)).toBe(projectAttachment);
+			expect(registry.getAttached("hr", "proj-a")).toBe(projectAttachment);
+			expect(projectAttachment.address).toBe(attachmentKey("hr", rootA));
 		},
 		SESSION_TEST_TIMEOUT,
 	);
