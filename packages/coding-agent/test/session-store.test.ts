@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../src/session/agent-session";
+import { SessionManager } from "../src/session/session-manager";
 import { reducePhase } from "../src/session/session-snapshot";
 import { SessionStore } from "../src/session/session-store";
 
@@ -55,6 +56,9 @@ function makeStubSession(overrides: Partial<AgentSession> = {}) {
 		sessionId: "test-session",
 		sessionName: "t",
 		sessionFile: "/tmp/s.jsonl",
+		// 真 SessionManager（in-memory）：快照里的归属是会话头里那条**记录**，没它就没什么可读的
+		// —— 一个没有 sessionManager 的「会话」不是会话，桩不该把它删掉。
+		sessionManager: SessionManager.inMemory("/tmp/s.jsonl"),
 		model: undefined,
 		thinkingLevel: undefined,
 		scopedModels: [],
@@ -84,6 +88,42 @@ function makeStubSession(overrides: Partial<AgentSession> = {}) {
 		},
 	};
 }
+
+// ── 快照里的会话归属（T25）：只从会话**记录**读，不按 cwd 猜 ──
+
+describe("SessionStore 快照的 projectId", () => {
+	/** 挂一个**真** SessionManager（in-memory），这样归属是会话头里的真记录。 */
+	function storeFor(manager: SessionManager): SessionStore {
+		const { session } = makeStubSession({ sessionManager: manager });
+		return SessionStore.attach(session as unknown as AgentSession);
+	}
+
+	test("有记录 → 填该 id；没记录 → undefined（不是空串）", async () => {
+		const bound = SessionManager.inMemory("/tmp/proj");
+		await bound.setResolvedProject({ projectId: "proj-a", source: "session" });
+		const boundStore = storeFor(bound);
+		expect(boundStore.getSnapshot().projectId).toBe("proj-a");
+		boundStore.dispose();
+
+		const unbound = SessionManager.inMemory("/tmp/proj");
+		const unboundStore = storeFor(unbound);
+		expect(unboundStore.getSnapshot().projectId).toBeUndefined();
+		unboundStore.dispose();
+	});
+
+	test("记录里是空串也读成 undefined：空串不是归属", () => {
+		const manager = SessionManager.inMemory("/tmp/proj");
+		const header = manager.getHeader();
+		if (!header) throw new Error("expected a session header");
+		header.projectId = "";
+		// 先确认记录里真的成了空串（否则下面那条断言就没在验东西）
+		expect(manager.getHeader()?.projectId).toBe("");
+
+		const store = storeFor(manager);
+		expect(store.getSnapshot().projectId).toBeUndefined();
+		store.dispose();
+	});
+});
 
 describe("SessionStore", () => {
 	test("attach 初始化 seq=0 且快照字段来自 session getters", () => {

@@ -1,5 +1,6 @@
 import type { AgentSession, AgentSessionEvent } from "./agent-session";
 import { reducePhase, type SessionPhase, type SessionSnapshot } from "./session-snapshot";
+import { readPersistedProject } from "./session-workspace";
 
 export type SnapshotListener = (snapshot: SessionSnapshot, event: AgentSessionEvent) => void;
 
@@ -47,6 +48,10 @@ export class SessionStore {
 			sessionId: session.sessionId,
 			sessionName: session.sessionName,
 			sessionFile: session.sessionFile,
+			// 归属只从会话**记录**读（`SessionHeader.projectId`，与 `./session-workspace` 的 resolver
+			// 同一条路、同一个读法）：没记录（或记的是空串）就是 undefined —— 不拿 cwd 反推一个，
+			// 那会把会话放进一个它自己从未声明过的 Project。
+			projectId: readPersistedProject(session.sessionManager.getHeader())?.projectId,
 			model: session.model,
 			thinkingLevel: session.thinkingLevel,
 			scopedModels: session.scopedModels,
