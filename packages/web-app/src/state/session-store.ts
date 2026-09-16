@@ -15,6 +15,8 @@ import type {
 	DelegatedChildDto,
 	DiagnosisAggregationDto,
 	EnvironmentSummaryDto,
+	EvolvedSkillsDto,
+	GitChangesDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
@@ -52,6 +54,8 @@ import type {
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
+	NewSessionOptions,
+	NewSessionResult,
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
@@ -162,6 +166,15 @@ export interface SessionView {
 	agentTodosPending: boolean;
 	/** 板子读不到的原因（存储损坏 / 版本不符）。读失败 ≠ 没有任务。 */
 	agentTodosError?: string;
+	/**
+	 * 当前焦点会话所在仓库的 working tree 改动（git_changes）。
+	 * `undefined` = 还没读过；`changes: []` = 读到了，**确实没有改动** —— 两者不能当成同一件事。
+	 */
+	gitChanges?: GitChangesDto;
+	/** 改动还没读出来（切会话后的窗口期 / 还没读过）。 */
+	gitChangesPending: boolean;
+	/** 改动读不到的原因（不是 git 仓库 / git 失败）。读失败 ≠ 没有改动，面板必须分开显示。 */
+	gitChangesError?: string;
 }
 
 /** B7-1：回合收尾通知——有错误消息走出错告警（errors 开关），否则走完成（agentDone 开关）。 */
@@ -240,6 +253,17 @@ export class SessionStore {
 	#agentTodoGeneration = 0;
 	#projectsError: string | undefined;
 	/**
+	 * 仓库改动跟**会话身份**（agent + 会话文件）走：换会话就地作废，绝不让上一个会话的改动
+	 * 留在这一屏下面（既有仓库随会话变的情况，也有面板把上一屏的改动当成刚改的情况）。
+	 */
+	#gitChanges: GitChangesDto | undefined;
+	#gitChangesPending = true;
+	#gitChangesError: string | undefined;
+	/** 最近一次读过改动的会话身份；变了才重读（仓库不随快照变）。 */
+	#gitChangesKey: string | undefined;
+	/** 改动读取的代际：换会话后，迟到的那一份整份丢弃（它答的是另一个会话的仓库）。 */
+	#gitChangesGeneration = 0;
+	/**
 	 * 最近一次算过归属的「会话身份」（焦点 agent + 会话文件）。
 	 *
 	 * 它是「归属要不要重算」的唯一判据：同一会话的重复快照不重读 registry（列表可缓存），
@@ -273,6 +297,7 @@ export class SessionStore {
 				if (conn.connected) {
 					this.#syncProjectAttribution();
 					this.#syncAgentTodos();
+					this.#syncGitChanges();
 				}
 				void unsubConn;
 			});
@@ -382,7 +407,18 @@ export class SessionStore {
 		void this.#run(() => this.#client.compact());
 	}
 
-	newSession(): void {
+	/**
+	 * 新建会话（new_session）。
+	 *
+	 * `opts` 三个入参里只有两个落得下去：`agentId`（wire 的 `sessionId`）与 `title`
+	 * （创建后紧跟一次 `set_session_name`）；`projectId` **wire 落不下去**，由回执的 `notApplied`
+	 * 报给调用方 —— 这里不把它渲染成已生效（见 {@link NewSessionOptions}）。
+	 *
+	 * 失败不抛（与本节其它写命令一致）：错误进 view.commandError 提示条。失败时回 `undefined`
+	 * ——**不代表「没建成」**：命令发出去了但没等到答复（断线/超时）与「建了但标题没落上」
+	 * （第二跳失败）都走这条路。拿不准就说拿不准，不许编一个 `created:false`。
+	 */
+	async newSession(opts?: NewSessionOptions): Promise<NewSessionResult | undefined> {
 		const view = cloneView(this.getSnapshot());
 		// 新会话没有账本：上一会话的子会话树不得跟过来（私有字段与 view 要一起改，
 		// 否则要等下一个快照才会消失）；在途的那一次读取也一并作废 —— 它答的是上一会话的账本。
@@ -390,9 +426,11 @@ export class SessionStore {
 		// 新会话就是一个新会话，与当前身份必然不同 —— 不看目标是什么，直接作废：
 		// 少了这一步，上一会话的在途 list_projects 会在新会话的快照到达前落进新视图。
 		this.#invalidateProjectAttribution(view);
+		// 改动清单同理：它是上一个会话所在仓库的，新会话还没问过。
+		this.#invalidateGitChanges(view);
 		this.#view = view;
 		this.#notify();
-		void this.#run(() => this.#client.newSession());
+		return await this.#run(() => this.#client.newSession(opts));
 	}
 
 	/** 切换模型（set_model）。失败不再静默：错误写 view.commandError，由模型控制中心/工作台提示条渲染。 */
@@ -670,6 +708,9 @@ export class SessionStore {
 		// 重算一次，也不要让上一会话的归属（和它在途请求）继续落在屏幕上。
 		const identity = this.#sessionIdentityOf(agentId, targetSessionFile);
 		if (identity !== this.#projectAttributionKey) this.#invalidateProjectAttribution(view);
+		// 仓库改动也跟**会话身份**走：换会话后继续显示上一个会话的改动，就是把别人的改动
+		// 挂在这一屏下面（面板还会以为自己看到的是当前的 working tree）。
+		if (identity !== this.#gitChangesKey) this.#invalidateGitChanges(view);
 		// Todo 板跟着 **Agent** 走（不是会话）：同一个 Agent 换历史会话，板子不变；换 Agent 立即作废，
 		// 在重读结果回来之前界面上是「还不知道」，而不是上一个 Agent 的任务。
 		if (agentId !== this.#agentTodoKey) this.#invalidateAgentTodos(view);
@@ -1059,6 +1100,100 @@ export class SessionStore {
 		void this.#loadProjects(this.#activeAgentId ?? undefined, generation);
 	}
 
+	// ── Git 工作区改动（Changes 视图）─────────────────────────────────────
+	// 与归属同一套纪律：**作废是同步的**（重读回来之前界面只能是「还不知道」），
+	// 请求**按代际提交**（换会话后上一个会话的迟到响应整份丢弃）。key 也是会话身份
+	// （agent + 会话文件）—— 改动属于一个仓库，而仓库是会话的一部分。
+
+	/**
+	 * 手动重读当前会话所在仓库的改动（Changes 面板的刷新入口）。
+	 *
+	 * 不降级：读不到就错误态（调用方把「读失败」与「确实没改动」分开显示）。
+	 * `agentId` 只在「看别的 agent 的仓库」时才传（缺省 = 本连接焦点）。
+	 */
+	async refreshGitChanges(agentId?: string): Promise<void> {
+		const generation = ++this.#gitChangesGeneration;
+		this.#gitChangesPending = true;
+		const pending = cloneView(this.getSnapshot());
+		pending.gitChangesPending = true;
+		this.#view = pending;
+		this.#notify();
+		await this.#loadGitChanges(generation, agentId);
+	}
+
+	/**
+	 * 读**任意**一个 agent 工作区的改动（git_changes，代理到 pi-client；**不**落进本 store 的视图）。
+	 *
+	 * 与 {@link refreshGitChanges} 分开是因为它们答的不是同一个问题：那个是「当前这一屏的会话
+	 * 改了什么」（跟着会话身份走、要作废），这个是「另一个会话 / 子会话的仓库改了什么」
+	 * （调用方自己持有结果，按 Root/Child Session 分组）。失败原样招错：分组视图里某一组读不到
+	 * 要显示成那一组自己的错误，不能跟着当前会话的错误一起混。
+	 */
+	fetchGitChanges(agentId?: string): Promise<GitChangesDto> {
+		return this.#client.getGitChanges(agentId);
+	}
+
+	/**
+	 * 焦点会话变了就重读改动，没变就不动。
+	 *
+	 * 与归属/板子同源调用点（连接就绪 / 快照到达），保证「切会话后改动自己跟上」不需要手动刷新。
+	 */
+	#syncGitChanges(): void {
+		const key = this.#currentSessionIdentity();
+		if (key === this.#gitChangesKey) return;
+		this.#gitChangesKey = key;
+		this.#gitChanges = undefined;
+		this.#gitChangesError = undefined;
+		this.#gitChangesPending = true;
+		const view = cloneView(this.getSnapshot());
+		view.gitChanges = undefined;
+		view.gitChangesError = undefined;
+		view.gitChangesPending = true;
+		this.#view = view;
+		this.#notify();
+		// generation 在发请求之前递增：从这一刻起，上一个身份的响应就再也落不了地。
+		void this.#loadGitChanges(++this.#gitChangesGeneration);
+	}
+
+	/**
+	 * 把改动作废到「还没读过」：代际同步递增（在途响应从此落不了地）、显示值与它的错误一起清空。
+	 * 显示的 pending 置 true —— 在重读回来之前界面上的答案是「还不知道」，不是「没改动」。
+	 *
+	 * **每一个改变会话身份的入口都必须走这里**（切换 / 开历史会话 / 新会话）——
+	 * 漏一个就是一个「上一个会话的改动挂在新会话下面」的窗口。
+	 */
+	#invalidateGitChanges(view: SessionView): void {
+		this.#gitChangesGeneration += 1;
+		this.#gitChangesKey = undefined;
+		this.#gitChanges = undefined;
+		this.#gitChangesError = undefined;
+		this.#gitChangesPending = true;
+		view.gitChanges = undefined;
+		view.gitChangesError = undefined;
+		view.gitChangesPending = true;
+	}
+
+	/** 发一次读请求，并按代际提交（成功与失败走同一道门）。 */
+	async #loadGitChanges(generation: number, agentId?: string): Promise<void> {
+		let changes: GitChangesDto | undefined;
+		let error: string | undefined;
+		try {
+			changes = await this.#client.getGitChanges(agentId ?? this.#activeAgentId ?? undefined);
+		} catch (err) {
+			error = errorMessageOf(err);
+		}
+		if (generation !== this.#gitChangesGeneration) return;
+		this.#gitChanges = changes;
+		this.#gitChangesError = error;
+		this.#gitChangesPending = false;
+		const view = cloneView(this.getSnapshot());
+		view.gitChanges = changes;
+		view.gitChangesError = error;
+		view.gitChangesPending = false;
+		this.#view = view;
+		this.#notify();
+	}
+
 	// ── Agent Todo（T10A）──────────────────────────────────────────────────
 	// 与 Project 归属同一套纪律：**作废是同步的**（重读回来之前界面只能是「还不知道」），
 	// 请求**按代际提交**（换 Agent 后上一个 Agent 的迟到响应整份丢弃）。
@@ -1260,6 +1395,16 @@ export class SessionStore {
 		return this.#client.getSkills(sessionId);
 	}
 
+	/**
+	 * 演化技能（get_evolved_skills，代理到 pi-client；展示层自行持有状态）。
+	 *
+	 * 与 {@link fetchSkills} 是两条命令、两套事实（磁盘发现 vs 演化产出），不合并成一份数据 ——
+	 * 合并就得回答「同一个名字两边都有时听谁的」，而那是展示层的分组问题，不是数据层的问题。
+	 */
+	fetchEvolvedSkills(sessionId?: string): Promise<EvolvedSkillsDto> {
+		return this.#client.getEvolvedSkills(sessionId);
+	}
+
 	/** 启停技能（set_skill_enabled，代理到 pi-client；写该 agent 自己的配置）。 */
 	setSkillEnabled(
 		name: string,
@@ -1434,6 +1579,7 @@ export class SessionStore {
 		// 快照是「会话身份」唯一的权威来源（切 Agent / 开新会话后 serve 必推一份）：归属在这儿对齐。
 		this.#syncProjectAttribution();
 		this.#syncAgentTodos();
+		this.#syncGitChanges();
 	}
 
 	#applyProgress(event: ProgressEventDto): void {
@@ -1615,6 +1761,9 @@ export class SessionStore {
 				agentTodoProjectIds: this.#agentTodoProjectIds,
 				agentTodosPending: this.#agentTodosPending,
 				agentTodosError: this.#agentTodosError,
+				gitChanges: this.#gitChanges,
+				gitChangesPending: this.#gitChangesPending,
+				gitChangesError: this.#gitChangesError,
 			};
 		}
 		return {
@@ -1659,6 +1808,9 @@ export class SessionStore {
 			agentTodoProjectIds: this.#agentTodoProjectIds,
 			agentTodosPending: this.#agentTodosPending,
 			agentTodosError: this.#agentTodosError,
+			gitChanges: this.#gitChanges,
+			gitChangesPending: this.#gitChangesPending,
+			gitChangesError: this.#gitChangesError,
 		};
 	}
 

@@ -20,6 +20,8 @@ import type {
 	DelegateChildInput,
 	DelegatedChildDto,
 	EnvironmentSummaryDto,
+	EvolvedSkillsDto,
+	GitChangesDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	ListenRecordingDto,
@@ -71,6 +73,11 @@ export type {
 	CronUpdateInput,
 	DelegateChildInput,
 	DelegatedChildDto,
+	EvolvedSkillDto,
+	EvolvedSkillsDto,
+	GitChangeDto,
+	GitChangeStateDto,
+	GitChangesDto,
 	ProjectDeleteDto,
 	ProjectListDto,
 	ProjectRecordDto,
@@ -198,6 +205,57 @@ export type {
 	SkillStatus,
 	SkillsResultDto,
 } from "@cornfield/wire";
+
+/**
+ * 新建会话的入参（new_session）。
+ *
+ * 三项都是**请求**，不是保证 —— 各自能不能落到 wire 上不一样，落不下去的会出现在
+ * {@link NewSessionResult} 的 `notApplied` 里（而不是静默丢掉，那会让调用方把一个没有发生的
+ * 事实渲染成已生效）。
+ */
+export interface NewSessionOptions {
+	/**
+	 * 目标 Agent（注册表名）→ wire `new_session` 的 `sessionId`。缺省 = 本连接当前焦点 agent。
+	 *
+	 * serve 的路由规则：该 Agent 要**已经 attach** 过，否则整条命令 ok:false
+	 * （`agent not attached: X (send attach first)`）。这里不代调用方 attach —— 把一个 Agent
+	 * 拉起来是另一个动作，隐藏它会让调用方以为「切过去了」而实际上只是建了个会话。
+	 */
+	agentId?: string;
+	/** 标题 → wire `set_session_name`（wire 没有「创建时命名」这条命令，只能是创建后紧跟一次改名）。 */
+	title?: string;
+	/**
+	 * 目标 Project。**wire 落不下去**：会话的 Project 归属是 serve 按会话 cwd 与 Project root
+	 * 匹配**算**出来的（`list_projects` 的 `currentProjectId`），客户端没有指派入口 ——
+	 * 这一项不会变成任何命令。
+	 *
+	 * 传了它就会出现在 `notApplied` 里；调用方不得把用户的这次选择渲染成「已归属该项目」，
+	 * 只能显示 serve 算出来的真实归属。
+	 */
+	projectId?: string;
+}
+
+/**
+ * 新建会话的结果 —— 回答「真的建了吗」+「哪些入参没落地」。
+ *
+ * 命令本身的传输失败不走这里：失败抛错（未连接 / serve 拒绝），与其它写命令同一个约定。
+ * 但 **serve 接了命令不等于建了会话** —— `new_session` 可以回 `cancelled:true`（比如上一回合
+ * 还没收尾），那是一个 ok:true 的空动作。把它当成功就是把界面切成一个不存在的会话。
+ */
+export interface NewSessionResult {
+	/**
+	 * serve 是否为这次请求真的开了新会话。
+	 *
+	 * false = 回了 `cancelled:true`：新会话不存在，界面不得切成它（标题也不会被落上 ——
+	 * 那一跳会改到**上一个**会话的名字）。
+	 */
+	created: boolean;
+	/**
+	 * 本次请求里 wire 落不下去的入参名。今天只可能是 `"projectId"` ——
+	 * 它出现在这里就表示调用方的那个选择**没有被应用**。
+	 */
+	notApplied: Array<"projectId">;
+}
 
 export interface GatewayGroupInfo {
 	channelId: string;
@@ -357,7 +415,12 @@ export interface PiClient {
 	/** 前端已注册的 host tools（set_host_tools 本地态）。 */
 	getHostTools(): HostToolDefinitionDto[];
 	compact(): Promise<void>;
-	newSession(): Promise<void>;
+	/**
+	 * 新建会话（new_session）。`opts.agentId` 定向目标 Agent（wire 的 `sessionId`），
+	 * `opts.title` 在创建后用 `set_session_name` 落上；`opts.projectId` wire 落不下去，
+	 * 会出现在返回的 `notApplied` 里（见 {@link NewSessionOptions}）。失败抛错。
+	 */
+	newSession(opts?: NewSessionOptions): Promise<NewSessionResult>;
 	forkFrom(entryId: string): Promise<void>;
 	undoExchange(entryId: string): Promise<void>;
 	retryFrom(entryId: string, message?: string): Promise<void>;
@@ -546,6 +609,16 @@ export interface PiClient {
 	fsDiff(before: string, after: string): Promise<FsDiffResult>;
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限，MIME 按扩展名）。 */
 	fsReadImage(sessionId: string, path: string): Promise<FsImageResult>;
+	// ── Git 工作区改动（Changes 视图；契约命令 git_changes，serve 端经 ticket 实现）──
+	/**
+	 * 一个 agent 工作区的改动清单（git_changes）。
+	 *
+	 * 空清单 = **读到了，工作区确实干净**；读不到（不是 git 仓库 / git 失败 / 未知 agent）抛错
+	 * —— 调用方必须把「没有改动」与「读失败」分开显示，不许把后者渲染成前者。
+	 * sessionId 定向 agent（缺省 = 本连接焦点 agent）。
+	 */
+	getGitChanges(sessionId?: string): Promise<GitChangesDto>;
+
 	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。 */
 	listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }>;
 	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 端只读 docroot 路由）。 */
@@ -584,6 +657,16 @@ export interface PiClient {
 	 * sessionId 定向 agent（缺省 = 本连接焦点 agent）；失败/未连接抛错。
 	 */
 	getSkills(sessionId?: string): Promise<SkillsResultDto>;
+
+	// ── 演化技能（self-evolution 提炼结果；契约命令 get_evolved_skills）──
+	/**
+	 * 演化系统沉淀的技能（get_evolved_skills，只读）。
+	 *
+	 * 与 `getSkills` 是两件事（磁盘发现 vs 演化产出），不合并。空清单 = 确实一条都没有；
+	 * 读不到（库在但打不开）抛错 —— 那是读取失败，不是「还没演化出技能」。
+	 * sessionId 定向 agent（缺省 = 本连接焦点 agent）。
+	 */
+	getEvolvedSkills(sessionId?: string): Promise<EvolvedSkillsDto>;
 
 	// ── 队列（协议批 B-2）──
 	/** 排队文本（get_state 的 queued 字段；快照只有计数）。 */

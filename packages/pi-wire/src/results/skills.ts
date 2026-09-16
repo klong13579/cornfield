@@ -68,6 +68,67 @@ export interface SkillLoadErrorDto {
 	message: string;
 }
 
+/**
+ * 一条**演化技能**（self-evolution 从会话里提炼出来的技能，存在 `evolution.db` 的 `skills` 表）。
+ *
+ * 与 {@link SkillScopeRowDto} 的区别：那个是**这次会话加载的技能**（磁盘发现 + 启用/停用），
+ * 这个是**演化系统的产出**（提炼、评分、使用统计）—— 两者是两件不同的事，可以有同名却
+ * 不同来源的行，不合并成一张表。
+ *
+ * 字段与 `@cornfield/self-evolution` 的 `EvolvedSkill` 一一对应（那是这套事实的拥有者，
+ * pi-wire 不能反向依赖它：self-evolution → coding-agent → … 依赖方向是往上的）——
+ * serve 侧的投影按同一份形状产出，两端共用同一份定义，不再各写一遍。
+ *
+ * 唯一没跟过来的是 `optimizationCount`：它声明在 `EvolvedSkill` 上，但**没有进 `skills` 表**
+ * （写入语句与行映射都不含它，只在进程内累加），投影它只会得到一个永远缺省的字段 ——
+ * 那会让「从没优化过」与「没记录」在界面上长得一样。缺这个事实就不声明它。
+ */
+export interface EvolvedSkillDto {
+	name: string;
+	description: string;
+	/** 这条技能适用的任务形态（提炼时写下的一句话）。 */
+	taskPattern: string;
+	/** 做法。 */
+	approach: string;
+	tools: string[];
+	pitfalls: string[];
+	createdAt: number;
+	usageCount: number;
+	lastUsedAt: number;
+	successCount: number;
+	failureCount: number;
+	version: number;
+	/** 质量分（0-100）；从未评分时缺省。 */
+	qualityScore?: number;
+	/** 优化后的提示片段；没优化过时缺省。 */
+	optimizedPrompt?: string;
+	/** 已废弃；`undefined` = 没记过（不是「未废弃」的另一种写法）。 */
+	deprecated?: boolean;
+	deprecationReason?: string;
+	autonomyNotes?: string;
+	lastOptimizedAt?: number;
+	/** 1-5 星的人工评分。 */
+	userRating?: number;
+}
+
+/**
+ * `get_evolved_skills` 的答复。
+ *
+ * `skills` 是**清单的全部**：空数组 = `evolution.db` 读到了、里面确实一条技能都没有
+ * （含「库文件还没生成」这种明确空集）；**读不到**（库在但打不开 / 表结构不对）整条命令
+ * ok:false —— 读失败不是空集，用空数组冒充会让技能页显示「还没演化出技能」这个反的结论。
+ */
+export interface EvolvedSkillsDto {
+	skills: EvolvedSkillDto[];
+	/**
+	 * 本次答复的降级原因：命令成功、`skills` 有效，但**有一项事实没读到**
+	 * （例如某几行的 JSON 列解析失败、只能按缺省值给出）。**整份读不到不走这里**，那是 ok:false。
+	 *
+	 * 缺省 = 这份清单是完整的。
+	 */
+	error?: string;
+}
+
 /** 这份技能列表锚在谁身上 —— 同屏多个 Agent 时，没有它就无法判断看的是谁的技能。 */
 export interface SkillScopeFactsDto {
 	agentId: string;
