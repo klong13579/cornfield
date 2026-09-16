@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
-import { projectLabelOf } from "../src/components/ProjectContext";
+import { attributionTextOf, projectLabelOf, sessionAttributionOf } from "../src/lib/project-read-model";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import type { SessionView } from "../src/state/session-store";
 import { SessionStore } from "../src/state/session-store";
@@ -537,14 +537,100 @@ describe("projectLabelOf", () => {
 	});
 
 	it("有归属 → 显示那个 Project 的名字", () => {
-		const label = projectLabelOf(viewOf({ projects: PROJECTS, currentProjectId: "dtc" }));
+		const label = projectLabelOf(viewOf({ projects: PROJECTS, workingProjectId: "dtc" }));
 		expect(label.label).toBe("米克原子 DTC");
 		expect(label.title).toContain("/Users/me/dtc");
 	});
 
-	it("声明了但会话不在其中 → 未归属（不拿第一个凑数）", () => {
-		const label = projectLabelOf(viewOf({ projects: PROJECTS }));
-		expect(label.label).toBe("未归属");
+	it("没选工作上下文 → 不指定（不拿会话归属冒充选择，也不拿第一个凑数）", () => {
+		const label = projectLabelOf(viewOf({ projects: PROJECTS, currentProjectId: "dtc" }));
+		expect(label.label).toBe("不指定");
 		expect(label.title).toContain("2 个");
+		expect(label.title).toContain("不声明归属");
+	});
+
+	it("选过的项目已不在注册表 → 照实说出来（与「不指定」不是同一句话）", () => {
+		const label = projectLabelOf(viewOf({ projects: PROJECTS, workingProjectId: "gone" }));
+		expect(label.label).toBe("gone（已不在注册表）");
+		expect(label.title).toContain("不在注册表里");
+	});
+
+	it("注册表还没读到 → 判不出选中的那个还在不在，不先说它没了", () => {
+		const label = projectLabelOf(viewOf({ workingProjectId: "dtc" }));
+		expect(label.label).toBe("…");
+		expect(label.title).toContain("判不出它还在不在");
+	});
+});
+
+/**
+ * 会话归属的读数：权威且带来源。
+ *
+ * 这里钉的是「不知道」与「确实没有」不是一回事 —— 前者说「归属未知」，只有 serve 真的答过
+ * （`currentProjectSource: "none"`）才说「未归属」。
+ */
+describe("sessionAttributionOf / attributionTextOf", () => {
+	function viewOf(patch: Partial<SessionView>): SessionView {
+		return {
+			connected: true,
+			reconnecting: false,
+			wsUrl: "ws://127.0.0.1:1/ws",
+			protocolVersion: 1,
+			phase: "idle",
+			model: null,
+			thinkingLevel: null,
+			sessionId: "",
+			messages: [],
+			messageEntryIds: {},
+			isStreaming: false,
+			activeToolNames: [],
+			queued: 0,
+			todo: [],
+			flags: { autoCompaction: false, autoRetry: false },
+			agents: [],
+			env: null,
+			historyLoading: false,
+			sessionTreeLoading: false,
+			...patch,
+		};
+	}
+
+	it("权威归属来自 header（source: session），不是前端按路径猜的", () => {
+		const attribution = sessionAttributionOf(
+			viewOf({ projects: PROJECTS, currentProjectId: "dtc", currentProjectSource: "session" }),
+		);
+		expect(attribution).toMatchObject({ kind: "attributed", projectId: "dtc", from: "session" });
+		expect(attributionTextOf(attribution).detail).toContain("会话记录");
+	});
+
+	it("旧会话回落：按目录匹配算出来的归属与上面一条分开说", () => {
+		const attribution = sessionAttributionOf(
+			viewOf({ projects: PROJECTS, currentProjectId: "dtc", currentProjectSource: "cwd" }),
+		);
+		expect(attribution).toMatchObject({ kind: "attributed", from: "cwd" });
+		expect(attributionTextOf(attribution).detail).toContain("按目录匹配");
+	});
+
+	it("还没问过 → 归属未知，不说「未归属」", () => {
+		const attribution = sessionAttributionOf(viewOf({ projects: PROJECTS }));
+		expect(attribution.kind).toBe("unknown");
+		expect(attributionTextOf(attribution).label).toBe("归属未知");
+	});
+
+	it("serve 答过「没有任何东西声明过」（source: none）→ 才是未归属", () => {
+		const attribution = sessionAttributionOf(viewOf({ projects: PROJECTS, currentProjectSource: "none" }));
+		expect(attribution.kind).toBe("none");
+		expect(attributionTextOf(attribution).label).toBe("未归属");
+	});
+
+	it("读不到 registry → 不知道，不拿「未归属」顶", () => {
+		expect(sessionAttributionOf(viewOf({ projectsError: "boom" })).kind).toBe("unknown");
+		expect(sessionAttributionOf(viewOf({})).kind).toBe("unknown");
+	});
+
+	it("归属指向注册表里没有的 id → 照实说，不折叠成未归属", () => {
+		const attribution = sessionAttributionOf(
+			viewOf({ projects: PROJECTS, currentProjectId: "ghost", currentProjectSource: "session" }),
+		);
+		expect(attribution).toMatchObject({ kind: "unlisted", projectId: "ghost" });
 	});
 });

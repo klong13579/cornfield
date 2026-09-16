@@ -1,6 +1,7 @@
 import { agentTodoStatusActions, isAgentTodoTransitionAllowed } from "@cornfield/wire";
 import { useEffect, useMemo, useState } from "react";
 import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto } from "../../lib/pi-client-api";
+import { serveVerdictOf } from "../../lib/serve-verdict";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
@@ -26,7 +27,6 @@ import {
 	patchOfDraft,
 	projectRegistryOf,
 	sameFilter,
-	serveVerdictOf,
 	sortAgentTodos,
 } from "./agent-todo-logic";
 

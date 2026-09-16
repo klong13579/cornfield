@@ -1,50 +1,59 @@
 import { Plus } from "lucide-react";
 import type { ProjectRecordDto } from "../../lib/pi-client-api";
+import { projectFieldState } from "../../lib/project-read-model";
 import { type AgentFocusSource, activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import type { SessionView } from "../../state/session-store";
 
 /**
- * 新建会话表单（T15「工作台三件」第一件）。
+ * 新建会话表单（T15「工作台三件」第一件；T28 起 Project 真的生效）。
  *
  * 这一屏只做两件事，两件都要老实：
  *   1. **收下这次新建的三个意图**：Agent / Project / 标题；
- *   2. **说清每个意图今天落到哪** —— 落得下去的发出去，落不下去的当场明说。静默丢弃等于
- *      让用户以为自己选了一个其实没生效的东西，那比不提供这个控件更糟。
+ *   2. **说清每个意图落到哪** —— 三个都会被服务端看见，但「发出去了」不等于「建成了」：
+ *      未知 Project、目标 Agent 没 attach 都会被 serve 原样拒掉，那时界面上必须出现**它的原话**。
  *
- * 今天的落点（都是查过实现的事实，不是猜测）：
- *   - **Agent**：**可写**。提交走 store 的 `newSession` 这一条唯一路径：先把目标 Agent 切过去
+ * 三个字段今天的落点（都是查过实现的事实，不是猜测）：
+ *   - **Agent**：提交走 store 的 `newSession` 这一条唯一路径：先把目标 Agent 切过去
  *     并**等 serve 确认**（attach + switch_session 两半都 await），确认不了就整条命令不发；
  *     确认之后才带**显式目标**发 `new_session`（wire 的 `sessionId`）。serve 逐帧并发处理
  *     （wire-server.ts `void core.handleCommand(...)`），所以「先切后建」如果不等切换落地，
  *     就会建到**旧** Agent 上 —— 这个顺序由 store 一处保证，这一屏只负责把选中的 Agent 交出去。
  *   - **标题**：wire 有 `set_session_name`，由适配层在**创建成功之后**跟一次（落在新会话上）。
- *   - **Project**：**没有**「把会话绑到某个 Project」的命令：会话归属由工作目录按 WP4 的 root
- *     规则推导（`matchProjectForPath`），创建时不可选。
+ *   - **Project**：wire 有 `new_session.projectId`，它是这个会话的**权威归属** —— serve 按它
+ *     解析工作根与边界根，并把结果记进会话。未知 id 由 serve 拒，错误原文照原样显示。
+ *     带着哪个 id 发这条命令，由 store 按**工作上下文**定（见 `SessionStore.newSession`）：
+ *     不止这一个入口建会话，规则写在一处，三个入口才会得到同一个答案。
+ *
+ * Project 这一个字段**不在本组件的草稿里**：它就是顶栏那个工作上下文（`view.workingProjectId`），
+ * 由 store 一处持有。表单里再存一份草稿就会有两个「这次要建到哪」的值，而提交只能用一个 ——
+ * 那正是「切了 Project 却没生效」类问题的温床。所以这里读它、改它也改 store 那一份，
+ * 但**不把它当提交入参传出去**：那样又会多一条只有表单走得到的路径。
  *
  * 组件是受控的、无 hook 的（仓库既有惯例，见 layout/ProjectSwitcher.tsx 的 ProjectPanel）：状态
- * 由外壳持有，判据都是从这里导出的纯函数，单测直接调用即可覆盖。
+ * 由外壳持有，判据都是这里导出或 `lib/project-read-model` 的纯函数，单测直接调用即可覆盖。
  */
 
 /** 表单草稿。空串一律表示「不指定」——与「选了某个值」不是一回事。 */
 export interface NewSessionDraft {
 	/** "" = 用当前焦点 Agent（§10 解析链第 1 级）。 */
 	agentId: string;
-	/** "" = 不指定 Project。 */
-	projectId: string;
 	/** "" = 不指定标题。 */
 	title: string;
 }
 
-export const EMPTY_NEW_SESSION_DRAFT: NewSessionDraft = { agentId: "", projectId: "", title: "" };
+export const EMPTY_NEW_SESSION_DRAFT: NewSessionDraft = { agentId: "", title: "" };
 
 /**
- * 提交给写入面的入参形状 —— store 的 `newSession({ agentId, projectId, title })` 收的就是这三个。
+ * 提交给写入面的入参形状 —— store 的 `newSession` 收的就是这两个。
  *
- * 三个字段都可选：缺省与空串在这里不是一回事，所以空串一律不带出去，不留一个空值给服务端猜。
+ * 只有两个字段，因为**建在哪个 Project 不在这里决定**：它是工作上下文（`view.workingProjectId`），
+ * 由 store 在 `newSession` 里统一问一次。表单再往入参里塞一份，就会有两个「这次要建到哪」的值，
+ * 而侧栏那两个直建钮根本没有表单可塞 —— 同一个选择在两个入口两个结果。
+ *
+ * 两个字段都可选：缺省与空串在这里不是一回事，所以空串一律不带出去，不留一个空值给服务端猜。
  */
 export interface NewSessionInput {
 	agentId?: string;
-	projectId?: string;
 	title?: string;
 }
 
@@ -52,10 +61,8 @@ export interface NewSessionInput {
 export function newSessionInputOf(draft: NewSessionDraft): NewSessionInput {
 	const input: NewSessionInput = {};
 	const agentId = draft.agentId.trim();
-	const projectId = draft.projectId.trim();
 	const title = draft.title.trim();
 	if (agentId !== "") input.agentId = agentId;
-	if (projectId !== "") input.projectId = projectId;
 	if (title !== "") input.title = title;
 	return input;
 }
@@ -102,34 +109,12 @@ function currentProjectOf(view: Pick<SessionView, "projects" | "currentProjectId
 }
 
 /**
- * Project 字段的五态 —— 「读不到」和「没声明过」不是一件事（与 ProjectList 同一套判据）。
+ * Project 字段今天的写入面：`new_session.projectId` —— 这个会话的权威归属。
  *
- * 面板把每一态画成自己的话，因为把它折叠成「没有 Project」就是在替一个没读到的答案发言。
+ * 与「明天起会生效」的空话不同，这条命令是真的：serve 按它解析工作根与边界根，并把结果作为
+ * 事实记进会话（`SessionHeader.projectId`）。未声明的 id 会被**拒绝**，那条拒绝原样上屏。
  */
-export type ProjectFieldState =
-	| { kind: "disconnected" }
-	| { kind: "pending" }
-	| { kind: "error"; message: string }
-	| { kind: "undeclared" }
-	| { kind: "declared"; projects: ProjectRecordDto[]; currentProjectId?: string };
-
-export function projectFieldState(
-	view: Pick<SessionView, "connected" | "projects" | "projectsPending" | "projectsError" | "currentProjectId">,
-): ProjectFieldState {
-	if (!view.connected) return { kind: "disconnected" };
-	if (view.projectsError !== undefined) return { kind: "error", message: view.projectsError };
-	if (view.projectsPending || view.projects === undefined) return { kind: "pending" };
-	if (view.projects.length === 0) return { kind: "undeclared" };
-	return {
-		kind: "declared",
-		projects: view.projects,
-		...(view.currentProjectId === undefined ? {} : { currentProjectId: view.currentProjectId }),
-	};
-}
-
-/** Project 字段今天的写入面：没有。缺的是「把新会话绑到一个 Project」这条命令。 */
-export const PROJECT_FIELD_NOTE =
-	"暂不支持写入：没有「把会话绑到某个 Project」的命令 —— 会话归属由工作目录按 root 规则推导";
+export const PROJECT_FIELD_NOTE = "落到 new_session.projectId：serve 按它定这个会话的工作根与边界根";
 
 /** 标题字段今天的写入面：创建成功后由适配层跟一次 `set_session_name`（wire 没有「创建时命名」）。 */
 export const TITLE_FIELD_NOTE = "创建成功后落名：wire 没有「创建时命名」，是创建后紧跟一次 set_session_name";
@@ -160,10 +145,21 @@ export interface NewSessionFormProps {
 	view: SessionView;
 	draft: NewSessionDraft;
 	onChange: (draft: NewSessionDraft) => void;
+	/** 工作上下文（`view.workingProjectId`，空串 = 不指定）——这次新建的 Project 由 store 按它定。 */
+	projectId: string;
+	/** 改工作上下文（接 `store.setWorkingProject`）；空串 = 不指定。 */
+	onProjectChange: (projectId: string) => void;
 	onCreate: (input: NewSessionInput) => void;
 }
 
-export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFormProps): React.JSX.Element {
+export function NewSessionForm({
+	view,
+	draft,
+	onChange,
+	projectId,
+	onProjectChange,
+	onCreate,
+}: NewSessionFormProps): React.JSX.Element {
 	const agents = view.agents;
 	const focusId = activeAgentIdOf(view);
 	const focusAgent = activeAgentOf(view);
@@ -188,8 +184,8 @@ export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFo
 			<div className="mb-1.5 flex items-center gap-2">
 				<span className="text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">新建会话</span>
 				<span className="flex-1" />
-				{/* 落不下去的字段一律在提交前就写在这里，不在提交时静默丢掉 */}
-				<span className="text-[11px] text-ink-faint">Agent 可写（先切过去再建）· Project 今天写不进去</span>
+				{/* 每个字段的去向一律在提交前就写在这里，不在提交时静默丢掉 */}
+				<span className="text-[11px] text-ink-faint">Agent 可写（先切过去再建）· Project 落到命令上</span>
 			</div>
 
 			<div className="flex flex-wrap items-end gap-2">
@@ -216,19 +212,25 @@ export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFo
 				<label className="flex min-w-0 flex-1 flex-col gap-0.5" title={PROJECT_FIELD_NOTE}>
 					<span className="text-[11px] text-ink-faint">Project</span>
 					<select
-						value={draft.projectId}
-						onChange={e => onChange({ ...draft, projectId: e.target.value })}
+						value={projectId}
+						onChange={e => onProjectChange(e.target.value)}
 						aria-label="Project"
+						disabled={project.kind === "disconnected"}
 						className="min-w-0 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink outline-none focus:border-accent"
 					>
-						<option value="">不指定</option>
+						<option value="">不指定（新会话不声明归属）</option>
 						{project.kind === "declared" &&
 							project.projects.map(item => (
 								<option key={item.projectId} value={item.projectId}>
 									{item.name}
-									{item.projectId === project.currentProjectId ? "（当前）" : ""}
+									{item.projectId === project.currentProjectId ? "（当前会话）" : ""}
 								</option>
 							))}
+						{/* 选过、但已声明清单里没有它：得有这一项，否则 select 会把 value 画成空白 */}
+						{projectId !== "" &&
+							!(project.kind === "declared" && project.projects.some(p => p.projectId === projectId)) && (
+								<option value={projectId}>{projectId}（不在已声明的清单里）</option>
+							)}
 					</select>
 				</label>
 
@@ -292,14 +294,14 @@ export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFo
 				<div>
 					Project：
 					{project.kind === "disconnected"
-						? "未连接 —— Project registry 不可用"
+						? "未连接 —— Project registry 不可用，这次不指定归属"
 						: project.kind === "pending"
 							? "读取中 —— 此刻还不知道声明过哪些 Project"
 							: project.kind === "error"
 								? `读取失败：${project.message}`
 								: project.kind === "undeclared"
 									? "还没声明过任何 Project（~/.cornfield/agent/projects.json）"
-									: `已声明 ${project.projects.length} 个（只作参考）`}
+									: `已声明 ${project.projects.length} 个`}
 					{" · "}
 					{PROJECT_FIELD_NOTE}
 				</div>

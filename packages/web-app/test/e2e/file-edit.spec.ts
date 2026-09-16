@@ -237,7 +237,8 @@ test.describe("文件编辑闭环（真实 serve + 真实文件系统）", () =>
 			const createSession = page.getByRole("button", { name: "新建会话" });
 			await expect(createSession).toBeVisible();
 			// 点开表单 ≠ 已经建了会话：文件视图还在（它只在会话真换了之后才作废）。
-			// 表单里选 Agent / Project / 标题都不算数 —— 没提交之前什么也没发生。
+			// 表单里的选择都还没变成会话：Project 选的是**工作上下文**（下一个新会话落在哪，客户端状态），
+			// Agent 与标题要等提交才落到命令上 —— 没提交之前没有会话被建出来。
 			await expect(page.getByText("点击左侧目录展开，点文件查看或编辑")).toHaveCount(0);
 			await expect(page.getByLabel(`编辑 ${FILE}`)).toHaveCount(1);
 			// 提交（默认路径 = 当前焦点的 Agent）→ 会话真的换了，文件视图随之作废

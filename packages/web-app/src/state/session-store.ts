@@ -33,6 +33,7 @@ import type {
 	ProviderOAuthStartDto,
 	ProviderStatusDto,
 	SessionPhaseDto,
+	SessionProjectSourceDto,
 	SessionSnapshotDto,
 	SessionTreeDto,
 	SkillsResultDto,
@@ -55,11 +56,11 @@ import type {
 	ListenRecordingDto,
 	McpServerDto,
 	NewSessionOptions,
-	NewSessionResult,
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
+import { isServeVerdict, serveVerdictOf } from "../lib/serve-verdict";
 import { activeAgentIdOf } from "./agent-context";
 import { createClient } from "./client";
 import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
@@ -145,8 +146,22 @@ export interface SessionView {
 	 * 已声明的 Project（list_projects）。`undefined` = 还没读到；`[]` = 读到了，确实没声明过。
 	 */
 	projects?: ProjectRecordDto[];
-	/** 被查询会话落在哪个 Project（serve 按 WP4 的 root 规则算）；缺省 = 没有归属。 */
+	/**
+	 * **当前会话**落在哪个 Project —— serve 的权威读数（先看会话自己记的 header.projectId，
+	 * 只有老会话才按 cwd 与 root 匹配回落）。
+	 *
+	 * 缺省 = 没问过 / 还没算出来（配合 `projectsPending` 区分）；「问了、确实没有归属」由
+	 * `currentProjectSource: "none"` 表达 —— 两者不是同一件事。
+	 */
 	currentProjectId?: string;
+	/**
+	 * `currentProjectId` 是从哪来的：`session` = 会话自己记下的 / `cwd` = 按目录匹配算出来的 /
+	 * `none` = 问了，没有任何东西声明过归属。`undefined` = 没问过。
+	 *
+	 * 读的人不得把它折叠成一个布尔：会话记下的事实与按目录猜出来的答案不是一个可信度，
+	 * 而用户要据此判断「这个归属靠不靠得住」。
+	 */
+	currentProjectSource?: SessionProjectSourceDto;
 	/**
 	 * 当前会话的 Project 归属还没算出来（切会话后的窗口期，或还没读过）。
 	 *
@@ -156,6 +171,14 @@ export interface SessionView {
 	projectsPending: boolean;
 	/** Project 读不到的原因（存储损坏）。读失败 ≠ 没声明过。 */
 	projectsError?: string;
+	/**
+	 * **工作上下文**选中的 Project —— 客户端自己的选择，不是 serve 的读数：下一个新会话
+	 * 落在它的根上（`new_session.projectId`），切它不重启 serve。
+	 *
+	 * 缺省 = 不指定（新会话不声明归属，行为与今天一致）。它与 `currentProjectId` 是两回事，
+	 * 两者不许互相顶替：前者是「我要在哪干活」，后者是「这个会话现在在哪」。
+	 */
+	workingProjectId?: string;
 	/**
 	 * 当前焦点 Agent 的 Todo 板（list_agent_todos）。
 	 * `undefined` = 还没读到；`[]` = 读到了，**确实是空的** —— 两者不能当成同一件事。
@@ -202,12 +225,15 @@ export type FocusAgentResult = { ok: true } | { ok: false; error: string };
 /**
  * 一次新建会话的结局。
  *
- * 三态必须分开，不许折叠：`not-created` 是**确定没建**（serve 拒了，或目标 Agent 根本没切过去），
+ * 三态必须分开，不许折叠：`not-created` 是**确定没建**（serve 拒了、或目标 Agent 根本没切过去），
  * `unknown` 是**说不准**（命令发出去了但没等到答复），把它读成「没建成」就是把一个没发生的否定
  * 当成事实；读成 `created` 就是把没建的东西报成建了。
+ *
+ * 三态的分界线就在 `PiServerError`：serve 回了 `ok:false` 就是它**看过并拒了**（一条确定的
+ * 否定，`error` 是它的原话）；断线 / 超时没有答复，只能是 `unknown`。
  */
 export type NewSessionOutcome =
-	| { kind: "created"; notApplied: NewSessionResult["notApplied"] }
+	| { kind: "created" }
 	| { kind: "not-created"; error: string }
 	| { kind: "unknown"; error: string };
 
@@ -254,7 +280,16 @@ export class SessionStore {
 	 */
 	#projects: ProjectRecordDto[] | undefined;
 	#currentProjectId: string | undefined;
+	#currentProjectSource: SessionProjectSourceDto | undefined;
 	#projectsPending = true;
+	/**
+	 * 工作上下文（客户端选择）：**不随会话变** —— 换会话不该把我选的工作项目偷偷改掉，
+	 * 它是「下一批活干在哪」这件事，而不是「这个会话在哪」这件事。
+	 *
+	 * 声明过的 Project 被删时这里不做静默清理：清掉它就是在替用户做一个他没做的选择，
+	 * 而 UI 会把「选过但已不在注册表里」老实说出来（与「未声明」不是同一句话）。
+	 */
+	#workingProjectId: string | undefined;
 	/**
 	 * Agent Todo 板属于一个 Agent，**不随会话变**：切会话（同一 Agent 换历史会话）不重读，
 	 * 换 Agent 才作废重读。
@@ -454,6 +489,14 @@ export class SessionStore {
 	 * attach；`switch_session` 也是先 `registry.attach` 再改焦点），这条路上没有要等的东西，
 	 * 再切一次只会白推一份当前会话的快照回来（默认路径的表现因此与以前一致）。
 	 *
+	 * **建在哪个 Project**（`new_session.projectId`）这条规则只在这里写一次：
+	 *   - 显式 `opts.projectId` 优先 —— 调用方指名要建在哪；
+	 *   - 否则用**工作上下文**（`setWorkingProject`，顶栏 chip 选的那个）。
+	 * 写在一处是必需的：在各个调用点各自决定，就会出现「选了工作上下文、侧栏那个钮建出来的会话
+	 * 却没归属」这种半生效 —— 三个建会话的入口必须问同一个答案。
+	 *
+	 * 未知 id 由 serve 拒（ok:false），那条否定走 `not-created`，错误原文原样带出去（不吞、不改写）。
+	 *
 	 * 失败不抛（与本节其它写命令一致）：错误进 view.commandError 提示条，同时用
 	 * {@link NewSessionOutcome} 把「确定没建」与「说不准」分开报给调用方。
 	 */
@@ -467,6 +510,7 @@ export class SessionStore {
 		if (target === undefined) {
 			return this.#creationFailed("还不知道本连接的焦点 Agent（未连接或注册表还没到）——新会话落在谁身上无从确定");
 		}
+		const project = opts?.projectId ?? this.#workingProjectId;
 		this.#creating = true;
 		try {
 			if (target !== current) {
@@ -485,20 +529,24 @@ export class SessionStore {
 			this.#view = view;
 			this.#notify();
 			try {
-				// `projectId` 落不下去（由回执的 notApplied 报给调用方）；`title` 由适配层在创建后
-				// 跟一次 `set_session_name` 落上 —— 那一跳是在**新的**会话上，不在上一个会话上。
-				const result = await this.#client.newSession({ ...opts, agentId: target });
+				// `title` 由适配层在创建后跟一次 `set_session_name` 落上 —— 那一跳是在**新的**会话上，
+				// 不在上一个会话上。
+				const result = await this.#client.newSession({ ...opts, agentId: target, projectId: project });
 				if (!result.created) {
 					// serve 接了命令但没建（`cancelled:true`，如上一回合还没收尾）：这不是一次新建。
 					return this.#creationFailed("serve 拒绝了这次新建（上一回合还没收尾）——没有新会话");
 				}
 				this.#clearCommandError();
-				return { kind: "created", notApplied: result.notApplied };
+				return { kind: "created" };
 			} catch (err) {
-				const error = errorMessageOf(err);
+				// serve 的判决（ok:false）与「没等到答复」必须分开报：前者是它看过并给出的**确定否定**
+				// （未知 projectId / Agent 没 attach），报成 unknown 就让用户以为「可能建成了」；后者
+				// 什么都没说，报成 not-created 就是替一个没发生的否定发言。
+				// 判决的原文（serve 自己的话）原样上屏，不翻译、不截断 —— 那是用户唯一能据以修的东西。
+				const verdict = isServeVerdict(err);
+				const error = verdict ? serveVerdictOf(err).message : errorMessageOf(err);
 				this.#createFailed(error);
-				// 命令发出去了但没等到答复（断线 / 超时）：建没建**不知道**，不许报成「没建成」。
-				return { kind: "unknown", error };
+				return verdict ? { kind: "not-created", error } : { kind: "unknown", error };
 			}
 		} finally {
 			this.#creating = false;
@@ -841,11 +889,13 @@ export class SessionStore {
 		this.#projectGeneration += 1;
 		this.#projectAttributionKey = undefined;
 		this.#currentProjectId = undefined;
+		this.#currentProjectSource = undefined;
 		this.#projectsPending = true;
 		// 错误也是上一次请求的判决，与归属同属一份被作废的结果：留着它，新身份在 pending 期间
 		// 会继续挂在旧会话身上显示「读不出来」—— 一个我们已经宣告作废的请求的结论。
 		this.#projectsError = undefined;
 		view.currentProjectId = undefined;
+		view.currentProjectSource = undefined;
 		view.projectsPending = true;
 		view.projectsError = undefined;
 	}
@@ -1112,6 +1162,27 @@ export class SessionStore {
 	}
 
 	/**
+	 * 切工作上下文（顶栏 Project chip 的选择器）。
+	 *
+	 * 只是本地记住「下一个新会话落在哪」，**不发任何命令** —— 这正是设计里「切换不重启 serve」
+	 * 的含义："切 Project" 不是一个服务端动作，是下一次 `new_session` 带哪个 `projectId`。
+	 * 已经在跑的会话不动（它是另一个会话的归属，不是我的选择能改的）。
+	 *
+	 * `undefined` / 空串 = 不指定（新会话不声明归属）。
+	 *
+	 * 不在这里捣校验：注册表可能还没读到（此时无法判定 ids 合不合法），而一个「选过、但当前
+	 * 注册表里找不到」的选择必须能被如实说出来 —— 静默换成另一个 Project，或静默降成「未声明」，
+	 * 都是在替用户做一个他没做的选择。已删除的项目由 UI 按陈旧态显示（见 `projectLabelOf`）。
+	 */
+	setWorkingProject(projectId?: string): void {
+		this.#workingProjectId = projectId === undefined || projectId === "" ? undefined : projectId;
+		const view = cloneView(this.getSnapshot());
+		view.workingProjectId = this.#workingProjectId;
+		this.#view = view;
+		this.#notify();
+	}
+
+	/**
 	 * 声明或更新一个 Project（set_project），返回存储真正落盘的那一份；随后重读 registry 与归属。
 	 *
 	 * 失败**原样抛出**（root 已被别的 Project 占用 / 输入不成立 / 存储坏了）：吞掉它就会让用户
@@ -1155,11 +1226,13 @@ export class SessionStore {
 	async #loadProjects(agentId: string | undefined, generation: number): Promise<void> {
 		let projects: ProjectRecordDto[] | undefined;
 		let currentProjectId: string | undefined;
+		let currentProjectSource: SessionProjectSourceDto | undefined;
 		let error: string | undefined;
 		try {
 			const result = await this.#client.listProjects(agentId);
 			projects = result.projects;
 			currentProjectId = result.currentProjectId;
+			currentProjectSource = result.currentProjectSource;
 		} catch (err) {
 			// 读不到就不知道归属，不是「没有归属」：列表与归属一起作废，错误挡住阅读。
 			error = errorMessageOf(err);
@@ -1167,11 +1240,13 @@ export class SessionStore {
 		if (generation !== this.#projectGeneration) return;
 		this.#projects = projects;
 		this.#currentProjectId = currentProjectId;
+		this.#currentProjectSource = currentProjectSource;
 		this.#projectsError = error;
 		this.#projectsPending = false;
 		const view = cloneView(this.getSnapshot());
 		view.projects = projects;
 		view.currentProjectId = currentProjectId;
+		view.currentProjectSource = currentProjectSource;
 		view.projectsPending = false;
 		view.projectsError = error;
 		this.#view = view;
@@ -1192,9 +1267,11 @@ export class SessionStore {
 		if (key === this.#projectAttributionKey) return;
 		this.#projectAttributionKey = key;
 		this.#currentProjectId = undefined;
+		this.#currentProjectSource = undefined;
 		this.#projectsPending = true;
 		const view = cloneView(this.getSnapshot());
 		view.currentProjectId = undefined;
+		view.currentProjectSource = undefined;
 		view.projectsPending = true;
 		this.#view = view;
 		this.#notify();
@@ -1858,8 +1935,10 @@ export class SessionStore {
 				sessionTreeError: this.#sessionTreeError,
 				projects: this.#projects,
 				currentProjectId: this.#currentProjectId,
+				currentProjectSource: this.#currentProjectSource,
 				projectsPending: this.#projectsPending,
 				projectsError: this.#projectsError,
+				workingProjectId: this.#workingProjectId,
 				agentTodos: this.#agentTodos,
 				agentTodoProjectIds: this.#agentTodoProjectIds,
 				agentTodosPending: this.#agentTodosPending,
@@ -1905,8 +1984,10 @@ export class SessionStore {
 			sessionTreeError: this.#sessionTreeError,
 			projects: this.#projects,
 			currentProjectId: this.#currentProjectId,
+			currentProjectSource: this.#currentProjectSource,
 			projectsPending: this.#projectsPending,
 			projectsError: this.#projectsError,
+			workingProjectId: this.#workingProjectId,
 			agentTodos: this.#agentTodos,
 			agentTodoProjectIds: this.#agentTodoProjectIds,
 			agentTodosPending: this.#agentTodosPending,
