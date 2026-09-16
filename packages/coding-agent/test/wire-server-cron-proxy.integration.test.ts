@@ -2,7 +2,7 @@
  * P2-4 e2e — serve `get_cron_tasks` / `get_cron_logs` / `gateway_status` 转发 gateway 生产端点。
  *
  * P2-4 后 serve 不再直读 jobs.json/status.json——这些命令转发到 gateway 的 POST /wire
- * （127.0.0.1:OMP_GATEWAY_WIRE_PORT??7892；7891 系 serve sidecar，不与 gateway 共用）。本测试用封真 mock gateway 端点（进程内
+ * （127.0.0.1:CORNFIELD_GATEWAY_WIRE_PORT??7892；7891 系 serve sidecar，不与 gateway 共用）。本测试用封真 mock gateway 端点（进程内
  * Bun.serve）验证转发语义（确定性，不依赖机器真实 gateway）：
  *
  * - 转发成功：canned 形状原样穿透（TaskRowDto / CronLogEntryDto / GatewayStatusDto），
@@ -19,6 +19,8 @@ import { waitForServe } from "./wait-for-serve";
 type Frame = { type: string; [k: string]: unknown };
 
 let sessionDir: string;
+let isolatedHome: string;
+let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
 /** gateway 不可用场景：指向从不绑定的死端口。 */
@@ -174,7 +176,7 @@ function startMockWire(): void {
 	wirePort = mockWire.port ?? 0;
 }
 
-/** 起一个 serve（OMP_GATEWAY_WIRE_PORT 定向到给定端口）。 */
+/** 起一个 serve（CORNFIELD_GATEWAY_WIRE_PORT 定向到给定端口）。 */
 async function spawnServe(
 	wirePortOverride: number,
 	servePortBase: number,
@@ -198,15 +200,32 @@ async function spawnServe(
 		{
 			stdout: "pipe",
 			stderr: "pipe",
-			env: { ...process.env, PI_NO_TITLE: "1", OMP_GATEWAY_WIRE_PORT: String(wirePortOverride) },
+			// 名称必须与产品侧一致（wire-server.ts 的 GATEWAY_WIRE_PORT 只认 CORNFIELD_
+			// 前缀；gateway.ts #startWireEndpoint 同）。写成别的名字不会被报错，只会静默
+			// 回退 7892——2026-09-16 修本文件前，这里的 `OMP_GATEWAY_WIRE_PORT` 就是这种
+			// 情形：mock 一次都没被命中，三条转发用例恒 ok:false。
+			// 隔离 HOME：否则 serve 会去加载运行者机器上已配置的 MCP servers / agents /
+			// LSP，启动耗时随机器状态浮动（本机实测 10–24s，大半耗在那些无关加载上）。
+			env: {
+				...process.env,
+				HOME: isolatedHome,
+				PI_NO_TITLE: "1",
+				CORNFIELD_GATEWAY_WIRE_PORT: String(wirePortOverride),
+			},
 		},
 	);
-	const url = await waitForServe(proc, servePort);
+	// 显式预算：本机空载实测 serve 启动 10–24s（整个 CLI 启动：原生 addon + MCP/LSP/
+	// agent attach），负载下更久。用 waitForServe 的 60s 默认值时，beforeAll 预算会
+	// 先于它触发，失败只剩 bun 的预算文案、丢掉真实原因。
+	const url = await waitForServe(proc, servePort, 90_000);
 	return { proc: proc as ReturnType<typeof Bun.spawn>, url: url.url };
 }
 
 beforeAll(async () => {
 	startMockWire();
+	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-home-"));
+	savedHome = process.env.HOME;
+	process.env.HOME = isolatedHome;
 	sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-"));
 	// 主实例：mock gateway 可达 → 转发穿透用例
 	const main = await spawnServe(wirePort, 48500, 1500);
@@ -218,7 +237,7 @@ beforeAll(async () => {
 	const down = await spawnServe(deadPort, 51000, 1000);
 	downProc = down.proc;
 	downUrl = down.url;
-}, 45_000);
+}, 240_000);
 
 afterAll(async () => {
 	if (mockWire) mockWire.stop();
@@ -231,9 +250,13 @@ afterAll(async () => {
 		await proc.exited;
 	}
 	await fs.rm(sessionDir, { recursive: true, force: true });
+	if (savedHome !== undefined) process.env.HOME = savedHome;
+	await fs.rm(isolatedHome, { recursive: true, force: true });
 });
 
 describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
+	// 每条用例显式预算：bun 默认 5s 低于本文件自己的等待（hello_ack 10s / 响应 30s），
+	// 负载下握手稍慢就会先被 bun 掉断，丢掉真实原因。断言未改。
 	test("get_cron_tasks：canned 任务形状原样穿透", async () => {
 		const { ws, frames } = await connect(url);
 		try {
@@ -246,7 +269,7 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 		} finally {
 			ws.close();
 		}
-	});
+	}, 30_000);
 
 	test("get_cron_logs：taskId/days/limit 参数原样转发 + canned 日志穿透", async () => {
 		const { ws, frames } = await connect(url);
@@ -266,7 +289,7 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 		} finally {
 			ws.close();
 		}
-	});
+	}, 30_000);
 
 	test("gateway_status：pid/stale/accounts 形状穿透", async () => {
 		const { ws, frames } = await connect(url);
@@ -282,7 +305,7 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 		} finally {
 			ws.close();
 		}
-	});
+	}, 30_000);
 
 	test("gateway 端点不可用：返回明确 gateway 错误", async () => {
 		const { ws, frames } = await connect(downUrl);
@@ -296,5 +319,5 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 		} finally {
 			ws.close();
 		}
-	});
+	}, 30_000);
 });
