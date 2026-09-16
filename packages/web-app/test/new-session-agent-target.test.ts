@@ -14,7 +14,7 @@ import { SessionStore } from "../src/state/session-store";
  *
  * 下面的假 serve 复现那一刻（`switch_session` 的焦点要等一个 tick 才改），并像真 serve 一样
  * 按 `command.sessionId ?? activeAgent` 决定新会话落在谁身上、再推一份带**落地 Agent** 的
- * `session_snapshot`。断言只认 serve 侧的事实（`createdOn` / 推来的快照），不认客户端本地读数。
+ * `session_snapshot`。断言只认 serve 侧的事实（`createdOn` / 推来的快照 / `renames`），不认客户端本地读数。
  */
 
 let lastCreated: FakeServe | undefined;
@@ -40,6 +40,23 @@ class FakeServe implements PiWebSocketLike {
 	readonly createdOn: string[] = [];
 	/** 推出去的 session_snapshot 帧上的 Agent（serve 对「本连接焦点是谁」的权威说法）。 */
 	readonly pushedAgents: string[] = [];
+	/**
+	 * 每条 `set_session_name` 到达时的原文 + serve 侧的解析结果。
+	 *
+	 * `agent` 是 serve `resolveTarget` 的判断（没带 sessionId 就取**那一刻**的连接焦点），
+	 * `sessionFile` 是那一刻该 Agent 的**当前**会话 —— 改名落在谁身上由它决定，
+	 * 所以「改到了**上一个**会话」这件事是可判定的，不用看客户端本地读数。
+	 */
+	readonly renames: Array<{
+		name: string | undefined;
+		agent: string;
+		focusAtArrival: string;
+		sessionFile: string | undefined;
+	}> = [];
+	/** 各 Agent 当前的会话文件（session 级命令落在它上面；boot 时 default 已有一个）。 */
+	readonly sessions = new Map<string, string>([["default", "/sessions/default.jsonl"]]);
+	/** 下一条 `new_session` 的结局：true = serve 回 `cancelled:true`（接了命令但没建，见 wire-server）。 */
+	cancelNextCreate = false;
 	#seq = 0;
 
 	constructor(_url: string) {
@@ -67,6 +84,8 @@ class FakeServe implements PiWebSocketLike {
 					return this.#fail(id, `unknown agent: ${sessionId}`);
 				}
 				this.attached.add(sessionId);
+				// attach 打开的是该 Agent 已有的会话；已经有就不覆盖（重 attach 不会换会话）
+				if (!this.sessions.has(sessionId)) this.sessions.set(sessionId, `/sessions/${sessionId}.jsonl`);
 				return this.#ok(id, { sessionId, sessionFile: `/sessions/${sessionId}.jsonl` });
 			}
 			case "switch_session": {
@@ -90,14 +109,44 @@ class FakeServe implements PiWebSocketLike {
 				if (!this.attached.has(landing)) {
 					return this.#fail(id, `agent not attached: ${landing} (send attach first)`);
 				}
+				// serve：`sessionDone({ cancelled: !success })` —— 命令受理了但这次没建（上一个会话还在）
+				if (this.cancelNextCreate) {
+					this.cancelNextCreate = false;
+					return this.#ok(id, { cancelled: true });
+				}
 				this.createdOn.push(landing);
+				const sessionFile = `/sessions/${landing}-${++this.#seq}.jsonl`;
+				this.sessions.set(landing, sessionFile);
 				this.#ok(id, { cancelled: false });
-				this.#push(landing, `/sessions/${landing}-${++this.#seq}.jsonl`);
+				this.#push(landing, sessionFile);
 				return;
+			}
+			case "set_session_name": {
+				// serve：`resolveTarget(command)` —— 没带 sessionId 就取本连接**当刻**的焦点；
+				// 改名落在该 Agent 当刻那个会话上，所以「改到了上一个会话」在这里是可判定的
+				const agent = sessionId ?? this.activeAgent;
+				this.renames.push({
+					name: command.name,
+					agent,
+					focusAtArrival: this.activeAgent,
+					sessionFile: this.sessions.get(agent),
+				});
+				const name = command.name?.trim();
+				if (!name) return this.#fail(id, "Session name cannot be empty");
+				if (!this.attached.has(agent)) {
+					return this.#fail(id, `agent not attached: ${agent} (send attach first)`);
+				}
+				return this.#ok(id, {});
 			}
 			default:
 				return this.#ok(id, {});
 		}
+	}
+
+	/** serve 的 `registry.detach`：这个 Agent 的会话没了（agent 进程退出 / 另一条连接 detach）。 */
+	detach(agentId: string): void {
+		this.attached.delete(agentId);
+		this.sessions.delete(agentId);
 	}
 
 	/** serve 的 agent 列表推送（本连接焦点标 active）。 */
@@ -159,6 +208,7 @@ class FakeServe implements PiWebSocketLike {
 interface ServeCommand {
 	type?: string;
 	sessionId?: string;
+	name?: string;
 }
 
 const fakeCtor: PiWebSocketCtor = FakeServe;
@@ -189,7 +239,7 @@ async function createConnectedStore(): Promise<{ store: SessionStore; serve: Fak
 
 /** 与「新建会话」相关的请求帧类型（其余是注册表/归属那几路读命令，不属于本条契约）。 */
 function creationFrames(serve: FakeServe): string[] {
-	const interesting = new Set(["attach", "switch_session", "new_session"]);
+	const interesting = new Set(["attach", "switch_session", "new_session", "set_session_name"]);
 	return serve.sent
 		.map(line => JSON.parse(line) as { type?: string; command?: { type?: string } })
 		.filter(f => f.type === "request" && interesting.has(String(f.command?.type)))
@@ -282,5 +332,83 @@ describe("新建会话选另一个 Agent：先等 serve 确认，再带显式目
 		expect(outcome.kind === "not-created" ? outcome.error : "").toContain("无从确定");
 		expect(creationFrames(serve)).toEqual([]);
 		expect(serve.createdOn).toEqual([]);
+	});
+});
+
+describe("新建会话的标题：真的建出来之后才发改名，改的是**这次**的会话", () => {
+	it("带标题新建：命令顺序是 attach → switch_session → new_session → set_session_name，改名带的是表单里的标题", async () => {
+		const { store, serve } = await createConnectedStore();
+
+		const outcome = await store.newSession({ agentId: "hr", title: "季度复盘" });
+
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
+		// serve 侧事实一：改名这一帧是**创建回执之后**才到的，没跑到创建前面去
+		expect(creationFrames(serve)).toEqual(["attach", "switch_session", "new_session", "set_session_name"]);
+		// serve 侧事实二：只建了一个会话，改名落在它身上（hr-1 = 这一次新建出来的那个）
+		expect(serve.createdOn).toEqual(["hr"]);
+		expect(serve.renames).toEqual([
+			{ name: "季度复盘", agent: "hr", focusAtArrival: "hr", sessionFile: "/sessions/hr-1.jsonl" },
+		]);
+	});
+
+	it("第二个会话带标题：改名落在**这一次**的新会话上，上一个会话的名字不许动", async () => {
+		const { store, serve } = await createConnectedStore();
+
+		await store.newSession({ agentId: "hr" }); // 上一个会话：/sessions/hr-1.jsonl
+		expect(serve.renames).toEqual([]);
+
+		const outcome = await store.newSession({ agentId: "hr", title: "季度复盘" });
+
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
+		expect(serve.createdOn).toEqual(["hr", "hr"]);
+		// 改名那一刻 hr 当刻的会话已经是**第二个**（hr-2）——改的不是上一个（hr-1）
+		expect(serve.renames).toEqual([
+			{ name: "季度复盘", agent: "hr", focusAtArrival: "hr", sessionFile: "/sessions/hr-2.jsonl" },
+		]);
+	});
+
+	it("serve 回了 cancelled（命令受理了但这次没建）：一个改名帧都不发 —— 上一个会话不许被改名", async () => {
+		const { store, serve } = await createConnectedStore();
+		// 焦点上本来就有会话（这就是「上一个会话」：改名不带 sessionId 就会落到它头上）
+		expect(serve.sessions.get("default")).toBe("/sessions/default.jsonl");
+		serve.cancelNextCreate = true;
+
+		const outcome = await store.newSession({ title: "季度复盘" });
+
+		expect(outcome.kind).toBe("not-created");
+		// serve 侧事实：这次没有会话被建出来，也没有任何 set_session_name 到达
+		expect(serve.createdOn).toEqual([]);
+		expect(creationFrames(serve)).toEqual(["new_session"]);
+		expect(serve.renames).toEqual([]);
+	});
+});
+
+describe("标题的边界：没给 / 空串 / 创建被拒 —— 都不发改名帧", () => {
+	it("没给标题、或标题是空串：一个改名帧都不发（不拿空名字当标题）", async () => {
+		const withoutTitle = await createConnectedStore();
+		expect(await withoutTitle.store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
+		expect(withoutTitle.serve.renames).toEqual([]);
+		expect(creationFrames(withoutTitle.serve)).toEqual(["attach", "switch_session", "new_session"]);
+
+		const emptyTitle = await createConnectedStore();
+		expect(await emptyTitle.store.newSession({ title: "" })).toEqual({ kind: "created", notApplied: [] });
+		expect(emptyTitle.serve.renames).toEqual([]);
+		expect(creationFrames(emptyTitle.serve)).toEqual(["new_session"]);
+	});
+
+	it("标题在、但创建被 serve 拒（ok:false）：不发改名帧", async () => {
+		const { store, serve } = await createConnectedStore();
+		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
+		// serve 侧：hr 的会话没了（agent 进程退出 / 另一条连接 detach），而焦点还停在 hr
+		serve.detach("hr");
+
+		// 这里不断言调用的返回值：ok:false 走 store 的 catch-all，被归成 `unknown`（「建没建不知道」），
+		// 与 serve 说的「确定没建」不是一回事 —— 那是另一条票的事。本票钉的是下面这两条 serve 侧事实。
+		await store.newSession({ title: "季度复盘" });
+
+		// 创建本身被 serve 拒了：没有第二个会话，也没有改名帧
+		expect(serve.createdOn).toEqual(["hr"]);
+		expect(creationFrames(serve)).toEqual(["attach", "switch_session", "new_session", "new_session"]);
+		expect(serve.renames).toEqual([]);
 	});
 });
