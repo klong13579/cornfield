@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
-import type { AgentInfoDto } from "@cornfield/wire";
+import type { AgentInfoDto, TodoPhaseDto } from "@cornfield/wire";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { ProjectList, projectLabelOf } from "../src/components/ProjectContext";
 import { AgentSwitcher } from "../src/layout/AgentSwitcher";
@@ -14,8 +14,21 @@ import {
 	projectDraftToRecord,
 } from "../src/layout/ProjectSwitcher";
 import { activePanelOf, getPanels, panelHandle } from "../src/layout/panel-registry";
-import type { ProjectRecordDto } from "../src/lib/pi-client-api";
-import { WorkspaceView } from "../src/pages/workspace/WorkspaceView";
+import type { ChildSessionNodeDto, ProjectRecordDto } from "../src/lib/pi-client-api";
+import {
+	agentIdentitySource,
+	CROSS_AGENT_NOTE,
+	EMPTY_NEW_SESSION_DRAFT,
+	NewSessionForm,
+	type NewSessionInput,
+	newSessionInputOf,
+	newSessionSubmitState,
+	PROJECT_FIELD_NOTE,
+	projectFieldState,
+	TITLE_FIELD_NOTE,
+} from "../src/pages/workspace/NewSessionForm";
+import { ChildSessionCard } from "../src/pages/workspace/SessionTree";
+import { PlanStrip, planAreaOf, planProgressOf, WorkspaceView } from "../src/pages/workspace/WorkspaceView";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import { SessionStore, type SessionView } from "../src/state/session-store";
 
@@ -785,5 +798,343 @@ describe("Project 写面：声明 / 删除", () => {
 		});
 		fireOnText(ready, "button", "删除", "onClick");
 		expect(removed).toBe(1);
+	});
+});
+
+// ── 8. 工作台三件（T15）：新建会话表单 ──────────────────────────────
+
+/**
+ * 工作台三件的第一件。
+ *
+ * 这屏的价值全在「它说的是不是真的」：Agent / Project / 标题三个意图，落得下去的发出去，
+ * 落不下去的当场明说。所以这里逐态拉出来看屏上到底写了什么；在浏览器里点那一下不在本目录
+ * 的能力范围内（没有 DOM 测试环境），表单按受控的无 hook 组件直接调用。
+ */
+describe("NewSessionForm：三个意图各自落到哪", () => {
+	/** 表单外壳：没给的处理器一律空实现。 */
+	function formOf(props: {
+		view: SessionView;
+		draft?: typeof EMPTY_NEW_SESSION_DRAFT;
+		onChange?: (draft: typeof EMPTY_NEW_SESSION_DRAFT) => void;
+		onCreate?: (input: NewSessionInput) => void;
+	}): ReactElement {
+		return NewSessionForm({
+			draft: EMPTY_NEW_SESSION_DRAFT,
+			onChange: noop,
+			onCreate: noop,
+			...props,
+		});
+	}
+
+	it("就绪：画出默认 Agent、它的来源、以及三个字段各自的去向", () => {
+		const html = renderToStaticMarkup(
+			createElement(NewSessionForm, {
+				view: viewOf({ agents: AGENTS, activeAgentId: "hr" }),
+				draft: EMPTY_NEW_SESSION_DRAFT,
+				onChange: noop,
+				onCreate: noop,
+			}),
+		);
+		expect(html).toContain("新会话将由");
+		expect(html).toContain("本会话焦点（§10 第 1 级）");
+		expect(html).toContain("新建时用当前焦点的 Agent");
+		// 写不进去的两个字段当场明说，不靠一个点不动的控件暗示
+		expect(html).toContain(PROJECT_FIELD_NOTE);
+		expect(html).toContain(TITLE_FIELD_NOTE);
+	});
+
+	it("无 Agent：说清是注册表里还没有 Agent，不是「未连接」；提交点不动", () => {
+		const tree = formOf({ view: viewOf({ agents: [] }) });
+		const html = renderToStaticMarkup(tree);
+		expect(html).toContain("注册表里还没有 Agent");
+		expect(html).not.toContain("未连接——读不到 Agent 注册表");
+		expect((elementOfType(tree, "button").props as { disabled?: boolean }).disabled).toBe(true);
+		expect(newSessionSubmitState(viewOf({ agents: [] }), EMPTY_NEW_SESSION_DRAFT).canSubmit).toBe(false);
+	});
+
+	it("无 Project：说清「还没声明过」并给出声明文件路径（不是读取失败、也不是读取中）", () => {
+		const html = renderToStaticMarkup(
+			createElement(NewSessionForm, {
+				view: viewOf({ agents: AGENTS, activeAgentId: "hr", projects: [] }),
+				draft: EMPTY_NEW_SESSION_DRAFT,
+				onChange: noop,
+				onCreate: noop,
+			}),
+		);
+		expect(html).toContain("还没声明过任何 Project");
+		expect(html).toContain("~/.cornfield/agent/projects.json");
+		expect(html).not.toContain("读取失败");
+		expect(html).not.toContain("读取中");
+	});
+
+	it("未连接：Agent 与 Project 各自说自己的「未连接」，都不编内容", () => {
+		const html = renderToStaticMarkup(
+			createElement(NewSessionForm, {
+				view: viewOf({ connected: false, projects: undefined }),
+				draft: EMPTY_NEW_SESSION_DRAFT,
+				onChange: noop,
+				onCreate: noop,
+			}),
+		);
+		expect(html).toContain("未连接——读不到 Agent 注册表");
+		expect(html).toContain("未连接 —— Project registry 不可用");
+		expect(html).not.toContain("还没声明过任何 Project");
+	});
+
+	it("Project 读失败：原样显示 serve 的话，不显示成空集", () => {
+		const tree = formOf({ view: viewOf({ agents: AGENTS, projectsError: "Project store is not valid JSON" }) });
+		const html = renderToStaticMarkup(tree);
+		expect(html).toContain("读取失败：Project store is not valid JSON");
+		expect(html).not.toContain("还没声明过任何 Project");
+		expect(projectFieldState(viewOf({ projectsError: "boom" })).kind).toBe("error");
+	});
+
+	it("默认 Agent 的来源：命中 Project 声明的默认就照实说第 2 级", () => {
+		const view = viewOf({ agents: AGENTS, activeAgentId: "default", projects: PROJECTS, currentProjectId: "dtc" });
+		expect(agentIdentitySource(view, "hr")).toMatchObject({ kind: "project", projectName: "DTC" });
+		// 改选了 hr：它是这个 Project 声明的默认 Agent，屏上就写第 2 级
+		const html = renderToStaticMarkup(
+			createElement(NewSessionForm, {
+				view,
+				draft: { ...EMPTY_NEW_SESSION_DRAFT, agentId: "hr" },
+				onChange: noop,
+				onCreate: noop,
+			}),
+		);
+		expect(html).toContain("已改选");
+		expect(html).toContain("Project「DTC」的默认 Agent（§10 第 2 级）");
+	});
+
+	it("Project 声明的默认与焦点不同：明说新会话仍建在焦点上（不假装按声明走）", () => {
+		const view = viewOf({ agents: AGENTS, activeAgentId: "default", projects: PROJECTS, currentProjectId: "dtc" });
+		const html = renderToStaticMarkup(
+			createElement(NewSessionForm, {
+				view,
+				draft: EMPTY_NEW_SESSION_DRAFT,
+				onChange: noop,
+				onCreate: noop,
+			}),
+		);
+		expect(html).toContain("与当前焦点不同：新会话仍建在当前焦点上");
+		expect(html).toContain("本会话焦点（§10 第 1 级）");
+	});
+
+	it("第 3/4 级看不到就说看不到，不猜一个来源", () => {
+		const view = viewOf({ agents: AGENTS, activeAgentId: "default", projects: PROJECTS, currentProjectId: "dtc" });
+		const source = agentIdentitySource(view, "ghost");
+		expect(source.kind).toBe("unknown");
+		expect(source.label).toContain("看不见");
+	});
+
+	it("选别的 Agent：提交被挡住，并给出能走的那条路", () => {
+		const view = viewOf({ agents: AGENTS, activeAgentId: "default" });
+		const draft = { ...EMPTY_NEW_SESSION_DRAFT, agentId: "hr" };
+		const state = newSessionSubmitState(view, draft);
+		expect(state.canSubmit).toBe(false);
+		expect(state.hint).toBe(CROSS_AGENT_NOTE);
+
+		const tree = formOf({ view, draft });
+		expect(renderToStaticMarkup(tree)).toContain(CROSS_AGENT_NOTE);
+		expect((elementOfType(tree, "button").props as { disabled?: boolean }).disabled).toBe(true);
+	});
+
+	it("提交真的把三个字段交出去（去空格；空串不带出去）", () => {
+		const seen: NewSessionInput[] = [];
+		const view = viewOf({ agents: AGENTS, activeAgentId: "hr" });
+
+		// 什么都不填：不带任何字段（缺省与空串不是一回事）
+		const bare = formOf({ view, onCreate: input => seen.push(input) });
+		fire(bare, "form", "onSubmit", { preventDefault: noop });
+		expect(seen).toEqual([{}]);
+
+		// 三个都填：原样交出去（标题去空格）
+		const filled = NewSessionForm({
+			view,
+			draft: { agentId: "hr", projectId: "dtc", title: "  看下工单  " },
+			onChange: noop,
+			onCreate: input => seen.push(input),
+		});
+		fire(filled, "form", "onSubmit", { preventDefault: noop });
+		expect(seen[1]).toEqual({ agentId: "hr", projectId: "dtc", title: "看下工单" });
+	});
+
+	it("草稿→入参：只带真的选过/写过的字段", () => {
+		expect(newSessionInputOf(EMPTY_NEW_SESSION_DRAFT)).toEqual({});
+		expect(newSessionInputOf({ agentId: "  ", projectId: "", title: "  " })).toEqual({});
+		expect(newSessionInputOf({ agentId: "hr", projectId: "dtc", title: "标题" })).toEqual({
+			agentId: "hr",
+			projectId: "dtc",
+			title: "标题",
+		});
+	});
+});
+
+// ── 9. 工作台三件（T15）：当前计划区域 ───────────────────────────────
+
+/**
+ * 第二件：当前计划。
+ *
+ * 它是**本会话自己的** Session Todo（快照 `todoPhases`）——不建第二份计划存储、不写进 Todo
+ * 工作台或 Agent 板。所以这组用例只钉两件事：四态分开（尤其是「快照还没到」不等于「没有计划」），
+ * 以及切换真的交给 store 的现有入口。
+ */
+describe("当前计划区域", () => {
+	const PHASES: TodoPhaseDto[] = [
+		{
+			name: "第一阶段",
+			tasks: [
+				{ content: "读任务包", status: "completed" },
+				{ content: "写实现", status: "pending" },
+				{ content: "旧方案", status: "abandoned" },
+				{ content: "跑门禁", status: "in_progress" },
+			],
+		},
+	];
+
+	it("四态分开：未连接 / 快照未到 / 确实没有计划 / 有计划", () => {
+		const base = viewOf({});
+		expect(planAreaOf({ ...base, connected: false, todo: PHASES }).kind).toBe("disconnected");
+		expect(planAreaOf({ ...base, sessionId: "", todo: [] }).kind).toBe("waiting");
+		expect(planAreaOf({ ...base, sessionId: "sess-1", todo: [] }).kind).toBe("empty");
+		const phases = planAreaOf({ ...base, sessionId: "sess-1", todo: PHASES });
+		expect(phases.kind).toBe("phases");
+		expect(phases.phases).toHaveLength(1);
+	});
+
+	it("快照还没到：不拿「没有计划」顶位（那是一个还没到的答案）", () => {
+		const area = planAreaOf({ connected: true, sessionId: "", todo: [] });
+		expect(area.label).not.toContain("没有计划");
+		expect(renderToStaticMarkup(PlanStrip({ area, onToggle: noop }))).not.toContain("完成 0/0");
+	});
+
+	it("未连接：说清读不到，不画空计划", () => {
+		const area = planAreaOf({ connected: false, sessionId: "sess-1", todo: [] });
+		const html = renderToStaticMarkup(PlanStrip({ area, onToggle: noop }));
+		expect(html).toContain("未连接——读不到本会话的计划");
+		expect(html).not.toContain("本次会话还没有计划");
+	});
+
+	it("进度：放弃单列，不与完成相加", () => {
+		expect(planProgressOf(PHASES)).toEqual({ done: 1, total: 4, abandoned: 1 });
+		expect(planProgressOf([])).toEqual({ done: 0, total: 0, abandoned: 0 });
+	});
+
+	it("有计划：画出相位/进度/来源，未终结的两态点得动，进行中与已放弃是只读读数", () => {
+		const clicked: Array<[string, number]> = [];
+		const tree = PlanStrip({
+			area: planAreaOf({ connected: true, sessionId: "sess-1", todo: PHASES }),
+			onToggle: (phaseName, index) => clicked.push([phaseName, index]),
+		});
+		const html = renderToStaticMarkup(tree);
+		expect(html).toContain("当前计划");
+		expect(html).toContain("本会话的 Session Todo");
+		expect(html).toContain("完成 1/4");
+		expect(html).toContain("放弃 1");
+		expect(html).toContain("第一阶段");
+		expect(html).toContain("读任务包");
+
+		const rows = collect(tree).filter(node => node.type === "button");
+		expect(rows).toHaveLength(4);
+		// 只有 pending / completed 点得动（store.toggleTodo 就是在这一对之间来回换）
+		expect(rows.map(row => (row.props as { disabled?: boolean }).disabled)).toEqual([false, false, true, true]);
+
+		(rows[1]!.props as { onClick: () => void }).onClick();
+		expect(clicked).toEqual([["第一阶段", 1]]);
+	});
+});
+
+// ── 10. 工作台三件（T15）：子会话卡片的进程读数 ──────────────────────
+
+/**
+ * 第三件：子会话卡片上的 process state。
+ *
+ * 判据本身在 `session-tree-logic.test.ts`（包括「非终态 + 有 pid 不是 healthy」那条），这里钉的是
+ * **它到底有没有画到屏上**：卡片是受控无 hook 组件，直接调用就能拿到元素树。
+ */
+describe("ChildSessionCard：三个维度各画各的", () => {
+	function node(patch: Partial<ChildSessionNodeDto> = {}): ChildSessionNodeDto {
+		return {
+			sessionId: "child-1",
+			parentSessionId: "sess-root",
+			rootSessionId: "sess-root",
+			depth: 1,
+			agentId: "hr",
+			status: "running",
+			objective: "研究编辑器方案",
+			createdAt: 1_000,
+			updatedAt: 2_000,
+			...patch,
+		};
+	}
+
+	function cardOf(
+		child: ChildSessionNodeDto,
+		extra: {
+			startingChildId?: string;
+			busy?: boolean;
+			bringingBack?: boolean;
+			onBringBack?: (id: string) => void;
+		} = {},
+	): ReactElement {
+		return ChildSessionCard({
+			child,
+			busy: extra.busy ?? false,
+			bringingBack: extra.bringingBack ?? false,
+			onBringBack: extra.onBringBack ?? noop,
+			...(extra.startingChildId === undefined ? {} : { startingChildId: extra.startingChildId }),
+		});
+	}
+
+	/** 卡里就一个带回钮（没有就是元素树变了，直接报出来）。 */
+	function backButtonOf(tree: ReactElement): ReactElement {
+		const found = collect(tree).find(el => el.type === "button");
+		if (!found) throw new Error("子会话卡片里没有带回钮");
+		return found;
+	}
+
+	it("非终态 + 有 pid：画「进程 未知」并把依据（含 pid）摆出来", () => {
+		const html = renderToStaticMarkup(cardOf(node({ lastPid: 4242 })));
+		expect(html).toContain("进程 未知");
+		expect(html).toContain("账本未复核");
+		expect(html).toContain("4242");
+	});
+
+	it("completed：进程画「已停止」（不再说未知）", () => {
+		const html = renderToStaticMarkup(cardOf(node({ status: "completed", lastPid: 1 })));
+		expect(html).toContain("进程 已停止");
+		expect(html).not.toContain("进程 未知");
+	});
+
+	it("failed：进程画「失败」，原文原因照显示，不换成「崩溃」", () => {
+		const html = renderToStaticMarkup(cardOf(node({ status: "failed", statusDetail: "启动后没有挂上 broker" })));
+		expect(html).toContain("进程 失败");
+		expect(html).toContain("启动后没有挂上 broker");
+		expect(html).not.toContain("崩溃");
+	});
+
+	it("刚发出、还没有 pid 的那次委派：画「启动中」", () => {
+		const html = renderToStaticMarkup(cardOf(node(), { startingChildId: "child-1" }));
+		expect(html).toContain("进程 启动中");
+		// 别的子会话拿不到这一档
+		expect(renderToStaticMarkup(cardOf(node(), { startingChildId: "child-2" }))).toContain("进程 未知");
+	});
+
+	it("带回钮的可用性跟着结果状态走（这一次才带回 / 此前已带回）", () => {
+		const ready = cardOf(node({ resultRef: "/tmp/r.md" }));
+		expect((backButtonOf(ready).props as { disabled?: boolean }).disabled).toBe(false);
+		expect(renderToStaticMarkup(ready)).toContain("结果待带回");
+
+		const brought = backButtonOf(cardOf(node({ resultRef: "/tmp/r.md", resultBroughtBackAt: 42 })));
+		expect((brought.props as { disabled?: boolean }).disabled).toBe(true);
+		expect(String((brought.props as { title?: string }).title)).toContain("此前已带回");
+	});
+
+	it("正在带回的那一条才写「带回中…」；别的卡片只是点不动", () => {
+		const idle = backButtonOf(cardOf(node({ resultRef: "/tmp/r.md" }), { busy: true }));
+		expect((idle.props as { disabled?: boolean }).disabled).toBe(true);
+		expect(textOf(idle.props.children as ReactNode)).toContain("带回结果");
+
+		const mine = backButtonOf(cardOf(node({ resultRef: "/tmp/r.md" }), { busy: true, bringingBack: true }));
+		expect(textOf(mine.props.children as ReactNode)).toContain("带回中…");
 	});
 });

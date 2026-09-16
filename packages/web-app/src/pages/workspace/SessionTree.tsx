@@ -1,13 +1,15 @@
 import { AlertTriangle, ArrowDownToLine, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { BroughtBackChildResultDto, DelegatedChildDto } from "../../lib/pi-client-api";
+import type { BroughtBackChildResultDto, ChildSessionNodeDto, DelegatedChildDto } from "../../lib/pi-client-api";
 import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
+	childProcessStateOf,
 	delegateAgentOptions,
 	delegateFailureNote,
 	delegateSubmitState,
+	focusProcessState,
 	resultStateOf,
 	STATUS_BADGE,
 	STATUS_LABEL,
@@ -18,15 +20,102 @@ import {
  * 会话树（T8，FR-1/§8）—— 当前会话作为 Root，下面挂它直接委派出去的子会话。
  *
  * 数据只有一条来源：serve `get_session_tree`（父会话自己的账本）。
- * 三件事在这里被刻意分开显示，因为它们不是一回事：
+ * 几件被刻意分开显示的事，因为它们不是一回事：
  *   - 查不到（未连接 / 账本读失败）≠ 没有子会话（正常答案：空数组）
  *   - 结果就绪 ≠ 结果已带回（只有前者才能点「带回」）
  *   - 「这次才带回」≠「此前已带回」（重复带回不会二次注入，UI 也必须说清）
+ *   - 任务状态（这次委派走到哪）≠ 进程状态（有没有进程在服务它）≠ 结果状态 —— 三个维度各画
+ *     各的；进程那一维说不出凭据时就写「未知」（口径见 `./session-tree-logic`）
  *
- * 委派同理：不先画一行「启动中」再等回执 —— 子会话只从账本里长出来（成功就刷新同一条
+ * 委派同理：不先画一行「启动中」的子会话再等回执 —— 子会话只从账本里长出来（成功就刷新同一条
  * `get_session_tree`）。失败照样把 serve 的原话摆出来，**并且照样重读账本**：serve 在起不来 /
  * 没过注册门时会把节点写成 `failed` 再报错，客户端无从知道那一次到底有没有起子会话。
+ * （进程那一维的「启动中」不是这一条的反例：它只画在**账本已经给出的那条节点**上，凭据是手上
+ * 那次还没有 pid 的委派回执，不会凭空多出一行子树。）
  */
+
+/**
+ * 子会话卡片（受控、无 hook）。三个维度的读数都在卡片里算 —— 任务状态 / 结果状态 / 进程
+ * 状态，口径见 `./session-tree-logic`；本组件只管画。无 hook 是为了让单测能直接调用它，
+ * 把屏上的字与按钮的可用性钉住，不必起一个 DOM。
+ */
+export function ChildSessionCard({
+	child,
+	startingChildId,
+	busy,
+	bringingBack,
+	onBringBack,
+}: {
+	child: ChildSessionNodeDto;
+	/** 手上那次「刚发出、还没有 pid」的委派（`starting` 唯一的凭据）。 */
+	startingChildId?: string;
+	/** 有任何一条正在带回中（一次一个，所以别的卡片也点不动）。 */
+	busy: boolean;
+	/** 正在带回的就是这一条。 */
+	bringingBack: boolean;
+	onBringBack: (sessionId: string) => void;
+}): React.JSX.Element {
+	const state = resultStateOf(child);
+	const process = childProcessStateOf(child, { startingChildId });
+	return (
+		<div className="mb-1.5 rounded-lg border border-hairline bg-surface px-2.5 py-2">
+			<div className="flex items-center gap-1.5">
+				<span className="shrink-0 font-mono text-[10px] text-ink-faint">└─</span>
+				<span className="min-w-0 flex-1 truncate text-[13px] text-ink">
+					{child.objective ?? child.delegationRole ?? child.sessionId.slice(0, 8)}
+				</span>
+				<span className={STATUS_BADGE[child.status]}>{STATUS_LABEL[child.status]}</span>
+			</div>
+
+			<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-faint">
+				{child.delegationRole && <span>{child.delegationRole}</span>}
+				<span>depth {child.depth}</span>
+				<span>{shortTime(child.updatedAt)}</span>
+				<span className={state.canBringBack ? "text-warning" : undefined}>{state.label}</span>
+				{/* 进程这一格的依据（含账本记着的 pid）都进 detail：不在屏上摆一个裸 pid */}
+				<span className={process.state === "unknown" ? "text-ink-subtle" : undefined} title={process.detail}>
+					进程 {process.label}
+				</span>
+			</div>
+
+			{/* 「未知」必须在屏上说明缺什么，不能只给一个没解释的词 */}
+			{process.state === "unknown" && <div className="mt-1 text-[11px] text-ink-subtle">{process.detail}</div>}
+
+			{child.escalation && (
+				<div className="mt-1 rounded border border-warning/30 bg-warning/5 px-2 py-1 text-[11px] text-warning">
+					等父会话（{child.escalation.blocking}）：{child.escalation.question || "（未附问题）"}
+				</div>
+			)}
+			{!child.escalation && child.statusDetail && (
+				<div className="mt-1 text-[11px] text-ink-subtle">{child.statusDetail}</div>
+			)}
+
+			<div className="mt-1.5 flex items-center gap-2">
+				<button
+					type="button"
+					className="btn-secondary cbtn"
+					disabled={!state.canBringBack || busy}
+					onClick={() => onBringBack(child.sessionId)}
+					title={
+						state.canBringBack
+							? `带回 ${child.resultRef}`
+							: child.resultRef
+								? "该结果此前已带回"
+								: "子会话还没有产出结果"
+					}
+				>
+					<ArrowDownToLine size={12} strokeWidth={1.5} />
+					{bringingBack ? "带回中…" : "带回结果"}
+				</button>
+				{child.resultRef && (
+					<span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-faint" title={child.resultRef}>
+						{child.resultRef}
+					</span>
+				)}
+			</div>
+		</div>
+	);
+}
 
 export function SessionTree(): React.JSX.Element {
 	const view = useSession();
@@ -54,6 +143,10 @@ export function SessionTree(): React.JSX.Element {
 	}, [store, view.connected, agentId, sessionKey]);
 
 	const children = view.sessionTree?.children ?? [];
+	// 「刚发出、还没有 pid 的那次委派」是 `starting` 唯一的凭据（见 session-tree-logic 的说明）：
+	// 账本里倒推不出来，所以只认手上这一条回执，并且只在它的 pid 真缺省时才成立。
+	const startingChildId = delegated?.pid === undefined ? delegated?.sessionId : undefined;
+	const rootProcess = focusProcessState(view.sessionTree);
 	const submit = delegateSubmitState({ objective, busy: delegating });
 	const delegate = async (): Promise<void> => {
 		// 提交时的会话身份：这一次委派的回执只属于这个会话。
@@ -202,6 +295,10 @@ export function SessionTree(): React.JSX.Element {
 								{view.activeWorkspace ?? "—"}
 								{view.isStreaming ? " · 进行中" : ""}
 							</div>
+							{/* 进程是独立一维读数（与状态徽标、结果状态不是一回事），依据写在 title 里 */}
+							<div className="mt-0.5 truncate text-[11px] text-ink-faint" title={rootProcess.detail}>
+								进程 <span className="text-ink-subtle">{rootProcess.label}</span>
+							</div>
 						</div>
 
 						{children.length === 0 && (
@@ -210,67 +307,16 @@ export function SessionTree(): React.JSX.Element {
 							</div>
 						)}
 
-						{children.map(child => {
-							const state = resultStateOf(child);
-							return (
-								<div
-									key={child.sessionId}
-									className="mb-1.5 rounded-lg border border-hairline bg-surface px-2.5 py-2"
-								>
-									<div className="flex items-center gap-1.5">
-										<span className="shrink-0 font-mono text-[10px] text-ink-faint">└─</span>
-										<span className="min-w-0 flex-1 truncate text-[13px] text-ink">
-											{child.objective ?? child.delegationRole ?? child.sessionId.slice(0, 8)}
-										</span>
-										<span className={STATUS_BADGE[child.status]}>{STATUS_LABEL[child.status]}</span>
-									</div>
-
-									<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-faint">
-										{child.delegationRole && <span>{child.delegationRole}</span>}
-										<span>depth {child.depth}</span>
-										<span>{shortTime(child.updatedAt)}</span>
-										<span className={state.canBringBack ? "text-warning" : undefined}>{state.label}</span>
-										{child.lastPid !== undefined && <span className="font-mono">pid {child.lastPid}</span>}
-									</div>
-
-									{child.escalation && (
-										<div className="mt-1 rounded border border-warning/30 bg-warning/5 px-2 py-1 text-[11px] text-warning">
-											等父会话（{child.escalation.blocking}）：{child.escalation.question || "（未附问题）"}
-										</div>
-									)}
-									{!child.escalation && child.statusDetail && (
-										<div className="mt-1 text-[11px] text-ink-subtle">{child.statusDetail}</div>
-									)}
-
-									<div className="mt-1.5 flex items-center gap-2">
-										<button
-											type="button"
-											className="btn-secondary cbtn"
-											disabled={!state.canBringBack || busyId !== null}
-											onClick={() => void bringBack(child.sessionId)}
-											title={
-												state.canBringBack
-													? `带回 ${child.resultRef}`
-													: child.resultRef
-														? "该结果此前已带回"
-														: "子会话还没有产出结果"
-											}
-										>
-											<ArrowDownToLine size={12} strokeWidth={1.5} />
-											{busyId === child.sessionId ? "带回中…" : "带回结果"}
-										</button>
-										{child.resultRef && (
-											<span
-												className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-faint"
-												title={child.resultRef}
-											>
-												{child.resultRef}
-											</span>
-										)}
-									</div>
-								</div>
-							);
-						})}
+						{children.map(child => (
+							<ChildSessionCard
+								key={child.sessionId}
+								child={child}
+								startingChildId={startingChildId}
+								busy={busyId !== null}
+								bringingBack={busyId === child.sessionId}
+								onBringBack={childSessionId => void bringBack(childSessionId)}
+							/>
+						))}
 					</>
 				)}
 
