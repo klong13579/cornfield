@@ -17,7 +17,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { loadRegistry, registerAgent, saveRegistry } from "../src/skeleton/registry";
-import { ensureWorkspace, loadWorkspace, WORKSPACE_SCHEMA_VERSION, workspaceFilePath } from "../src/skeleton/workspace";
+import {
+	ensureWorkspace,
+	loadWorkspace,
+	readWorkspaceDeclaration,
+	WORKSPACE_SCHEMA_VERSION,
+	workspaceFilePath,
+} from "../src/skeleton/workspace";
 
 const savedHome = process.env.HOME;
 let isolatedHome: string;
@@ -61,6 +67,50 @@ describe("loadWorkspace", () => {
 		expect(decl.root).toBe(".");
 		expect(decl.projectRoot).toBe(".");
 		expect(decl.knowledge?.identity).toBe("mission.md");
+	});
+});
+
+/**
+ * The strict sibling. `loadWorkspace` deliberately collapses "no declaration" and "cannot
+ * read the declaration" into null; callers that decide something *from* the declaration
+ * need those apart — a declaration that exists but is unreadable may be declaring
+ * something, and reading it as "nothing declared" silently widens their scope.
+ */
+describe("readWorkspaceDeclaration", () => {
+	test("absent when there is no file (the one case that really is 'nothing declared')", async () => {
+		expect(await readWorkspaceDeclaration(agentDir)).toEqual({ state: "absent" });
+	});
+
+	test("invalid for unparseable JSON, with the reason", async () => {
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
+		await Bun.write(workspaceFilePath(agentDir), "not json");
+
+		const read = await readWorkspaceDeclaration(agentDir);
+		expect(read.state).toBe("invalid");
+		expect(read.state === "invalid" && read.reason).toContain("not valid JSON");
+	});
+
+	test("invalid for parseable JSON that is not a schema-v2 declaration", async () => {
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
+		await Bun.write(
+			workspaceFilePath(agentDir),
+			JSON.stringify({ schemaVersion: 1, id: "x", name: "X", type: "agent", root: ".", projectRoot: "." }),
+		);
+
+		const read = await readWorkspaceDeclaration(agentDir);
+		expect(read.state).toBe("invalid");
+		expect(read.state === "invalid" && read.reason).toContain(`schema-v${WORKSPACE_SCHEMA_VERSION}`);
+	});
+
+	test("declared carries the parsed declaration", async () => {
+		const decl = await ensureWorkspace(agentDir, { name: "hr" });
+		expect(await readWorkspaceDeclaration(agentDir)).toEqual({ state: "declared", declaration: decl });
+	});
+
+	test("loadWorkspace keeps collapsing absent and invalid to null (existing callers unchanged)", async () => {
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
+		await Bun.write(workspaceFilePath(agentDir), "not json");
+		expect(await loadWorkspace(agentDir)).toBeNull();
 	});
 });
 

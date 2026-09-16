@@ -120,8 +120,8 @@ export const DOMAIN_AUTHORITY: Record<DomainConcept, ConceptAuthority> = {
 	},
 	agentTodo: {
 		owner: "agent",
-		authority: null,
-		pending: "WP10 — store still undecided (§37: Markdown board vs structured), no file migration in WP1",
+		authority:
+			"`<agentDir>/.cornfield/agent-todos.json` (WP10, structured — §9's Markdown `<agentDir>/TODO.md` was rejected as lossy): one Agent owns its board, `projectId` is an optional binding and the Project owns nothing. Never `<projectRoot>/TODO.md` — that is `projectTodo`",
 	},
 	sessionTodo: {
 		owner: "session",
@@ -381,7 +381,11 @@ export interface DomainSnapshot {
 	schedules?: readonly ScheduleRecord[];
 	todos?: readonly AgentTodo[];
 	contextItems?: readonly ContextItem[];
-	/** Both paths must be declared for the board-collision rule to run (§37: store undecided). */
+	/**
+	 * Both paths must be declared for the board-collision rule to run. WP10 settled the Agent
+	 * side (`<agentDir>/.cornfield/agent-todos.json`), so the two cannot collide through the
+	 * store; the rule stays for callers that declare paths of their own.
+	 */
 	todoBoardPaths?: { agentBoard?: string; projectBoard?: string };
 }
 

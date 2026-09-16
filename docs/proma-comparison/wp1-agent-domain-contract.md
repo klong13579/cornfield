@@ -30,7 +30,7 @@
 | Schedule | client | gateway scheduler：任务定义（`~/.cornfield/gateway-data/scheduler/tasks/` 下的 `.json5`，`SchedulerFileStore`）+ 运行态存储 | 已有（但只带 `agentDir`，不带 `agentId`） |
 | Worker | derived | 无，且不应有：＝子 Session + 指派边 + 执行策略 | 不持久化（设计如此） |
 | ContextItem | session | session JSONL 条目（file mention）+ session artifacts store | 已有 |
-| AgentTodo | agent | 无；§37 明确 Markdown 板 / 结构化存储**尚未决策** | **待建（WP10）** |
+| AgentTodo | agent | `<agentDir>/.cornfield/agent-todos.json`（WP10 已落地：**结构化**；§9 的 Markdown `<agentDir>/TODO.md` 方案被否，理由见下） | 已有（WP10） |
 | Session Todo | session | session JSONL：`todo` 工具结果 details + `user_todo_edit` 自定义条目，由 `../tools/todo-write.ts` 拥有 | 已有，原样复用 |
 | Project TODO | client | `<projectRoot>/TODO.md`，由 `project-todo` skill 维护 | 已有 |
 
@@ -41,7 +41,9 @@
 3. **正式 Session 只有一种执行策略。** `SessionExecutionPolicy = "isolated-process"`（单成员联合）。§38 已删除 `in-process` 作为 Session 策略；进程内工作仍是现有 subagent Task（`runSubprocess` + IRC），永不进入 Session 树。跨进程边界的数据用 `isSessionExecutionPolicy()` 收口。
 4. **Session Todo 完全复用现有能力**——契约模块把 `TodoItem` / `TodoPhase` / `TodoStatus` 从 `../tools/todo-write.ts` **原样 type-only 转出**，不定义 `SessionTodo` 平行类型，也不提供任何 todo 存储函数。`test/agent-domain.test.ts` 里有出口面快照测试：往这个模块里塞 store/runtime 会直接测试失败。
 5. **AgentTodo 归属 Agent**（§37 D4）：`agentId` 必填且唯一 owner，`projectId` 可选绑定；Project 不拥有 Todo。Session 是推进 Todo 的一次工作，**Session 结束不自动完成 Todo**；terminal 状态（`completed` / `cancelled`）不可重开。
-6. **AgentTodo ≠ Project TODO ≠ Session Todo。** 一个文件不能同时是两种板子；`todo.board-collision` 规则在调用方同时声明两条路径时生效（存储未决策，所以现在不误报）。
+6. **AgentTodo ≠ Project TODO ≠ Session Todo。** 一个文件不能同时是两种板子；`todo.board-collision` 规则在调用方同时声明两条路径时生效。
+7. **AgentTodo 的存储已在 WP10 决策：结构化，不是 Markdown 板。** 权威文件是 `<agentDir>/.cornfield/agent-todos.json`（与 `<agentDir>/.cornfield/workspace.json` 同目录，随 agentDir 一起搬走）。§9 提过的 `<agentDir>/TODO.md` 被否：`status` / `priority` / `dueAt` / `reminders` 没有 Markdown 形，往返要么自造语法要么静默丢字段。因此 Agent 板与 Project 板（`<projectRoot>/TODO.md`）在路径上不可能相同，`todo.board-collision` 结构性不会触发——规则保留给自行声明两条路径的调用方。
+8. **声明的读取分三态。** `readWorkspaceDeclaration()` 区分 `absent`（真的没声明过 → Agent 未约束）、`declared`、`invalid`（文件在但读不出内容）。依赖声明做判断的调用方（如 Agent Todo 的 Project 绑定上限）必须把 `invalid` 当硬错误：一份读不出内容的声明*可能*正在声明绑定，当成「未约束」就是静默放大范围。`loadWorkspace()` 仍是把前两者折叠成 `null` 的宽容读法，供只需要元数据的调用方使用。
 
 ## 4. 非法关系规则
 
@@ -91,11 +93,15 @@
 - **WP2**（Agent Profile Registry + gateway `agentId` 兼容解析）：`AgentRecord` 是 registry + workspace 声明的投影；`ScheduleRecord.agentDir` 是 gateway 今天的形状（`ScheduledTask.agentDir`，替代已废弃的 `accountId`），legacy `accountId` 的映射属于 WP2 兼容层，不在本校验器里。
 - **WP4**（Default Agent 与 WorkspaceContext 解析）：`ProjectRecord.defaultAgentId` + `WorkspaceContext` 是解析链的输入输出形状；`workspace.*` 规则是它的自检。
 - **WP10**（Agent Todo UI / scope 收口）：`AgentTodo` 字段与 `todo.*` 规则即 §37 的落地形状。
+  已落地（T10A）：存储 `agent-domain/agent-todo-store.ts`、serve 桥 `server/agent-todos-wire.ts`、wire 命令
+  `list_agent_todos` / `set_agent_todo` / `delete_agent_todo`（`AgentTodoListDto` / `AgentTodoUpsertDto` /
+  `AgentTodoDeleteDto` 在 pi-wire 登记）、前端 `web-app/src/pages/todo/`。Session Todo 与会话内 `todo` 工具
+  一行未动。
 
 ## 6. 本 WP 不做
 
 - 不建 Project / AgentTodo / session-tree 的存储（分别属 WP4 / WP10 / WP7-WP8）。
-- 不迁移任何 TODO 文件，不决定 AgentTodo 是 Markdown 板还是结构化存储（§37 明确另行决策）。
+- 不迁移任何 TODO 文件（后续 WP10 也只新增 Agent 板，不动任何已有 TODO 文件）。
 - 不改 `todo` 工具、`project-todo` skill、gateway scheduler、session manager 的任何现有行为。
 
 ## 7. 引用路径
