@@ -310,10 +310,15 @@ Parameters beyond `action` / `to` / `message`:
 | `inboundMode` | `"queue"` | `"interrupt"` steers inbound messages at the next safe model boundary instead of waiting for the current turn to end |
 | `inboundTrigger` | `"always"` | Whether an inbound message may start a turn: `"always"` / `"replies"` (replies only) / `"never"` |
 | `confirmSend` | `false` | Confirm ordinary and inferred sends from an interactive session |
-| `stableId` | unset | Stable address across restarts (use it when others must target you by name) |
 | `replyHint` | `true` | Include the reply command in inbound messages |
 | `status` | unset | Custom suffix appended to your automatic lifecycle status |
 | `enabled` | `true` | Turn intercom off entirely |
+
+This file is machine-global, so it holds no identity setting. An intercom ID belongs to a
+process: to answer to a fixed address, that process must be launched with
+`PI_INTERCOM_STABLE_ID` set (its launcher's job, not a file's). Without it you answer to
+your own session ID. A registration that would take an ID held by a live session is
+refused by the broker — two processes cannot share one address.
 
 ## Visible Peer Sessions
 

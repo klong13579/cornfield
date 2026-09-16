@@ -161,6 +161,75 @@ function delegationOptions(
 }
 
 /**
+ * 宿主接缝：只抓桥声明的委派身份，不真起子进程 —— 父边 id 是桥自己的事，没有进程也说得清。
+ * 注册门与真进程归 `delegateChildSession` 的用例，`readSessionTree` 只读账本。
+ */
+function selfCapturingOptions(captured: Array<DelegationHostInput["self"]>): SessionTreeWireOptions {
+	return {
+		host: (input: DelegationHostInput): DelegationHost => {
+			captured.push(input.self);
+			const supervisor = new Supervisor({
+				maxConcurrent: 1,
+				registration: {
+					async awaitRegistration() {},
+				},
+				restart: { maxRestarts: 0, baseBackoffMs: 10, maxBackoffMs: 20 },
+				process: {
+					readyTimeoutMs: 1_000,
+					requestTimeoutMs: 1_000,
+					abortTimeoutMs: 100,
+					exitGraceMs: 100,
+					termGraceMs: 50,
+				},
+			});
+			supervisors.push(supervisor);
+			return {
+				manager: new SessionTreeManager({
+					self: input.self,
+					supervisor,
+					store: new SessionLogTreeStore(sessionManager),
+				}),
+				command: { bin: process.execPath, args: [] },
+				async open(): Promise<void> {},
+			};
+		},
+	};
+}
+
+/**
+ * 父边 id：本会话自己的 intercom 身份 + `-tree` 后缀。
+ *
+ * 身份只有一个来源（`resolveIntercomSessionId`：进程环境里的 `PI_INTERCOM_STABLE_ID`，否则会话 id），
+ * 后缀不能省 —— 一个 id 只能有一个活着的连接（broker 会拒绝第二个），serve 这条边必须用另一个地址
+ * 上线，否则会话自己的 intercom 先占住那个 id，这条边永远上不了线。
+ */
+describe("parent edge identity", () => {
+	it("is the session's own intercom id plus the -tree suffix", async () => {
+		const declared: Array<DelegationHostInput["self"]> = [];
+
+		await readSessionTree(session, META, selfCapturingOptions(declared));
+
+		expect(declared).toHaveLength(1);
+		expect(declared[0]?.sessionId).toBe(session.sessionId);
+		expect(declared[0]?.intercomSessionId).toBe(`${session.sessionId}-tree`);
+	});
+
+	it("follows a pinned PI_INTERCOM_STABLE_ID, keeping the suffix", async () => {
+		const previous = process.env.PI_INTERCOM_STABLE_ID;
+		process.env.PI_INTERCOM_STABLE_ID = "pinned-parent";
+		const declared: Array<DelegationHostInput["self"]> = [];
+		try {
+			await readSessionTree(session, META, selfCapturingOptions(declared));
+		} finally {
+			if (previous === undefined) delete process.env.PI_INTERCOM_STABLE_ID;
+			else process.env.PI_INTERCOM_STABLE_ID = previous;
+		}
+
+		expect(declared[0]?.intercomSessionId).toBe("pinned-parent-tree");
+	});
+});
+
+/**
  * fixture 靠进程环境选行为与日志位置，而桥**不**接受调用方给的子进程环境
  * （让客户端决定子进程环境就是把一条 IPC 请求变成任意代码执行），所以这里改进程环境。
  */

@@ -26,6 +26,7 @@ import {
 	type IntercomExtensionState,
 } from "./extension-api";
 import { formatContextUsage } from "./format-context";
+import { resolveIntercomSessionId } from "./identity";
 import {
 	type ChildPaneMetadata,
 	openProjectPane,
@@ -57,7 +58,6 @@ const INBOUND_MESSAGE_DEDUPE_MAX = 1000;
 const INBOUND_MESSAGE_DEDUPE_RETENTION_MS = 60 * 60 * 1000;
 const DEFAULT_UNNAMED_SESSION_ALIAS_PREFIX = "subagent-chat";
 const INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
-const STABLE_INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_STABLE_ID";
 const NAME_POLL_MS_ENV = "PI_INTERCOM_NAME_POLL_MS";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
 const SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV = "PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR";
@@ -551,9 +551,6 @@ function buildPresenceIdentity(pi: ExtensionAPI, sessionId: string): { name: str
 		name: resolveIntercomPresenceName(sessionName, sessionId),
 		runtimeFallbackAlias: !sessionName?.trim(),
 	};
-}
-function resolveConfiguredIntercomSessionId(piSessionId: string, config: IntercomConfig): string {
-	return process.env[STABLE_INTERCOM_SESSION_ID_ENV]?.trim() || config.stableId || piSessionId;
 }
 function formatIntercomContactSnippet(sessionId: string): string {
 	return `Use pi-intercom: intercom({ action: "send", to: "${sessionId}", message: "..." })`;
@@ -1891,7 +1888,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
 		}
 		runtimeContext = ctx;
 		currentSessionId = ctx.sessionManager.getSessionId();
-		currentIntercomSessionId = resolveConfiguredIntercomSessionId(currentSessionId, config);
+		currentIntercomSessionId = resolveIntercomSessionId(currentSessionId);
 		publishIntercomSessionId(currentIntercomSessionId);
 		currentModel = ctx.model?.id ?? "unknown";
 		sessionStartedAt = Date.now();
