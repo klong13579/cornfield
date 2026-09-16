@@ -90,6 +90,77 @@ function kill(proc: ChildProcess): void {
 	}
 }
 
+type RecordedFrame = { dir: "c2s" | "s2c"; at: number; frame: unknown };
+
+/**
+ * 夹在浏览器与 serve 之间的 WS 录制代理。
+ *
+ * 为什么需要它：要证明的是「UI 真发出去的那一帧」把消息投给了**哪个会话**，而这条判据在浏览器里
+ * 看不见（隔离 HOME 没有 LLM key，用户消息也不会 flush 到 JSONL）。代理只转发 + 记录，不改一帧。
+ */
+function startRecordingProxy(targetPort: number): {
+	port: number;
+	frames: RecordedFrame[];
+	stop: () => void;
+} {
+	const frames: RecordedFrame[] = [];
+	const decode = (msg: string | Uint8Array): string => (typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+	const server = Bun.serve<{ upstream?: WebSocket; pending: string[] }>({
+		port: 0,
+		fetch(req, srv) {
+			if (srv.upgrade(req, { data: { pending: [] } })) return undefined;
+			return new Response("proxy: websocket only", { status: 426 });
+		},
+		websocket: {
+			open(ws) {
+				const upstream = new WebSocket(`ws://127.0.0.1:${targetPort}/ws`);
+				ws.data.upstream = upstream;
+				upstream.addEventListener("open", () => {
+					for (const queued of ws.data.pending) upstream.send(queued);
+					ws.data.pending = [];
+				});
+				upstream.addEventListener("message", ev => {
+					const text = decode(ev.data as string | Uint8Array);
+					try {
+						frames.push({ dir: "s2c", at: Date.now(), frame: JSON.parse(text) });
+					} catch {
+						// 非 JSON 帧照转不记
+					}
+					if (ws.readyState === WebSocket.OPEN) ws.send(text);
+				});
+				upstream.addEventListener("close", () => {
+					try {
+						ws.close();
+					} catch {
+						// 已关
+					}
+				});
+			},
+			message(ws, msg) {
+				const text = decode(msg as string | Uint8Array);
+				try {
+					frames.push({ dir: "c2s", at: Date.now(), frame: JSON.parse(text) });
+				} catch {
+					// 非 JSON 帧照转不记
+				}
+				const upstream = ws.data.upstream;
+				if (upstream?.readyState === WebSocket.OPEN) upstream.send(text);
+				else ws.data.pending.push(text);
+			},
+			close(ws) {
+				ws.data.upstream?.close();
+			},
+		},
+	});
+	return {
+		port: server.port ?? 0,
+		frames,
+		stop: () => {
+			void server.stop(true);
+		},
+	};
+}
+
 test.use({ viewport: { width: 1920, height: 1000 } });
 
 test.describe("Project 绑定闭环（真实 serve + 真实前端）", () => {
@@ -116,7 +187,6 @@ test.describe("Project 绑定闭环（真实 serve + 真实前端）", () => {
 
 		const servePort = await freePort();
 		const appPort = await freePort();
-		const serveUrl = `ws://127.0.0.1:${servePort}/ws`;
 		const serve = spawn(
 			"bun",
 			[
@@ -141,6 +211,9 @@ test.describe("Project 绑定闭环（真实 serve + 真实前端）", () => {
 
 		try {
 			await waitForOutput(serve, /ws:\/\/127\.0\.0\.1:\d+\/ws/, 60_000, "serve 启动");
+			// 浏览器连的是录制代理，不是 serve 本身（只转发+记录，不改一帧）
+			const proxy = startRecordingProxy(servePort);
+			const serveUrl = `ws://127.0.0.1:${proxy.port}/ws`;
 			await waitForHttp(`http://127.0.0.1:${appPort}/`, 30_000);
 
 			await page.addInitScript(
@@ -192,6 +265,47 @@ test.describe("Project 绑定闭环（真实 serve + 真实前端）", () => {
 				})
 				.toBe("marker-edited-by-ui\n");
 			await page.screenshot({ path: `${SHOTS}/6-saved-into-project-root.png` });
+
+			// ── 6. 发消息：UI 真发出去的那一帧，sessionId 必须是**会话身份**（不是 Agent 名） ──
+			// 判据取 c2s 帧：绑定后 UI 给 fs_list/fs_read/fs_write/git_changes 发的 sessionId 就是会话身份
+			// （附件地址 = `Agent 名 + NUL + 工作根`），消息也必须发到同一个身份上。
+			const fsFrames = proxy.frames
+				.filter(f => f.dir === "c2s")
+				.map(f => (f.frame as { command?: { type?: string; sessionId?: string } }).command)
+				.filter((c): c is { type: string; sessionId?: string } => c !== undefined)
+				.filter(c => ["fs_list", "fs_read", "fs_write", "git_changes"].includes(c.type ?? ""));
+			const addresses = new Set(
+				fsFrames.map(c => c.sessionId).filter((v): v is string => typeof v === "string" && v.includes("\u0000")),
+			);
+			expect(addresses.size).toBe(1);
+			const boundAddress = [...addresses][0] as string;
+			console.log("PROBE 会话身份（附件地址）=", boundAddress.replace(projRoot, "<projRoot>"));
+			expect(boundAddress.endsWith(projRoot)).toBe(true);
+
+			const composer = page.getByPlaceholder(/发消息，或直接提问/);
+			await composer.fill("PROBE-MESSAGE-INTO-BOUND-SESSION");
+			await page.getByRole("button", { name: "发送" }).click();
+			await expect
+				.poll(
+					() =>
+						proxy.frames.filter(f => {
+							const command = (f.frame as { command?: { type?: string } }).command;
+							return f.dir === "c2s" && command?.type === "prompt";
+						}).length,
+					{ timeout: 15_000, message: "发送后应当有一帧 prompt 出去" },
+				)
+				.toBeGreaterThan(0);
+
+			const prompts = proxy.frames
+				.filter(f => f.dir === "c2s")
+				.map(f => (f.frame as { command?: { type?: string; sessionId?: string; message?: string } }).command)
+				.filter((c): c is { type: string; sessionId?: string; message?: string } => c?.type === "prompt");
+			const sent = prompts.at(-1);
+			console.log("PROBE prompt.sessionId =", String(sent?.sessionId).replace(projRoot, "<projRoot>"));
+			console.log("PROBE prompt.message =", JSON.stringify(sent?.message).slice(0, 60));
+			expect(sent?.sessionId).toBe(boundAddress);
+			expect(sent?.sessionId).not.toBe("default");
+			await page.screenshot({ path: `${SHOTS}/7-message-sent.png` });
 		} finally {
 			kill(serve);
 			kill(preview);
