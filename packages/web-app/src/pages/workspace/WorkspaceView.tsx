@@ -268,11 +268,13 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 						view={view}
 						draft={newSessionDraft}
 						onChange={setNewSessionDraft}
-						onCreate={() => {
-							// 今天能落的只有「在当前焦点 Agent 上新建」这一件事：serve 的 new_session 建在
-							// 本连接当前焦点会话上（见 NewSessionForm 的说明），而表单把跨 Agent 提交挡住了，
-							// 所以这里不需要把 agentId 转交给别的命令。Project / 标题在表单里已经明说写不进去。
-							store.newSession();
+						onCreate={async input => {
+							// 提交顺序在 store 那一条唯一路径里：await 目标 Agent 的 attach / switch_session →
+							// 看结果 → 确认后才带显式目标发 new_session（见 SessionStore.newSession）。
+							// 没建成（或说不准）就不关表单：错误已由 store 写进命令错误提示条（serve 的原文），
+							// 用户可以改选重提 —— 这正是「失败不能看着像成功」。
+							const outcome = await store.newSession(input);
+							if (outcome.kind !== "created") return;
 							setNewSessionDraft(EMPTY_NEW_SESSION_DRAFT);
 							setNewSessionOpen(false);
 						}}

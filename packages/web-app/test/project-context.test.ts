@@ -125,6 +125,24 @@ function pushSnapshot(agentId: string, sessionFile: string): void {
 	);
 }
 
+/**
+ * serve 连接后必推的 agent 注册表（本连接焦点那个标 `active: true`）。
+ *
+ * 「新会话建在哪个 Agent 上」靠这个焦点读数定目标：注册表还没到就无从确定，不得建
+ * （见 SessionStore.newSession）。后台真实顺序也是先注册表再可能有点击。
+ */
+function pushAgents(...ids: string[]): void {
+	lastCreated?.receive(
+		JSON.stringify({
+			type: "push",
+			event: {
+				type: "server_snapshot",
+				sessions: ids.map((id, index) => ({ id, active: index === 0, attached: true })),
+			},
+		}),
+	);
+}
+
 /** 已发出的 list_projects 请求（id + command）。 */
 function projectRequests(): Array<Record<string, unknown>> {
 	return sentRequests()
@@ -386,6 +404,8 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 
 	it("新会话：旧响应在新会话快照到达前也落不了地", async () => {
 		const { store } = await createConnectedStore();
+		// 连接后 serve 先推注册表：焦点读数（新会话的目标）靠它落到具体 Agent 上
+		pushAgents("hr");
 
 		pushSnapshot("hr", "/sessions/hr-live.jsonl");
 		await Bun.sleep(0);
@@ -399,7 +419,7 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 		const staleRequest = lastProjectRequestId();
 
 		// 开新会话：身份必然变（新文件还不知道），旧响应必须作废
-		store.newSession();
+		const created = store.newSession();
 		await Bun.sleep(0);
 		respondTo(staleRequest, { projects: PROJECTS, currentProjectId: "cornfield" });
 		await Bun.sleep(0);
@@ -416,6 +436,7 @@ describe("迟到响应不得覆盖当前会话的归属（P1 回归）", () => {
 		await Bun.sleep(0);
 		expect(store.getSnapshot().currentProjectId).toBe("dtc");
 		void inFlight;
+		void created;
 	});
 
 	it("A 的迟到**错误**也不会把 B 打成错误态", async () => {

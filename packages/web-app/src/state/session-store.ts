@@ -60,6 +60,7 @@ import type {
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
+import { activeAgentIdOf } from "./agent-context";
 import { createClient } from "./client";
 import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
 
@@ -195,6 +196,21 @@ function maybeNotifyTurnEnd(view: SessionView): void {
 	}
 }
 
+/** 把本连接的焦点切到某个 Agent 的结果（`ok:false` 时 error 是 serve 的原文）。 */
+export type FocusAgentResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * 一次新建会话的结局。
+ *
+ * 三态必须分开，不许折叠：`not-created` 是**确定没建**（serve 拒了，或目标 Agent 根本没切过去），
+ * `unknown` 是**说不准**（命令发出去了但没等到答复），把它读成「没建成」就是把一个没发生的否定
+ * 当成事实；读成 `created` 就是把没建的东西报成建了。
+ */
+export type NewSessionOutcome =
+	| { kind: "created"; notApplied: NewSessionResult["notApplied"] }
+	| { kind: "not-created"; error: string }
+	| { kind: "unknown"; error: string };
+
 const EMPTY_PHASE: SessionPhaseDto = "idle";
 
 function cloneView(v: SessionView): SessionView {
@@ -277,6 +293,13 @@ export class SessionStore {
 	 * pending/error 覆盖成 A 的答案。请求取不得消，所以靠这道门把迟到的答案挡在外面。
 	 */
 	#projectGeneration = 0;
+	/**
+	 * 一次新建会话还在进行中（`newSession` 从定目标到回执的整段）。
+	 *
+	 * 两次快速提交（双击、侧栏与表单几乎同时提）会各自发一条 `new_session` —— 那就是两个会话，
+	 * 而用户只按了一次。第二次直接回「上一次还没结束」，不排队、也不静默丢掉。
+	 */
+	#creating = false;
 
 	init(client: PiClient): void {
 		this.#client = client;
@@ -368,6 +391,13 @@ export class SessionStore {
 		this.#notify();
 	}
 
+	/** 写提示条（唯一可见的错误面；文案里带 serve / 连接层的原文）。 */
+	#setCommandError(message: string): void {
+		this.#view = cloneView(this.getSnapshot());
+		this.#view.commandError = message;
+		this.#notify();
+	}
+
 	prompt(text: string, sessionId?: string, images?: ImageContentDto[]): void {
 		// SERVE-1 回归：本地乐观回显。发送即出现在当前转录（不再等服务端帧回推，否则路由异常时页面毫无反馈）；
 		// 目标 agent 的权威快照/流式帧到达后自然替换或推进；命令失败则把回显消息标错。
@@ -408,29 +438,83 @@ export class SessionStore {
 	}
 
 	/**
-	 * 新建会话（new_session）。
+	 * 新建会话 —— **唯一入口**（顶栏表单、侧栏两个直建钮、设置页都走这一条）。
 	 *
-	 * `opts` 三个入参里只有两个落得下去：`agentId`（wire 的 `sessionId`）与 `title`
-	 * （创建后紧跟一次 `set_session_name`）；`projectId` **wire 落不下去**，由回执的 `notApplied`
-	 * 报给调用方 —— 这里不把它渲染成已生效（见 {@link NewSessionOptions}）。
+	 * 提交顺序是硬要求，不能颠倒：
+	 *   1. **定目标**：显式 `opts.agentId` 优先，否则本连接焦点（§10 第 1 级）；
+	 *   2. 目标不是当前焦点时，先 {@link focusAgent} **等 serve 确认**切过去了，失败就**不建**；
+	 *   3. 带上**显式目标**发 `new_session`（wire 的 `sessionId` 就是「哪个 Agent」）。
 	 *
-	 * 失败不抛（与本节其它写命令一致）：错误进 view.commandError 提示条。失败时回 `undefined`
-	 * ——**不代表「没建成」**：命令发出去了但没等到答复（断线/超时）与「建了但标题没落上」
-	 * （第二跳失败）都走这条路。拿不准就说拿不准，不许编一个 `created:false`。
+	 * 为什么不能少第 2 步：serve 逐帧并发处理（`void core.handleCommand(...)`），而 `new_session`
+	 * 不带 `sessionId` 时按**处理那一刻**的 `ctx.activeAgentId` 定目标 —— 先切后建如果不等切换落地，
+	 * 新会话会建在**旧** Agent 上，而客户端已经在显示新的焦点了。带上 `sessionId` 是第二道锁：
+	 * 就算焦点读数因为别的原因旧了，这条命令也不会跑到别的 Agent 上去。
+	 *
+	 * 目标就是当前焦点时跳过第 2 步：serve 的焦点**永远是已 attach 的会话**（boot 时 default 已
+	 * attach；`switch_session` 也是先 `registry.attach` 再改焦点），这条路上没有要等的东西，
+	 * 再切一次只会白推一份当前会话的快照回来（默认路径的表现因此与以前一致）。
+	 *
+	 * 失败不抛（与本节其它写命令一致）：错误进 view.commandError 提示条，同时用
+	 * {@link NewSessionOutcome} 把「确定没建」与「说不准」分开报给调用方。
 	 */
-	async newSession(opts?: NewSessionOptions): Promise<NewSessionResult | undefined> {
-		const view = cloneView(this.getSnapshot());
-		// 新会话没有账本：上一会话的子会话树不得跟过来（私有字段与 view 要一起改，
-		// 否则要等下一个快照才会消失）；在途的那一次读取也一并作废 —— 它答的是上一会话的账本。
-		this.#invalidateSessionTree(view);
-		// 新会话就是一个新会话，与当前身份必然不同 —— 不看目标是什么，直接作废：
-		// 少了这一步，上一会话的在途 list_projects 会在新会话的快照到达前落进新视图。
-		this.#invalidateProjectAttribution(view);
-		// 改动清单同理：它是上一个会话所在仓库的，新会话还没问过。
-		this.#invalidateGitChanges(view);
-		this.#view = view;
-		this.#notify();
-		return await this.#run(() => this.#client.newSession(opts));
+	async newSession(opts?: NewSessionOptions): Promise<NewSessionOutcome> {
+		if (this.#creating) {
+			return { kind: "not-created", error: "上一次新建还没结束 —— 这次重复提交已忽略" };
+		}
+		const requested = opts?.agentId?.trim();
+		const current = this.#activeAgentId ?? activeAgentIdOf(this.getSnapshot());
+		const target = requested !== undefined && requested !== "" ? requested : current;
+		if (target === undefined) {
+			return this.#creationFailed("还不知道本连接的焦点 Agent（未连接或注册表还没到）——新会话落在谁身上无从确定");
+		}
+		this.#creating = true;
+		try {
+			if (target !== current) {
+				const focus = await this.focusAgent(target);
+				if (!focus.ok) return this.#creationFailed(focus.error);
+			}
+			const view = cloneView(this.getSnapshot());
+			// 新会话没有账本：上一会话的子会话树不得跟过来（私有字段与 view 要一起改，
+			// 否则要等下一个快照才会消失）；在途的那一次读取也一并作废 —— 它答的是上一会话的账本。
+			this.#invalidateSessionTree(view);
+			// 新会话就是一个新会话，与当前身份必然不同 —— 不看目标是什么，直接作废：
+			// 少了这一步，上一会话的在途 list_projects 会在新会话的快照到达前落进新视图。
+			this.#invalidateProjectAttribution(view);
+			// 改动清单同理：它是上一个会话所在仓库的，新会话还没问过。
+			this.#invalidateGitChanges(view);
+			this.#view = view;
+			this.#notify();
+			try {
+				// `projectId` 落不下去（由回执的 notApplied 报给调用方）；`title` 由适配层在创建后
+				// 跟一次 `set_session_name` 落上 —— 那一跳是在**新的**会话上，不在上一个会话上。
+				const result = await this.#client.newSession({ ...opts, agentId: target });
+				if (!result.created) {
+					// serve 接了命令但没建（`cancelled:true`，如上一回合还没收尾）：这不是一次新建。
+					return this.#creationFailed("serve 拒绝了这次新建（上一回合还没收尾）——没有新会话");
+				}
+				this.#clearCommandError();
+				return { kind: "created", notApplied: result.notApplied };
+			} catch (err) {
+				const error = errorMessageOf(err);
+				this.#createFailed(error);
+				// 命令发出去了但没等到答复（断线 / 超时）：建没建**不知道**，不许报成「没建成」。
+				return { kind: "unknown", error };
+			}
+		} finally {
+			this.#creating = false;
+		}
+	}
+
+	/** 确定没建成：错误进提示条（唯一可见的错误面），并回一个说得清的否定。 */
+	#creationFailed(error: string): NewSessionOutcome {
+		this.#createFailed(error);
+		return { kind: "not-created", error };
+	}
+
+	/** 新建失败的可见面：提示条写 serve / 连接层的原文 + 出错告警（与其它写命令同一套，B7-1）。 */
+	#createFailed(error: string): void {
+		this.#setCommandError(`新建会话失败：${error}`);
+		void notifyGuarded("出错告警 · 命令失败", error.slice(0, 120), "cornfield-notify-errors");
 	}
 
 	/** 切换模型（set_model）。失败不再静默：错误写 view.commandError，由模型控制中心/工作台提示条渲染。 */
@@ -661,11 +745,6 @@ export class SessionStore {
 		this.#notify();
 	}
 
-	/** lazy attach 注册表 agent（attach 后 serve 会推该会话快照/进度）。 */
-	attach(sessionId: string): void {
-		void this.#client.attach(sessionId).catch(() => undefined);
-	}
-
 	/** 切换活动会话（switch_session；serve 随后推新 session_snapshot，工作台自动跟随）。 */
 	switchSession(sessionId: string): void {
 		this.#setActiveAgent(sessionId, this.#workspaceShortOf(undefined, sessionId));
@@ -673,16 +752,40 @@ export class SessionStore {
 	}
 
 	/**
-	 * 把本连接的焦点切到某个 Agent。
+	 * 把本连接的焦点切到某个 Agent，并**等到 serve 的确认**。
 	 *
-	 * attach 与 switch_session 是同一件事的两半：只 attach 不切会话，serve 仍把消息发给上一个
-	 * Agent（回复也就不会回到这一屏）；只切会话不 attach，目标 Agent 可能还没起来。
-	 * 两半必须在一处绑定 —— 之前首页、Agent 管理、Composer 的 agent 菜单各写一遍这两行，
-	 * 任何一处将来只改一半，都会表现成「切过去了但回复不来」。
+	 * attach 与 switch_session 是同一件事的两半（只 attach 不切会话，serve 仍把消息发给上一个
+	 * Agent；只切会话不 attach，目标 Agent 可能还没起来），两半都在这里 await —— 调用方拿到
+	 * `ok:true` 才代表 serve 侧 `ctx.activeAgentId` 真的已经是它了，这正是「先切 Agent、再在那个
+	 * Agent 上新建会话」必须能等到的那个信号（见 {@link newSession}）；fire-and-forget 版本发完就回，
+	 * 调用方只能靠猜。
+	 *
+	 * UI 仍然立刻跟随（与 {@link switchSession} 同一条约定：新快照到达前不显示上一个 Agent 的
+	 * 转录）；但 serve 拒了这次切换时，本地读数**退回上一个焦点** —— 屏幕上报的必须是真的那个
+	 * Agent，不能是一个 serve 从没切过去的。`error` 是 serve 的原文（未连接时是连接层的原因）。
 	 */
-	focusAgent(agentId: string): void {
-		this.attach(agentId);
-		this.switchSession(agentId);
+	async focusAgent(agentId: string): Promise<FocusAgentResult> {
+		const previous = { agentId: this.#activeAgentId, workspace: this.#activeWorkspace };
+		this.#setActiveAgent(agentId, this.#workspaceShortOf(undefined, agentId));
+		try {
+			await this.#client.attach(agentId);
+			await this.#client.switchSession(agentId);
+		} catch (err) {
+			this.#restoreFocus(previous.agentId, previous.workspace);
+			return { ok: false, error: errorMessageOf(err) };
+		}
+		return { ok: true };
+	}
+
+	/** 把焦点读数退回上一个值（只改读数，不动转录与面板：那些属于即将到来的新快照）。 */
+	#restoreFocus(agentId: string | null, workspace: string | undefined): void {
+		this.#activeAgentId = agentId;
+		this.#activeWorkspace = workspace;
+		const view = cloneView(this.getSnapshot());
+		view.activeAgentId = agentId ?? undefined;
+		view.activeWorkspace = workspace;
+		this.#view = view;
+		this.#notify();
 	}
 
 	/** 记录本连接焦点 agent 并立即同步到 view（UI 立即跟随，不等 serve 快照）。 */
