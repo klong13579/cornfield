@@ -102,10 +102,21 @@ export interface SessionView {
 	phase: SessionPhaseDto;
 	model: string | null;
 	thinkingLevel: string | null;
+	/** 会话自己的 id（快照 payload 的 `session.sessionId`，一串 UUID）—— 只用于显示与索引对表。 */
 	sessionId: string;
 	sessionName?: string;
 	/** 当前会话 JSONL 绝对路径（快照带出；产物 tab 按会话隔离视图用）。 */
 	sessionFile?: string;
+	/**
+	 * **会话身份** = 本连接焦点附件的**地址**（`AttachedSession.address`；快照帧的 `sessionId`）。
+	 * 它回答「这个会话在哪一个工作根里」：wire 的 `fs_*` / `git_*` / `list_artifacts` / `/preview`
+	 * 的 `sessionId` 要的就是这个值（未绑 Project 的附件地址 == Agent 名，所以未绑会话逐字节不变）；
+	 * 绑了 Project 的会话只有它能指认得动 —— 拿 Agent 名指过去是全球通用的「那个 Agent 自己根上的附件」。
+	 *
+	 * 与 `sessionId`（会话自己的 id，一串 UUID）不是一件事：后者不是 wire 能解析的定向参数。
+	 * 空串 = 还没收到快照（此刻不指向任何根）。
+	 */
+	attachmentAddress: string;
 	/** 已落库消息。 */
 	messages: TranscriptMessage[];
 	/** messageId → session entryId（消息级 undo/fork/retry 定位）。 */
@@ -265,6 +276,11 @@ export class SessionStore {
 	#listeners = new Set<() => void>();
 	/** 本连接当前焦点 agent（switchSession/openHistorySession 记录；serve 启动焦点 = default）。 */
 	#activeAgentId: string | null = null;
+	/**
+	 * 本连接当前焦点**附件的地址**（快照帧的 `sessionId`；未绑定的附件地址就是 Agent 名）。
+	 * 只在 session_snapshot 到达时更新 —— 那是这条事实唯一的权威来源。
+	 */
+	#attachmentAddress = "";
 	/** 当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录，agent 会话 = agentDir）。 */
 	#activeWorkspace: string | undefined;
 	/** 会话树属于一个会话：换会话就地作废，绝不让上一个会话的子树留在视图里。 */
@@ -1708,6 +1724,10 @@ export class SessionStore {
 	#onFrame(frame: WireServerEventDto): void {
 		switch (frame.type) {
 			case "session_snapshot":
+				// 帧上的 `sessionId` 是**焦点附件的地址**（服务端 `sendSessionSnapshotTo` 填的
+				// `focused.address`）—— 会话身份就在这一帧上，内层 snapshot.sessionId 是另一个东西
+				// （会话自己的 uuid）。先记下来再重建视图，否则视图里的地址还是上一个附件那个。
+				this.#attachmentAddress = frame.sessionId;
 				this.#applySnapshot(frame.snapshot);
 				break;
 			case "server_snapshot":
@@ -1922,6 +1942,7 @@ export class SessionStore {
 				model: null,
 				thinkingLevel: null,
 				sessionId: "",
+				attachmentAddress: this.#attachmentAddress,
 				messages: [],
 				messageEntryIds: {},
 				isStreaming: false,
@@ -1962,6 +1983,7 @@ export class SessionStore {
 			model: snapshot.model?.id ?? null,
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
+			attachmentAddress: this.#attachmentAddress,
 			sessionName: snapshot.sessionName,
 			sessionFile: snapshot.sessionFile,
 			messages: snapshot.messages.map(m => this.#toMessage(m)),

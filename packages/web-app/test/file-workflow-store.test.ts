@@ -25,11 +25,15 @@ function versionOf(content: string): string {
 /** 服务端 fs_read 的字节预算（与 wire-server 的 FS_MAX_READ_BYTES 同值）。 */
 const READ_MAX_BYTES = 128 * 1024;
 
-/** 内存「serve」：文件表 + 与线上同语义的 fs_read / fs_write(CAS) / fs_diff。 */
+/** 内存「serve」：文件表 + 与线上同语义的 fs_read / fs_write(CAS) / fs_diff。
+ *
+ * 读/写都记下服务端收到的 `sessionId`（wire 身份）：它是不是**会话身份**而不是 Agent 名，
+ * 是这套测试要卡住的事（写错身份会落到另一个工作根、改错另一个文件）。
+ */
 class FakeServe {
 	readonly files = new Map<string, string>();
-	readonly reads: string[] = [];
-	readonly writes: { path: string; content: string; expectedVersion: string }[] = [];
+	readonly reads: { sessionId: string; path: string }[] = [];
+	readonly writes: { sessionId: string; path: string; content: string; expectedVersion: string }[] = [];
 	/** 落盘前改写内容（模拟 lsp.formatOnWrite）：返回 undefined 表示不改。 */
 	normalize: ((content: string) => string | undefined) | null = null;
 	/** 下一次 fs_read 抛错（探测失败用）。 */
@@ -55,8 +59,8 @@ class FakeServe {
 		};
 	}
 
-	async fsRead(_sessionId: string, path: string): Promise<FsReadResult> {
-		this.reads.push(path);
+	async fsRead(sessionId: string, path: string): Promise<FsReadResult> {
+		this.reads.push({ sessionId, path });
 		if (this.failNextRead) {
 			this.failNextRead = false;
 			throw new Error("read failed");
@@ -64,8 +68,8 @@ class FakeServe {
 		return this.#read(path);
 	}
 
-	async fsWrite(_sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult> {
-		this.writes.push({ path, content, expectedVersion });
+	async fsWrite(sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult> {
+		this.writes.push({ sessionId, path, content, expectedVersion });
 		const current = this.files.has(path) ? versionOf(this.files.get(path) ?? "") : "";
 		if (current !== expectedVersion) {
 			// 与适配层同一个判决对象：服务端拒写 → 调用方拿到 FsConflictError
@@ -91,7 +95,7 @@ class FakeServe {
 class FakeSessions {
 	view: FileWorkflowSessionView = {
 		activeAgentId: "default",
-		sessionId: "default",
+		attachmentAddress: "default",
 		sessionFile: "/sessions/a.jsonl",
 		isStreaming: false,
 		agents: [DEFAULT_AGENT],
@@ -133,6 +137,12 @@ const DEFAULT_AGENT: AgentInfoDto = {
 
 const PROJECT: ProjectRecordDto = { projectId: "p-cornfield", root: PROJECT_ROOT, name: "cornfield" };
 
+/**
+ * 绑了 Project 的附件地址：`attachmentKey(agentId, 工作根)`（服务端在中间放一个 NUL）。
+ * 同一个 Agent 的未绑定附件地址就是 `"default"` —— 两者指的不是同一个工作根。
+ */
+const BOUND_ADDRESS = `${DEFAULT_AGENT.id}\u0000${PROJECT_ROOT}`;
+
 let serve: FakeServe;
 let sessions: FakeSessions;
 let store: FileWorkflowStore;
@@ -146,8 +156,12 @@ beforeEach(() => {
 	store.init({ client: client(), sessions });
 });
 
-function open(path = "src/a.ts", agentId = "default"): void {
-	store.requestOpen(agentId, path);
+/**
+ * 打开一份文件（默认：未绑 Project 的会话 —— 附件地址 == Agent 名）。
+ * `attachmentAddress` 是 wire 身份（fs 命令的 sessionId），`agentId` 是归属展示 Agent。
+ */
+function open(path = "src/a.ts", agentId = "default", attachmentAddress = "default"): void {
+	store.requestOpen({ attachmentAddress, agentId, path });
 }
 
 describe("打开与编辑", () => {
@@ -157,6 +171,7 @@ describe("打开与编辑", () => {
 		await settle();
 		const openFile = store.getSnapshot().open;
 		expect(openFile?.path).toBe("src/a.ts");
+		expect(openFile?.attachmentAddress).toBe("default");
 		expect(openFile?.agentId).toBe("default");
 		expect(openFile?.baseText).toBe("one\ntwo\n");
 		expect(openFile?.draft).toBe("one\ntwo\n");
@@ -222,7 +237,9 @@ describe("保存（CAS）", () => {
 		store.edit("one\ntwo\n");
 		store.save();
 		await settle();
-		expect(serve.writes).toEqual([{ path: "src/a.ts", content: "one\ntwo\n", expectedVersion: versionOf("one\n") }]);
+		expect(serve.writes).toEqual([
+			{ sessionId: "default", path: "src/a.ts", content: "one\ntwo\n", expectedVersion: versionOf("one\n") },
+		]);
 		const openFile = store.getSnapshot().open;
 		expect(openFile?.baseText).toBe("one\ntwo\n");
 		expect(openFile?.baseVersion).toBe(versionOf("one\ntwo\n"));
@@ -275,6 +292,7 @@ describe("保存（CAS）", () => {
 		store.overwriteWithDraft();
 		await settle();
 		expect(serve.writes.at(-1)).toEqual({
+			sessionId: "default",
 			path: "src/a.ts",
 			content: "mine-v2\n",
 			expectedVersion: versionOf("external\n"),
@@ -414,9 +432,13 @@ describe("未保存时换文件", () => {
 		open("src/a.ts");
 		await settle();
 		store.edit("a-edited\n");
-		store.requestOpen("default", "src/b.ts");
+		open("src/b.ts");
 		await settle();
-		expect(store.getSnapshot().pendingOpen).toEqual({ agentId: "default", path: "src/b.ts" });
+		expect(store.getSnapshot().pendingOpen).toEqual({
+			attachmentAddress: "default",
+			agentId: "default",
+			path: "src/b.ts",
+		});
 		expect(store.getSnapshot().open?.path).toBe("src/a.ts");
 		expect(store.getSnapshot().open?.draft).toBe("a-edited\n");
 	});
@@ -427,7 +449,7 @@ describe("未保存时换文件", () => {
 		open("src/a.ts");
 		await settle();
 		store.edit("a-edited\n");
-		store.requestOpen("default", "src/b.ts");
+		open("src/b.ts");
 		store.cancelPendingOpen();
 		await settle();
 		expect(store.getSnapshot().pendingOpen).toBeNull();
@@ -440,7 +462,7 @@ describe("未保存时换文件", () => {
 		open("src/a.ts");
 		await settle();
 		store.edit("a-edited\n");
-		store.requestOpen("default", "src/b.ts");
+		open("src/b.ts");
 		store.confirmPendingOpen();
 		await settle();
 		const openFile = store.getSnapshot().open;
@@ -452,8 +474,8 @@ describe("未保存时换文件", () => {
 	test("迟到响应落不了地：A 的读回来时已经打开 B", async () => {
 		serve.seed("src/a.ts", "a\n");
 		serve.seed("src/b.ts", "b\n");
-		store.requestOpen("default", "src/a.ts");
-		store.requestOpen("default", "src/b.ts"); // A 的响应还在路上
+		store.requestOpen({ attachmentAddress: "default", agentId: "default", path: "src/a.ts" });
+		store.requestOpen({ attachmentAddress: "default", agentId: "default", path: "src/b.ts" }); // A 的响应还在路上
 		await settle();
 		expect(store.getSnapshot().open?.path).toBe("src/b.ts");
 		expect(store.getSnapshot().open?.draft).toBe("b\n");
@@ -470,12 +492,25 @@ describe("会话归属", () => {
 		expect(store.getSnapshot().identity).toBe("default|/sessions/b.jsonl");
 	});
 
-	test("换 Agent：打开的文件夹闭（路径相对另一个 agentDir 解析）", async () => {
+	test("换会话身份（另一个 Agent 的附件）：打开的文件夹闭", async () => {
 		serve.seed("src/a.ts", "a\n");
 		open();
 		await settle();
-		sessions.update({ activeAgentId: "hr", sessionId: "hr" });
+		sessions.update({ activeAgentId: "hr", attachmentAddress: "hr" });
 		expect(store.getSnapshot().open).toBeNull();
+	});
+
+	test("同一个 Agent 换到绑 Project 的附件：旧文件也作废（路径相对另一个根解）", async () => {
+		// 未绑定：地址 == "default"（Agent 自己根上的附件）
+		serve.seed("src/a.ts", "a\n");
+		open();
+		await settle();
+		expect(store.getSnapshot().open?.path).toBe("src/a.ts");
+
+		// 切到同 Agent 绑了 Project 的附件：地址带上工作根，Agent 还是那个 Agent
+		sessions.update({ attachmentAddress: `${BOUND_ADDRESS}` });
+		expect(store.getSnapshot().open).toBeNull();
+		expect(store.getSnapshot().identity).toBe(`${BOUND_ADDRESS}|/sessions/a.jsonl`);
 	});
 
 	test("换会话（脏）：草稿不静默丢，标成孤立并拒绝保存", async () => {
@@ -503,6 +538,70 @@ describe("会话归属", () => {
 		expect(store.getSnapshot().contextItems).toHaveLength(1);
 		sessions.update({ sessionFile: "/sessions/b.jsonl" });
 		expect(store.getSnapshot().contextItems).toEqual([]);
+	});
+});
+
+describe("wire 身份（会话身份）与归属 Agent 各就各位", () => {
+	test("绑 Project 的会话：读、写、探测都用附件地址，不是 Agent 名", async () => {
+		serve.seed("PROJECT_ROOT.txt", "proj\n");
+		open("PROJECT_ROOT.txt", "default", BOUND_ADDRESS);
+		await settle();
+		store.edit("proj-edited\n");
+		store.save();
+		await settle();
+		// 每一条 fs 命令都是拿附件地址问的：拿 Agent 名问会落到那个 Agent **自己根上的** 附件
+		// （未绑定），也就是另一个工作根里的另一个文件。
+		expect(serve.reads.length).toBeGreaterThan(0);
+		expect(serve.reads.every(read => read.sessionId === BOUND_ADDRESS)).toBe(true);
+		expect(serve.writes).toEqual([
+			{
+				sessionId: BOUND_ADDRESS,
+				path: "PROJECT_ROOT.txt",
+				content: "proj-edited\n",
+				expectedVersion: versionOf("proj\n"),
+			},
+		]);
+		// 归属不变：还是那个 Agent 的工作面里的文件（两个身份分开记）
+		const openFile = store.getSnapshot().open;
+		expect(openFile?.attachmentAddress).toBe(BOUND_ADDRESS);
+		expect(openFile?.agentId).toBe("default");
+	});
+
+	test("换到另一个附件后再打开同一路径：写盘带的是**新**身份", async () => {
+		serve.seed("src/a.ts", "a\n");
+		open("src/a.ts", "default", "default");
+		await settle();
+		sessions.update({ attachmentAddress: BOUND_ADDRESS });
+		open("src/a.ts", "default", BOUND_ADDRESS);
+		await settle();
+		store.edit("a2\n");
+		store.save();
+		await settle();
+		expect(serve.writes.at(-1)?.sessionId).toBe(BOUND_ADDRESS);
+	});
+
+	test("探测外部改写也走会话身份（否则改的是另一个根里的同名文件）", async () => {
+		serve.seed("src/a.ts", "one\n");
+		open("src/a.ts", "default", BOUND_ADDRESS);
+		await settle();
+		serve.seed("src/a.ts", "one\ntwo\n");
+		await store.checkExternal();
+		expect(serve.reads.at(-1)).toEqual({ sessionId: BOUND_ADDRESS, path: "src/a.ts" });
+		expect(store.getSnapshot().open?.baseText).toBe("one\ntwo\n");
+	});
+
+	test("同一路径在两个附件下的身份不同：换根后不得把旧文件当新会话的", async () => {
+		serve.seed("src/a.ts", "a\n");
+		open("src/a.ts", "default", "default");
+		await settle();
+		store.edit("uncommitted\n");
+		// 切到绑 Project 的附件：脏草稿不许静默丢，也不许再往新根写
+		sessions.update({ attachmentAddress: BOUND_ADDRESS });
+		const openFile = store.getSnapshot().open;
+		expect(openFile?.orphaned).toBe(true);
+		store.save();
+		await settle();
+		expect(serve.writes).toHaveLength(0);
 	});
 });
 
@@ -621,6 +720,7 @@ describe("上下文条目的 scope 与 version（票 22）", () => {
 		sessions.update({
 			sessionFile: "/sessions/b.jsonl",
 			activeAgentId: "other",
+			attachmentAddress: "other",
 			agents: [{ ...DEFAULT_AGENT, id: "other", agentDir: undefined }],
 		});
 		expect(store.getSnapshot().contextItems).toEqual([]);

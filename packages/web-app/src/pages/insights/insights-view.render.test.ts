@@ -69,6 +69,7 @@ function viewOf(patch: Partial<SessionView>): SessionView {
 		sessionName: "修 scope 面板",
 		sessionFile:
 			"/Users/me/.cornfield/agent/sessions/--Users--me--work--mika/by-date/2026-09-15/143205__a1b2c3d4.jsonl",
+		attachmentAddress: "hr",
 		messages: [],
 		messageEntryIds: {},
 		isStreaming: false,

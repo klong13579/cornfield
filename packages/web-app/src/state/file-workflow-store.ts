@@ -22,6 +22,15 @@ import type { SessionView } from "./session-store";
  * 一条（换会话一起作废）。拆成三个 store 就得把身份作废逻辑抄三遍，抄漏一处就是上一个会话的
  * 草稿留在了新会话的屏幕上。
  *
+ * ## 两个身份不要揉
+ *
+ *   **会话身份**（附件地址）＝ 「在哪个工作根里」—— fs_read/fs_write 的 `sessionId` 就是它，
+ *    文件路径相对它解。它才是写盘目标。
+ *   **归属 Agent**   ＝ 「是谁的」—— 解 agentDir 算范围、面板上显示归属。
+ *
+ * 一个 Agent 可以有多个附件（绑不同 Project），两者因此不是一回事；拿 Agent 名去指会话，
+ * 拿到的永远是「那个 Agent 自己根上的附件」。
+ *
  * ## 写盘的唯一真相
  *
  * 保存走 fs_write 的 compare-and-swap：带打开时读到的 `version`，服务端对不上就拒绝且一个
@@ -44,9 +53,15 @@ export interface EditorConflict {
 
 /** 当前打开的一份文件。 */
 export interface OpenFile {
-	/** agent workspace 相对路径（fs_read/fs_write 入参）。 */
+	/** 会话工作面相对路径（fs_read/fs_write 入参）。 */
 	path: string;
-	/** 打开时选定的 agent：写盘目标由它固定，不随后续会话切换漂移。 */
+	/**
+	 * **wire 目标 = 会话身份**（附件地址）：fs_read/fs_write/探测读的 `sessionId` 就是它。
+	 * 打开时固定，不随后续会话切换漂移 —— 写盘只能落在“这份文件当时所在的那个根”里。
+	 */
+	attachmentAddress: string;
+	/** 归属/展示 Agent（这份文件是它的工作面里的）：解 agentDir 算范围、面板上显示“来自哪个 Agent”。
+	 * **不参与** fs 定向——归属是“是谁的”，不是“在哪个根里”，二者可以不同（一个 Agent 多个附件）。 */
 	agentId: string;
 	/** 磁盘上那一份（编辑器 base）：保存时回传 baseVersion 做 CAS。 */
 	baseText: string;
@@ -66,8 +81,9 @@ export interface OpenFile {
 	orphaned: boolean;
 }
 
-/** 待确认的「带未保存修改换文件」。 */
+/** 待确认的“带未保存修改换文件”。 */
 export interface PendingOpen {
+	attachmentAddress: string;
 	agentId: string;
 	path: string;
 }
@@ -82,7 +98,7 @@ export interface DiffReview {
 }
 
 export interface FileWorkflowView {
-	/** 当前会话身份（`agentId|sessionFile`）；未连接时为空串。 */
+	/** 当前会话身份（`附件地址|sessionFile`）；未连接时为空串。 */
 	identity: string;
 	open: OpenFile | null;
 	/** 待带走的下一条消息的上下文条目（每条带 scope 与 version —— 见下面的创建处）。 */
@@ -95,7 +111,8 @@ export interface FileWorkflowView {
 export type FileWorkflowSessionView = Pick<
 	SessionView,
 	| "activeAgentId"
-	| "sessionId"
+	// 会话身份（焦点附件的地址）：换会话的作废判定按它算 —— 路径是相对那个工作根解析的。
+	| "attachmentAddress"
 	| "sessionFile"
 	| "isStreaming"
 	| "agents"
@@ -166,16 +183,21 @@ export class FileWorkflowStore {
 	/**
 	 * 打开一个文件。有未保存修改时**不**直接换（先挂起，等用户选）：换文件=丢掉草稿，
 	 * 而草稿是用户打的字，丢掉它必须是他自己说的。
+	 *
+	 * 两个身份分开传：`attachmentAddress` 是 wire 目标（fs 命令的 `sessionId`），`agentId` 是
+	 * 归属/展示 Agent。合成一个参数就是把“在哪个根里”与“是谁的”拴死 —— 而它们本来就能不同。
 	 */
-	requestOpen(agentId: string, path: string): void {
+	requestOpen(target: { attachmentAddress: string; agentId: string; path: string }): void {
 		const open = this.#view.open;
-		if (open && !open.orphaned && open.agentId === agentId && open.path === path) return;
+		if (open && !open.orphaned && open.attachmentAddress === target.attachmentAddress && open.path === target.path) {
+			return;
+		}
 		if (open?.dirty) {
-			this.#view = { ...this.#view, pendingOpen: { agentId, path } };
+			this.#view = { ...this.#view, pendingOpen: { ...target } };
 			this.#notify();
 			return;
 		}
-		void this.#load(agentId, path);
+		void this.#load(target);
 	}
 
 	/** 用户确认放弃草稿、打开挂起的那个文件。 */
@@ -183,7 +205,7 @@ export class FileWorkflowStore {
 		const pending = this.#view.pendingOpen;
 		if (!pending) return;
 		this.#view = { ...this.#view, pendingOpen: null };
-		void this.#load(pending.agentId, pending.path);
+		void this.#load(pending);
 	}
 
 	cancelPendingOpen(): void {
@@ -287,7 +309,7 @@ export class FileWorkflowStore {
 	reload(): void {
 		const open = this.#view.open;
 		if (!open || open.dirty) return;
-		void this.#load(open.agentId, open.path);
+		void this.#load({ attachmentAddress: open.attachmentAddress, agentId: open.agentId, path: open.path });
 	}
 
 	/**
@@ -301,13 +323,13 @@ export class FileWorkflowStore {
 		const token = this.#token;
 		let disk: FsReadResult;
 		try {
-			disk = await deps.client.fsRead(open.agentId, open.path);
+			disk = await deps.client.fsRead(open.attachmentAddress, open.path);
 		} catch {
 			return;
 		}
 		// 判决基于**读回来后那一刻的** base：探测期间用户可能刚保存过（base 已推进到磁盘那一份），
 		// 拿读到时的旧 base 去比会凭空造出一个冲突。
-		const current = this.#liveOpen(token, open.path, open.agentId);
+		const current = this.#liveOpen(token, open.path, open.attachmentAddress);
 		if (!current) return;
 		if (disk.version === current.baseVersion) return;
 		if (!current.dirty) {
@@ -380,8 +402,9 @@ export class FileWorkflowStore {
 	 *   scope   路径落在哪个锚点下 —— 用 wire 的共享规则判（技能页同一份）；锚点/路径不够就不判。
 	 *   version 打开这份文件时读到的 baseVersion —— 没读到（还在读、读失败、只读了半份）就是缺省。
 	 *
-	 * 归属 Agent：路径就是当前打开的那份文件时用它的 agentId（路径是相对**它的**家解析的）；
-	 * 否则用当前焦点 Agent —— 条目会被当前会话带走，而相对路径正是相对那个工作区解析的。
+	 * 归属 Agent：路径就是当前打开的那份文件时用它的 agentId（**打开时记下的归属**，
+	 * 不是 wire 目标——路径是相对那个工作根解析的）；否则用当前焦点 Agent —— 条目会被当前
+	 * 会话带走，而相对路径正是相对那个工作区解析的。
 	 */
 	#factsFor(kind: ContextItemKind, path: string): ContextItemFacts {
 		const view = this.#deps?.sessions.getSnapshot();
@@ -445,17 +468,21 @@ export class FileWorkflowStore {
 
 	// ── 内部 ──
 
-	/** 当前是否还是「那一次打开」（token 对得上且路径/目标 agent 一致）——异步结果落地前的唯一检查。 */
-	#liveOpen(token: number, path: string, agentId: string): OpenFile | null {
+	/**
+	 * 当前是否还是「那一次打开」（token 对得上且路径/目标会话一致）——异步结果落地前的唯一检查。
+	 * 对表用的是 **wire 目标**（会话身份）：它变了就是另一个根里的另一个文件。
+	 */
+	#liveOpen(token: number, path: string, attachmentAddress: string): OpenFile | null {
 		if (token !== this.#token) return null;
 		const open = this.#view.open;
-		if (!open || open.path !== path || open.agentId !== agentId) return null;
+		if (!open || open.path !== path || open.attachmentAddress !== attachmentAddress) return null;
 		return open;
 	}
 
-	async #load(agentId: string, path: string): Promise<void> {
+	async #load(target: { attachmentAddress: string; agentId: string; path: string }): Promise<void> {
 		const deps = this.#deps;
 		if (!deps) return;
+		const { attachmentAddress, agentId, path } = target;
 		const epoch = this.#epoch;
 		const token = ++this.#token;
 		this.#view = {
@@ -464,6 +491,7 @@ export class FileWorkflowStore {
 			pendingOpen: null,
 			open: {
 				path,
+				attachmentAddress,
 				agentId,
 				baseText: "",
 				baseVersion: "",
@@ -480,17 +508,17 @@ export class FileWorkflowStore {
 		this.#notify();
 		let result: FsReadResult;
 		try {
-			result = await deps.client.fsRead(agentId, path);
+			result = await deps.client.fsRead(attachmentAddress, path);
 		} catch (err) {
 			if (epoch !== this.#epoch) return;
-			const open = this.#liveOpen(token, path, agentId);
+			const open = this.#liveOpen(token, path, attachmentAddress);
 			if (!open) return;
 			this.#view = { ...this.#view, open: { ...open, loading: false, error: messageOf(err) } };
 			this.#notify();
 			return;
 		}
 		if (epoch !== this.#epoch) return;
-		const open = this.#liveOpen(token, path, agentId);
+		const open = this.#liveOpen(token, path, attachmentAddress);
 		if (!open) return;
 		this.#view = {
 			...this.#view,
@@ -517,7 +545,7 @@ export class FileWorkflowStore {
 		const token = this.#token;
 		let result: FsWriteResult;
 		try {
-			result = await deps.client.fsWrite(open.agentId, open.path, content, expectedVersion);
+			result = await deps.client.fsWrite(open.attachmentAddress, open.path, content, expectedVersion);
 		} catch (err) {
 			if (epoch !== this.#epoch) return;
 			const failed = this.#liveOpen(token, open.path, open.agentId);
@@ -531,7 +559,7 @@ export class FileWorkflowStore {
 			return;
 		}
 		if (epoch !== this.#epoch) return;
-		const current = this.#liveOpen(token, open.path, open.agentId);
+		const current = this.#liveOpen(token, open.path, open.attachmentAddress);
 		if (!current) return;
 		// 写盘期间用户又改了草稿：base 推进到刚落盘的那一份，但 dirty 按现在的草稿算 ——
 		// 否则「保存成功」会把他在飞行中敲的字标成已保存。
@@ -562,12 +590,12 @@ export class FileWorkflowStore {
 		const token = this.#token;
 		let disk: FsReadResult;
 		try {
-			disk = await deps.client.fsRead(afterWrite.agentId, afterWrite.path);
+			disk = await deps.client.fsRead(afterWrite.attachmentAddress, afterWrite.path);
 		} catch {
 			return;
 		}
 		if (epoch !== this.#epoch) return;
-		const current = this.#liveOpen(token, afterWrite.path, afterWrite.agentId);
+		const current = this.#liveOpen(token, afterWrite.path, afterWrite.attachmentAddress);
 		if (!current) return; // 已经换了文件或会话
 		if (current.draft !== writtenContent) return; // 用户在写盘期间又改了：别拿磁盘文本盖掉他的字
 		this.#view = {
@@ -592,16 +620,16 @@ export class FileWorkflowStore {
 		const conflict: EditorConflict = { detail, diskText: "", diskVersion: "" };
 		if (deps) {
 			try {
-				const disk = await deps.client.fsRead(open.agentId, open.path);
-				if (epoch !== this.#epoch || !this.#liveOpen(token, open.path, open.agentId)) return;
+				const disk = await deps.client.fsRead(open.attachmentAddress, open.path);
+				if (epoch !== this.#epoch || !this.#liveOpen(token, open.path, open.attachmentAddress)) return;
 				conflict.diskText = disk.text;
 				conflict.diskVersion = disk.version;
 			} catch {
 				// 连磁盘都读不到：仍然把「保存被拒绝」这件事说出来，不能退回成「保存成功」
-				if (epoch !== this.#epoch || !this.#liveOpen(token, open.path, open.agentId)) return;
+				if (epoch !== this.#epoch || !this.#liveOpen(token, open.path, open.attachmentAddress)) return;
 			}
 		}
-		const current = this.#liveOpen(token, open.path, open.agentId) ?? open;
+		const current = this.#liveOpen(token, open.path, open.attachmentAddress) ?? open;
 		this.#view = { ...this.#view, open: { ...current, conflict } };
 		this.#notify();
 	}
@@ -623,11 +651,17 @@ export class FileWorkflowStore {
 		this.#notify();
 	}
 
-	/** 会话身份：焦点 agent + 会话文件。一个概念一处定义（与 Project 归属同一把尺子）。 */
+	/**
+	 * 会话身份：焦点附件的地址 + 会话文件。一个概念一处定义（与 Project 归属同一把尺子）。
+	 *
+	 * 用地址而不用焦点 Agent：路径是相对那个**工作根**解析的，同一个 Agent 的两个附件（绑了不同
+	 * Project）是两个根 —— 按 Agent 名当身份，切到另一个附件时旧文件会活下来（它在新根下是另一个
+	 * 东西）。未绑定的附件地址 == Agent 名，所以未绑会话逐字节不变。
+	 */
 	#identityNow(): string {
 		const view = this.#deps?.sessions.getSnapshot();
 		if (!view) return "";
-		return `${activeAgentIdOf(view) ?? ""}|${view.sessionFile ?? ""}`;
+		return `${view.attachmentAddress}|${view.sessionFile ?? ""}`;
 	}
 
 	/**
@@ -650,7 +684,7 @@ export class FileWorkflowStore {
 				contextItems: [],
 				diff: null,
 				pendingOpen: null,
-				// 路径是相对 agentDir 解析的 —— 身份一变，同一个「path」指向的就是另一个目录里的另一个
+				// 路径是相对工作根解析的 —— 身份一变，同一个「path」指向的就是另一个目录里的另一个
 				// 文件，留着它等于让编辑器对着一个不存在的东西写字。没草稿就直接关（无损失）；
 				// 有草稿就不静默丢：留着让用户看见并自己处置（保存被拒并说明原因）。
 				open: !open ? null : open.dirty ? { ...open, orphaned: true } : null,

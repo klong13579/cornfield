@@ -16,8 +16,9 @@ import { FileExplorer } from "./FileExplorer";
  *
  * Terminal 是一个明确的**不做**：右栏不做终端。这里也没有留一个空 tab 占位。
  *
- * 数据源：Files/Artifacts 取当前 attached agent 的 registry id（未挂载回退首个 agent）；
- * Changes 自己按会话读（本会话 + 子会话各一组），不靠调用方传 agent。
+ * 数据源：Files 按**会话身份**（`view.attachmentAddress`，即焦点附件的地址）列 —— 绑了 Project 的
+ * 会话只有它能指认得动自己的工作根；Artifacts 取当前 attached agent 的 registry id（未挂载回退
+ * 首个 agent）；Changes 自己按会话读（本会话 + 子会话各一组），不靠调用方传 agent。
  */
 
 type TabId = "files" | "artifacts" | "changes";
@@ -32,8 +33,10 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 	const view = useSession();
 	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
-	// 跟随本连接当前焦点 agent（与左栏会话树同一处解析，避免两栏读不同 Agent）
+	// 跟随本连接当前焦点 agent（与左栏会话树同一处解析，避免两栏读不同 Agent）—— 只用于归属/展示。
 	const agentId = activeAgentIdOf(view);
+	// 文件面的 wire 身份是**会话身份**（附件地址）：绑了 Project 的会话只有它能指认出自己的根。
+	const attachmentAddress = view.attachmentAddress;
 
 	return (
 		<>
@@ -71,8 +74,8 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 				{/* 内容 */}
 				<div className="min-h-0 flex-1 overflow-hidden p-3">
 					{tab === "files" &&
-						(agentId ? (
-							<FileExplorer agentId={agentId} variant="narrow" />
+						(attachmentAddress !== "" && agentId ? (
+							<FileExplorer attachmentAddress={attachmentAddress} agentId={agentId} variant="narrow" />
 						) : (
 							<div className="py-10 text-center text-[12px] text-ink-faint">
 								{view.connected ? "等待会话挂载…" : "未连接——文件系统不可用"}
@@ -84,7 +87,13 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 							onOpenFile={(targetAgentId, path) => {
 								// 打开的是**那条改动所属会话**的文件（不是当前焦点 agent 的）；
 								// 编辑/保存的窗口在文件 tab 里，所以打开后切过去 —— 否则点了没反应。
-								getFileWorkflow().requestOpen(targetAgentId, path);
+								// 改动面板手上的身份就是一个 Agent（它的清单也是拿这个身份读的）：两个入参
+								// 因此同值 —— 清单从哪个根读的，就从哪个根开（一致性优先于猜测）。
+								getFileWorkflow().requestOpen({
+									attachmentAddress: targetAgentId,
+									agentId: targetAgentId,
+									path,
+								});
 								setTab("files");
 							}}
 						/>

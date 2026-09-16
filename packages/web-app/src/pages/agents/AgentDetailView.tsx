@@ -254,7 +254,12 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 
 				{tab === "profile" && <ProfileView agentId={agentId} />}
 
-				{tab === "files" && <FileExplorer agentId={agentId} />}
+				{tab === "files" && (
+					// Agent 详情页浏览的是**这个 Agent 自己根上的附件**：未绑 Project 的附件地址
+					// 就是 Agent 名（T26 保证），所以 wire 身份与展示 Agent 在这里同值 —— 两个入参
+					// 不是重复，是把“在哪个根里”与“是谁的”各自说清（工作台右栏两者不同）。
+					<FileExplorer attachmentAddress={agentId} agentId={agentId} />
+				)}
 
 				{tab === "prompts" && <PromptsView agentId={agentId} />}
 
