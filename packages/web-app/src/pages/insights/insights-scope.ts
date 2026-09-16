@@ -18,7 +18,12 @@
  *   errorRate = ΣfailedRequests / ΣtotalRequests（加权重算，**不是**各行 errorRate 取平均）
  */
 
-import type { AgentInfoDto, ProjectRecordDto, StatsFolderRowDto } from "@cornfield/wire";
+import {
+	type AgentInfoDto,
+	type ProjectRecordDto,
+	pickDeepestRootIndex,
+	type StatsFolderRowDto,
+} from "@cornfield/wire";
 import type { SessionRecordSummary } from "../../lib/records";
 
 /**
@@ -132,8 +137,14 @@ function resolveAgentIdentity(
 }
 
 /**
- * 最深的祖先 root 命中者（root 自身或其后代；嵌套声明遮蔽父级）——serve
- * `matchProjectForPath` 的同规则前端版本，用于把目录绝对路径挂到 Project 上。
+ * 最深的祖先 root 命中者（root 自身或其后代；嵌套声明遮蔽父级），用于把目录绝对路径挂到 Project 上。
+ *
+ * **规则只有一份**：pi-wire 的 `pickDeepestRootIndex`，serve 的 `matchProjectForPath` 与这里都调它，
+ * 前端不再自己实现一遍。**归一化按侧不同且不可避免**：serve 能 realpath（`resolveEquivalentPath`，
+ * symlink 解到真身），浏览器做不到也不假装做到，只能做词法归一（`normalizePath`）。
+ * 归一结果不同 = 命中结果可能不同（前端认不出的 symlink 路径就是未归属，不猜），
+ * 但「谁命中」的判定没有任何第二份实现。
+ *
  * `projects` 缺省 = registry 未读到 → 没有答案（undefined），不是「未归属」。
  */
 export function matchProjectForPath(
@@ -141,20 +152,9 @@ export function matchProjectForPath(
 	targetPath: string,
 ): ProjectRecordDto | undefined {
 	if (!projects) return undefined;
-	const wanted = normalizePath(targetPath);
-	let best: ProjectRecordDto | undefined;
-	let bestLength = -1;
-	for (const project of projects) {
-		const root = normalizePath(project.root);
-		if (!root) continue;
-		const prefix = root.endsWith("/") ? root : `${root}/`;
-		if (wanted !== root && !wanted.startsWith(prefix)) continue;
-		if (root.length > bestLength) {
-			best = project;
-			bestLength = root.length;
-		}
-	}
-	return best;
+	const roots = projects.map(project => normalizePath(project.root));
+	const index = pickDeepestRootIndex(roots, normalizePath(targetPath));
+	return index === -1 ? undefined : projects[index];
 }
 
 function attributeFromIndex(

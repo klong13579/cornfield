@@ -25,6 +25,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { getConfigDirName, isEnoent, resolveEquivalentPath } from "@cornfield/utils";
+import { pickDeepestRootIndex } from "@cornfield/wire";
 import type { ProjectId, ProjectRecord } from "./types";
 
 export const PROJECT_STORE_VERSION = 1;
@@ -101,20 +102,16 @@ export async function findProjectByRoot(root: string): Promise<ProjectRecord | u
  * Find the Project a path belongs to: the declared root itself, or the nearest declared
  * ancestor for a path inside it (deepest root wins, so a nested project declaration
  * shadows its parent). Pure, so a caller resolving several paths loads the store once.
+ *
+ * The rule itself is `pickDeepestRootIndex` in pi-wire — the web client asks the same question
+ * about its stats folders and both sides must answer it the same way. What stays on this side
+ * is the normalization: `resolveEquivalentPath` (realpath) is a serve-only runtime fact, so the
+ * roots handed to the rule are already resolved (a symlinked checkout matches its target).
  */
 export function matchProjectForPath(projects: readonly ProjectRecord[], targetPath: string): ProjectRecord | undefined {
-	const wanted = resolveEquivalentPath(targetPath);
-	let best: ProjectRecord | undefined;
-	let bestLength = -1;
-	for (const project of projects) {
-		const root = resolveEquivalentPath(project.root);
-		if (wanted !== root && !wanted.startsWith(root.endsWith(path.sep) ? root : `${root}${path.sep}`)) continue;
-		if (root.length > bestLength) {
-			best = project;
-			bestLength = root.length;
-		}
-	}
-	return best;
+	const roots = projects.map(project => resolveEquivalentPath(project.root));
+	const index = pickDeepestRootIndex(roots, resolveEquivalentPath(targetPath));
+	return index === -1 ? undefined : projects[index];
 }
 
 /**
