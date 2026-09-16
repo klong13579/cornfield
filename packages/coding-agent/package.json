@@ -493,14 +493,6 @@
 			"types": "./src/task/*.ts",
 			"import": "./src/task/*.ts"
 		},
-		"./task-control": {
-			"types": "./src/task-control/index.ts",
-			"import": "./src/task-control/index.ts"
-		},
-		"./task-control/*": {
-			"types": "./src/task-control/*.ts",
-			"import": "./src/task-control/*.ts"
-		},
 		"./tools": {
 			"types": "./src/tools/index.ts",
 			"import": "./src/tools/index.ts"
