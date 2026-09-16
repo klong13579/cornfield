@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { type DiffRow, parseNumberedDiff, summarizeDiff } from "../src/pages/workspace/diff-format";
+import {
+	type DiffRow,
+	pairForSplit,
+	parseNumberedDiff,
+	type SplitRow,
+	summarizeDiff,
+} from "../src/pages/workspace/diff-format";
 
 /**
  * T9：文件编辑面板的 diff 拆分。
@@ -86,6 +92,150 @@ describe("parseNumberedDiff", () => {
 
 	it("空格前缀的上下文行不因首个字符是空白而被丢掉", () => {
 		expect(parseNumberedDiff(" 1|  缩进的内容")).toEqual([{ kind: "context", lineNo: 1, text: "  缩进的内容" }]);
+	});
+});
+
+describe("pairForSplit", () => {
+	/** 便捷入口：直接把带行号的 diff 文本配成并列视图。 */
+	const split = (diff: string): SplitRow[] => pairForSplit(parseNumberedDiff(diff));
+
+	it("空 diff → 空数组", () => {
+		expect(split("")).toEqual([]);
+	});
+
+	it("没有对应行的一侧留空，不补假内容", () => {
+		// 纯删除：右侧全空（不是把删除行折成两栏各一份）
+		expect(split("-1|a\n-2|b")).toEqual([
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: null },
+			{ kind: "pair", left: { lineNo: 2, kind: "del", text: "b" }, right: null },
+		] satisfies SplitRow[]);
+		// 纯新增：左侧全空
+		expect(split("+1|a\n+2|b")).toEqual([
+			{ kind: "pair", left: null, right: { lineNo: 1, kind: "add", text: "a" } },
+			{ kind: "pair", left: null, right: { lineNo: 2, kind: "add", text: "b" } },
+		] satisfies SplitRow[]);
+	});
+
+	it("一段改动里按下标配对（删除多于新增 / 新增多于删除）", () => {
+		// 删 3 增 1：多出来的两行只在左栏
+		const moreDels = split("-1|a\n-2|b\n-3|c\n+1|x");
+		expect(moreDels).toEqual([
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: { lineNo: 1, kind: "add", text: "x" } },
+			{ kind: "pair", left: { lineNo: 2, kind: "del", text: "b" }, right: null },
+			{ kind: "pair", left: { lineNo: 3, kind: "del", text: "c" }, right: null },
+		] satisfies SplitRow[]);
+		// 增 2 删 1：多出来的一行只在右栏
+		const moreAdds = split("-1|a\n+1|x\n+2|y");
+		expect(moreAdds).toEqual([
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: { lineNo: 1, kind: "add", text: "x" } },
+			{ kind: "pair", left: null, right: { lineNo: 2, kind: "add", text: "y" } },
+		] satisfies SplitRow[]);
+	});
+
+	it("上下文行：两侧同一份内容，行号各自是真实行号", () => {
+		// 删除在前：旧 2/3 行在新文件里是 1/2 行（新 = 旧 + (新增数 − 删除数)）
+		expect(split("-1|a\n 2|b\n 3|c")).toEqual([
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: null },
+			{
+				kind: "pair",
+				left: { lineNo: 2, kind: "context", text: "b" },
+				right: { lineNo: 1, kind: "context", text: "b" },
+			},
+			{
+				kind: "pair",
+				left: { lineNo: 3, kind: "context", text: "c" },
+				right: { lineNo: 2, kind: "context", text: "c" },
+			},
+		] satisfies SplitRow[]);
+		// 新增在前：旧 1/2 行在新文件里是 2/3 行
+		expect(split("+1|x\n 1|b\n 2|c")).toEqual([
+			{ kind: "pair", left: null, right: { lineNo: 1, kind: "add", text: "x" } },
+			{
+				kind: "pair",
+				left: { lineNo: 1, kind: "context", text: "b" },
+				right: { lineNo: 2, kind: "context", text: "b" },
+			},
+			{
+				kind: "pair",
+				left: { lineNo: 2, kind: "context", text: "c" },
+				right: { lineNo: 3, kind: "context", text: "c" },
+			},
+		] satisfies SplitRow[]);
+	});
+
+	it("hunk 头与拆不出来的原文跨两栏，且偏移只在本 hunk 内成立", () => {
+		const diff = ["@@ -1,2 +1,2 @@", "-1|a", " 2|b", "@@ -9,2 +9,2 @@", " 9|y", "+9|z"].join("\n");
+		expect(split(diff)).toEqual([
+			{ kind: "marker", text: "@@ -1,2 +1,2 @@" },
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: null },
+			{
+				kind: "pair",
+				left: { lineNo: 2, kind: "context", text: "b" },
+				right: { lineNo: 1, kind: "context", text: "b" },
+			},
+			{ kind: "marker", text: "@@ -9,2 +9,2 @@" },
+			// 第二个 hunk：偏移从 0 起算，头一行上下文两侧同为 9
+			{
+				kind: "pair",
+				left: { lineNo: 9, kind: "context", text: "y" },
+				right: { lineNo: 9, kind: "context", text: "y" },
+			},
+			{ kind: "pair", left: null, right: { lineNo: 9, kind: "add", text: "z" } },
+		] satisfies SplitRow[]);
+	});
+
+	it("hunk 中间的原文行跨两栏，且不改变已累计的偏移", () => {
+		const diff = ["-1|a", "\\ No newline at end of file", " 2|b"].join("\n");
+		expect(split(diff)).toEqual([
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: null },
+			{ kind: "marker", text: "\\ No newline at end of file" },
+			{
+				kind: "pair",
+				left: { lineNo: 2, kind: "context", text: "b" },
+				right: { lineNo: 1, kind: "context", text: "b" },
+			},
+		] satisfies SplitRow[]);
+	});
+
+	it("没有 hunk 头的 diff：偏移从头累计", () => {
+		expect(split("-1|a\n-2|b\n 3|c")).toEqual([
+			{ kind: "pair", left: { lineNo: 1, kind: "del", text: "a" }, right: null },
+			{ kind: "pair", left: { lineNo: 2, kind: "del", text: "b" }, right: null },
+			{
+				kind: "pair",
+				left: { lineNo: 3, kind: "context", text: "c" },
+				right: { lineNo: 1, kind: "context", text: "c" },
+			},
+		] satisfies SplitRow[]);
+	});
+
+	it("内容原样透传：`|`、空行、中文、制表符", () => {
+		const diff = ["-1|const a = b | c;", "+1|", "+2|\t中文值"].join("\n");
+		expect(split(diff)).toEqual([
+			{
+				kind: "pair",
+				left: { lineNo: 1, kind: "del", text: "const a = b | c;" },
+				right: { lineNo: 1, kind: "add", text: "" },
+			},
+			{ kind: "pair", left: null, right: { lineNo: 2, kind: "add", text: "\t中文值" } },
+		] satisfies SplitRow[]);
+	});
+
+	it("一行都不丢：每个输入行在并列视图里都还看得见", () => {
+		const diff = ["@@ -1,4 +1,4 @@", " 1|same", "-2|old1", "-3|old2", "+2|new1", " 4|tail", "junk line"].join("\n");
+		const rows = parseNumberedDiff(diff);
+		const splitRows = pairForSplit(rows);
+		const cells = splitRows.reduce(
+			(total, row) => total + (row.kind === "pair" ? Number(row.left !== null) + Number(row.right !== null) : 0),
+			0,
+		);
+		const markers = splitRows.filter(row => row.kind === "marker").length;
+		const parseable = rows.filter(row => row.kind !== "hunk").length;
+		const contextRows = rows.filter(row => row.kind === "context").length;
+		// 拆不出来的原文（hunk 行）跨两栏：一行对一行
+		expect(markers).toBe(rows.length - parseable);
+		// 改动行占一格，上下文行两侧各一格 —— 没有行被吞掉
+		expect(cells).toBe(parseable + contextRows);
 	});
 });
 
