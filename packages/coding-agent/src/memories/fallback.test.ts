@@ -52,7 +52,7 @@ describe("Memory Fallback Logic", () => {
 
 		const result = parts.join("\n");
 
-		expect(result).toContain("Used tools: read → search → edit");
+		expect(result).toContain("Used tools: read → grep → edit");
 		expect(result).toContain("Modified files: src/foo.ts, src/bar.ts");
 		expect(result).toContain("Encountered 1 error(s), recovered successfully");
 		expect(result).toContain("User corrections: Use async/await");

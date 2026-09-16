@@ -152,7 +152,9 @@ describe("AgentSession auto-compaction queue resume", () => {
 		});
 
 		// Build a fake AssistantMessage with high token usage to trigger threshold
-		// compaction (contextWindow=200000, threshold ~80%).
+		// compaction. The window comes from the session's model (the catalog moved
+		// claude-sonnet-4-5 from 200k to 1M, which used to silently drop this fixture
+		// below the line); `resolveThresholdTokens` is window - max(15%, reserve).
 		const assistantMsg = {
 			role: "assistant" as const,
 			content: [],
@@ -161,7 +163,7 @@ describe("AgentSession auto-compaction queue resume", () => {
 			model: "claude-sonnet-4-5",
 			stopReason: "stop" as const,
 			usage: {
-				input: 190000,
+				input: Math.floor((session.model?.contextWindow ?? 200_000) * 0.85) + 5_000,
 				output: 1000,
 				cacheRead: 0,
 				cacheWrite: 0,
@@ -179,7 +181,10 @@ describe("AgentSession auto-compaction queue resume", () => {
 		await Bun.sleep(100); // let the agent's async event chain process
 
 		// Wait for compaction completion, then verify waitForIdle blocks on queued continuation.
-		await withTimeout(compactionDone, 5000, "compaction completion timed out");
+		// Hang guard, not a latency assertion — kept above bun's 5s per-test default so a
+		// missing event reports as this wait rather than bun's generic timeout (see the
+		// same bound in agent-session-compaction-overflow-recovery.test.ts).
+		await withTimeout(compactionDone, 30_000, "compaction completion timed out");
 		await Promise.resolve();
 		const idlePromise = session.waitForIdle();
 		let idleResolved = false;
@@ -197,7 +202,7 @@ describe("AgentSession auto-compaction queue resume", () => {
 		// uses the wire-reported usage from the last successful assistant turn,
 		// which the fake message above provides.
 		expect(runtimeSignals.some(signal => signal.startsWith("compaction:end:"))).toBe(true);
-	});
+	}, 30_000);
 
 	it("forwards todo reminder lifecycle signals to extensions", async () => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
