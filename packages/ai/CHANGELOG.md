@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-09-15
+
 ### Fixed
 
 - **Anthropic strict 白名单用例跟随 `find` → `glob` 改名**（`test/anthropic-alignment.test.ts`）：1.1.4 把工具名归一化后，代码侧 `ANTHROPIC_STRICT_TOOL_ALLOWLIST`（`src/providers/anthropic.ts:1820`）已是 `glob`，而该用例的 fixture 仍用旧名 `find`——断言 `strictNames` 恒缺失一项，长期红。现 fixture 与新名对齐，并把 `find` 归入「非白名单、不得标记 strict」那一组（旧拼写不会被解析成新名，写下来免得下次改名再漏）。
