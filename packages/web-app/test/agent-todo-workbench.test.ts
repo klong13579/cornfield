@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { AgentTodoDto, ProjectRecordDto } from "../src/lib/pi-client-api";
 import {
@@ -238,6 +239,14 @@ describe("agent todo workbench logic", () => {
 		expect(bindableProjects(LOADED, ["dtc"]).map(p => p.projectId)).toEqual(["dtc"]);
 		expect(bindableProjects(LOADED, [])).toEqual([]);
 	});
+});
+
+it("工作台只声明 Agent Todo，Project 仅作为筛选，不渲染 Session Todo 区块", () => {
+	const source = readFileSync(new URL("../src/pages/todo/TodoView.tsx", import.meta.url), "utf8");
+	expect(source).toContain("<AgentTodoBoard />");
+	expect(source).toContain("Project 筛选");
+	expect(source).not.toContain("<SessionTodos />");
+	expect(source).not.toContain('scope="Session"');
 });
 
 describe("store agent todos", () => {

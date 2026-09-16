@@ -77,6 +77,7 @@ import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
 import { resolveAgentScope } from "./agent-scope";
+import { dropAgentTodo, listAgentTodos, writeAgentTodo } from "./agent-todos-wire";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
@@ -438,6 +439,30 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						// 存储存在但读不出来 → ok:false（不当成「没有 Project」）
 						fail(`list_projects failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
+					return;
+				}
+				// ── Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）──
+				// 只读/只写这个 agentDir 的板子，不 lazy attach：列一块板不该把 agent 拉起来。
+				// 目标 agent 未注册 → ok:false（不拿别的 agent 的板子冒充）。
+				case "list_agent_todos":
+				case "set_agent_todo":
+				case "delete_agent_todo": {
+					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					const target = { agentId, agentDir: meta.agentDir };
+					if (command.type === "list_agent_todos") {
+						done(await listAgentTodos(target));
+						return;
+					}
+					if (command.type === "set_agent_todo") {
+						done({ todo: await writeAgentTodo(target, command.todo) });
+						return;
+					}
+					done({ deleted: await dropAgentTodo(target, command.todoId) });
 					return;
 				}
 				case "attach": {

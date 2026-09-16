@@ -4,9 +4,8 @@ import type { AgentTodoDto, AgentTodoStatusDto, ProjectRecordDto } from "../../l
  * Agent Todo 工作台的投影逻辑（纯函数，无 DOM）。
  *
  * 这一层只做三件事，且都必须可被单独验证：
- *   - **scope 隔离**：Agent Todo 板上的记录只按它自己的字段投影（owner / projectId），
- *     不去看会话 todo，也不去读 Project 的 TODO.md —— 三种东西的 owner 不同，混在一起
- *     看就是让用户以为它们是一回事（§9 / §37）。
+ *   - **scope 隔离**：工作台只展示 Agent-owned Todo，Project 仅按 projectId 筛选同一组记录。
+ *     会话 todo 留在聊天运行时；项目 TODO.md 不属于这个工作台的数据源。
  *   - **Project 筛选**：绑定了哪个 Project 就落在哪个桶里；**没绑定**是「通用任务」，
  *     与「绑定了一个查不到的 Project」是两回事（后者要显式说出来，不能悄悄藏掉）。
  *   - **展示顺序**：先未完成、再已完成、最后取消；同组按 updatedAt 倒序。

@@ -16,6 +16,8 @@ import type {
 	SkillStatus,
 	SkillsResultDto,
 } from "../src/results";
+import type { AgentTodoDto } from "../src/results/agent-todos";
+import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
 
 /**
  * 协议形状锁定（P0，参照 codex schema_fixtures）：
@@ -128,13 +130,35 @@ type _ListProjects = WireCommandOfType<"list_projects">;
 type _AssertListProjects = _ListProjects extends { type: "list_projects"; sessionId?: string } ? true : never;
 const _listProjectsShape: _AssertListProjects = true;
 
-// ── T10B：Skills / Memory 工作台的 scope 契约 ──
-// agent 定向读命令必须自带 sessionId（不能再靠调用方 cast 塞进去），
-// 结果形状也必须能表达「范围/来源/版本/激活/错误」——两端（serve 生产 / web-app 消费）都从这些类型出发。
+type _ListAgentTodos = WireCommandOfType<"list_agent_todos">;
+type _AssertListAgentTodos = _ListAgentTodos extends { type: "list_agent_todos"; sessionId?: string } ? true : never;
+const _listAgentTodosShape: _AssertListAgentTodos = true;
 
+type _SetAgentTodo = WireCommandOfType<"set_agent_todo">;
+type _AssertSetAgentTodo = _SetAgentTodo extends {
+	type: "set_agent_todo";
+	sessionId?: string;
+	todo: AgentTodoDto;
+}
+	? true
+	: never;
+const _setAgentTodoShape: _AssertSetAgentTodo = true;
+
+type _DeleteAgentTodo = WireCommandOfType<"delete_agent_todo">;
+type _AssertDeleteAgentTodo = _DeleteAgentTodo extends {
+	type: "delete_agent_todo";
+	sessionId?: string;
+	todoId: string;
+}
+	? true
+	: never;
+const _deleteAgentTodoShape: _AssertDeleteAgentTodo = true;
+
+// ── T10B：Skills / Memory 工作台的 scope 契约 ──
 type _GetMemory = WireCommandOfType<"get_memory">;
 type _AssertGetMemory = _GetMemory extends { type: "get_memory"; sessionId?: string } ? true : never;
 const _getMemoryShape: _AssertGetMemory = true;
+const _memoryTargetShape: _GetMemory = { type: "get_memory", sessionId: "agent" };
 
 type _GetSkills = WireCommandOfType<"get_skills">;
 type _AssertGetSkills = _GetSkills extends { type: "get_skills"; sessionId?: string } ? true : never;
@@ -191,6 +215,19 @@ type _AssertMemoryProjection = _MemoryProjection extends {
 	? true
 	: never;
 const _memoryProjectionShape: _AssertMemoryProjection = true;
+
+// ── T10C：调度写命令使用 canonical 输入，不能丢失 Agent 绑定与可靠性字段 ──
+type _CronCreate = WireCommandOfType<"cron_create">;
+type _CronUpdate = WireCommandOfType<"cron_update">;
+type _CronRemove = WireCommandOfType<"cron_remove">;
+type _CronTestRun = WireCommandOfType<"cron_test_run">;
+type _Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const _cronCreateShape: _Equal<_CronCreate, { id?: string; type: "cron_create" } & CronCreateInput> = true;
+const _cronUpdateShape: _Equal<_CronUpdate, { id?: string; type: "cron_update"; taskId: string } & CronUpdateInput> =
+	true;
+const _cronRemoveShape: _Equal<_CronRemove, { id?: string; type: "cron_remove"; taskId: string }> = true;
+const _cronTestRunShape: _Equal<_CronTestRun, { id?: string; type: "cron_test_run"; name: string; inMs?: number }> =
+	true;
 
 // ── 运行时命令清单快照 ──
 
@@ -267,7 +304,7 @@ const COMMAND_TYPES = [
 	"list_commands",
 	"get_cron_tasks",
 	"get_cron_logs",
-	// 定时任务写面（T10C）：调度定义 CRUD + test-run，走既有 gateway scheduler
+	// 定时任务写面（T10C）
 	"cron_create",
 	"cron_update",
 	"cron_remove",
@@ -335,6 +372,10 @@ const COMMAND_TYPES = [
 	"bring_back_child_result",
 	// Project（T8）：客户端级 Project registry 只读
 	"list_projects",
+	// Agent Todo（T10A）：Agent 级 Todo 板
+	"list_agent_todos",
+	"set_agent_todo",
+	"delete_agent_todo",
 ] as const satisfies readonly string[];
 
 /** 从 WireCommand union 提取 type 字面量（编译期核对清单）。 */
@@ -355,5 +396,6 @@ describe("WireCommand shape lock", () => {
 		expect(COMMAND_TYPES).toContain("set_mcp_server");
 		expect(COMMAND_TYPES).toContain("list_remote_skills");
 		expect(COMMAND_TYPES).toContain("listen_list");
+		expect(COMMAND_TYPES).toContain("set_agent_todo");
 	});
 });

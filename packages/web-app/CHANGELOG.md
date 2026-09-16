@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **导航与外壳收口：面板注册表成为唯一元数据源**（`src/router.tsx`, `src/layout/panel-registry.ts`, `src/layout/AppShell.tsx`, `src/layout/AppTopbar.tsx`）: 删除 `PAGE_META` / `PageMeta` / `findPageMeta`（与 panelRegistry 平行的第二份 path→标题/分组表；其 `protocol` 字段从无消费者，是随时会说谎的死元数据）；路由表由注册表派生（path / element / children 同源），当前面板改为从路由匹配链的 `handle` 解析（`activePanelOf` / `panelHandle`），不再按 pathname 前缀猜——子路由（`/models/catalog`、`/records/:id`、`/m`）在自己的路由上声明归属，自带顶栏由注册表的 `customTopbar` 声明。同时解掉 router ↔ AppShell 的循环 import，并删掉不再做任何查表的 `PanelHost`（面板就是路由，内容区直接是 Outlet）。
 ### Added
 
 - **定时任务工作台按 Agent / Project / Session scope 展示**（`src/pages/tasks/TasksView.tsx`, `src/pages/tasks/task-scope.ts`, `src/pages/insights/*`, `src/pages/voice/recording-scope.ts`, `src/lib/pi-client-api.ts`, `src/state/*`）：任务列表默认只看当前焦点 Agent 的任务（身份匹配，或旧行的执行 home 与其相同），身份未解析/未绑定的行单独成组、不归到任何 Agent 名下，并在行上写明「不会执行」的原因；Agent 组带声明的 Project 绑定（未声明只说未声明，不编一个项目）；执行记录里的 `agentSessionPath` 与投递目标会话即 Session scope。用量页按 Agent / Project 汇总目录行（求和派生，口径在 UI 标注；多 Agent / 未归属单独成组，不并入任何 Agent），会话 scope 只展示可确认的事实。听记历史按写入时标下的 provenance 分桶（本会话 / 本 Agent / 本 Project / 其他 / **未标注**）——旧记录不会被归给当前 Agent。

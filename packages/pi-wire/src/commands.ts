@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent } from "@cornfield/ai";
+import type { AgentTodoDto } from "./results/agent-todos";
 import type { CronCreateInput, CronUpdateInput } from "./results/cron";
 
 /**
@@ -229,7 +230,33 @@ export type MultiplexCommand =
 	 * 存储文件不存在 = 明确空集（projects: []）；文件在但读不出来 = ok:false，
 	 * **不得**退化成空列表 —— 「没声明过」与「声明过但坏了」是两件事。
 	 */
-	| { id?: string; type: "list_projects"; sessionId?: string };
+	| { id?: string; type: "list_projects"; sessionId?: string }
+	// Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）
+	/**
+	 * 列出一个 Agent 的整块 Todo 板（AgentTodoListDto）。
+	 *
+	 * 板子归属 Agent，不是会话：`sessionId` 定向注册表里的 agent，缺省 = 本连接当前焦点。
+	 * 只读该 agent 的 `<agentDir>/.cornfield/agent-todos.json`，不 lazy attach（列一块板不该
+	 * 把 agent 拉起来）。目标 agent 未注册 → ok:false，不拿别人的板子冒充。
+	 *
+	 * 存储文件不存在 = 明确的空板；文件在但读不出来（损坏 / 版本不符 / 记录形状不对）或该
+	 * Agent 的 workspace 声明读不出内容 = ok:false，**不得**退化成空板 —— 「没记过」与
+	 * 「记过但坏了」是两件事。
+	 */
+	| { id?: string; type: "list_agent_todos"; sessionId?: string }
+	/**
+	 * 新建或更新一条 Todo（AgentTodoUpsertDto；按 `todo.id` upsert）。
+	 *
+	 * `id` 由调用方给（重试同一份记录更新同一条，而不是多出一条任务），`agentId` 必填且必须
+	 * 等于目标 Agent —— 一个 Agent 只能写自己的板子。`createdAt` / `updatedAt` / `sessionRefs`
+	 * 由存储拥有：前两者写入时盖章，后者只允许原样送回读到的值。
+	 *
+	 * ok:false 的几种情况都是真错误，不是「已忽略」：owner 不匹配、`projectId` 没声明过、
+	 * 超出该 Agent 的声明绑定范围、生命周期非法（终态不可重开）、存储坏了。
+	 */
+	| { id?: string; type: "set_agent_todo"; sessionId?: string; todo: AgentTodoDto }
+	/** 删除一条 Todo（AgentTodoDeleteDto）。幂等：本来就不在板上返回 deleted:false。 */
+	| { id?: string; type: "delete_agent_todo"; sessionId?: string; todoId: string };
 
 /** 多端专属命令（rpc-types 没有，wire 层新增）。 */
 export type WireExtensionCommand =
@@ -294,29 +321,17 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_stats"; period?: "1d" | "7d" | "30d" | "90d" | "all" }
 	/**
-	 * W3 D3 + T10B：只读拉取记忆投影，按**真实 scope** 分区：
-	 * - user：`~/.cornfield/user.md`（身份画像，跨 Project；缺失 → null）
-	 * - agent：Agent 自己的记忆 home（WP1 WorkspaceContext.memoryDir + 旧版 agentDir/memories 列布局）
-	 * - project：会话所在 Project 的记忆投影（canonical evolution 目录优先，旧版扁平目录回落）
-	 * - session：本会话在记忆管线里的 stage-1 输出（按会话文件取；未沉淀 → pending）
-	 * - memoryStore：self-evolution 记忆库（vector_embeddings 分区，按 importance 排序）
-	 *
-	 * 每个区带自己的 `error`：**读不到 ≠ 空**（旧实现把读失败吞成 null，页面显示成「未生成」）。
-	 * 文件内容 > 128KB 截断并标记 truncated；声明的版本/内容指纹/mtime 由 get_skills 侧提供。
-	 *
-	 * - `sessionId` 定向 agent；缺省 = 本连接焦点 agent。定向未注册的 agent → ok:false。
+	 * Agent 定向只读记忆投影；sessionId 缺省 = 当前连接焦点，有值 = 指定 Agent。
+	 * 返回 user / agent / project / session 分区、memoryStore 与 resolution；
+	 * 分区错误必须显式返回，不能把读取失败当成空内容。
 	 */
 	| { id?: string; type: "get_memory"; sessionId?: string }
 	/**
-	 * W3 D5 + P2-W3-3 + T10B：只读列出技能工作台数据（五个事实，形状见 results/skills.ts）：
-	 * - skills：本次会话真的加载了的技能（= session.skills）+ 范围/来源/版本/激活/状态
-	 * - disabled：被 settings 停用的技能（`skills.ignoredSkills` + `disabledExtensions` 的 `skill:` 项，
-	 *   各自带 reason）；磁盘上没有的标 unavailable ——「停用」与「不存在」是两件事
-	 * - blocked：被挡住的技能（同名冲突落选者等，来自 discovery 警告）
-	 * - errors：发现阶段错误（扫描失败、SKILL.md 解析/读取失败）
-	 * - scope：这份列表锚在哪（agentId / agentDir / 会话根 / Project root）
-	 *
-	 * 范围判定与版本事实都由 serve 按该 agent 的 agentDir 与会话根算，客户端不自己猜。
+	 * W3 D5 + P2-W3-3：只读列出已加载技能 + 已停用名单。
+	 * skills = session.skills（discovery 按 settings 过滤后的「已启用」集）：name/description/
+	 * source/level（user|project|native）/provider。
+	 * disabled = settings.skills.ignoredSkills 名单 + 技能目录 SKILL.md 元数据（name/description?）
+	 * ——回切入口数据源（SkillsView「显示已停用」）。
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
 	| { id?: string; type: "get_skills"; sessionId?: string }
@@ -345,17 +360,7 @@ export type WireExtensionCommand =
 	 * 返回 { logs: [{ taskId, id, ts, status, exitCode, durationMs, output(截断), stderr(截断) }] }。
 	 */
 	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
-	/**
-	 * T10C：调度定义写面（docs/client/agent-hub.md §1.7「管理接口走 wire」/ §7-P1「cron 写操作走 wire 命令」）。
-	 *
-	 * 四个命令都是 gateway 领域命令（gateway :7892 POST /wire 直连，serve 转发），持久化到
-	 * 既有 scheduler storage / tasks 文件，**不**新建 scheduler。
-	 *
-	 * 形状见 `results/cron.ts`：`cron_create`/`cron_update` 入参里的 agent 绑定（agentId/agentDir）
-	 * 由网关用 agent-domain 解析成 `{ agentId, agentDir }` 再落盘（解析不到 → ok:false，
-	 * 不写一条跑不起来的 Schedule）；响应回写解析后的 `TaskRowDto`（含 agentResolution）。
-	 * 幂等键与执行语义（重复执行 / 失败重试 / 投递失败分开）沿用既有 scheduler，不在协议层重定义。
-	 */
+	/** T10C：沿用 gateway scheduler 的调度定义写面与 Agent 绑定解析。 */
 	| ({ id?: string; type: "cron_create" } & CronCreateInput)
 	| ({ id?: string; type: "cron_update"; taskId: string } & CronUpdateInput)
 	| { id?: string; type: "cron_remove"; taskId: string }

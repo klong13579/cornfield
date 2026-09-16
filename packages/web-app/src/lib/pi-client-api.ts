@@ -1,5 +1,9 @@
 import type {
 	AgentInfoDto,
+	AgentTodoDeleteDto,
+	AgentTodoDto,
+	AgentTodoListDto,
+	AgentTodoUpsertDto,
 	ArtifactDto,
 	AvailableModelsDto,
 	BroughtBackChildResultDto,
@@ -38,10 +42,18 @@ import type {
 } from "@cornfield/wire";
 
 // ArtifactDto / ArtifactsResultDto 由 pi-wire 定义，消费方（ArtifactsPanel 等）从本层引入。
-// Session Tree / Project DTO（T8）同样由 pi-wire 定义：消费方从本层引入，
-// 保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目形状。
+// Session Tree / Project DTO（T8）与 Agent Todo DTO（T10A）同样由 pi-wire 定义：消费方从本层
+// 引入，保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目/Todo 形状。
 // 定时任务写面（T10C）同理：入参/回写形状都从 pi-wire 转发，前端不自建。
 export type {
+	AgentTodoDeleteDto,
+	AgentTodoDto,
+	AgentTodoListDto,
+	AgentTodoPriorityDto,
+	AgentTodoReminderDto,
+	AgentTodoSourceDto,
+	AgentTodoStatusDto,
+	AgentTodoUpsertDto,
 	ArtifactDto,
 	BroughtBackChildResultDto,
 	ChildSessionEscalationDto,
@@ -75,6 +87,56 @@ export interface FsImageResult {
 	mimeType: string;
 	sizeBytes: number;
 	truncated: boolean;
+}
+
+/**
+ * fs_read 结果：正文 + 截断标记 + **磁盘内容身份**。
+ *
+ * `version` 是服务端对磁盘上那一份字节算出的身份（sha256，覆盖整个文件而非被截断的前段）：
+ * 编辑器拿它当 base，保存时原样回传给 fs_write 做 compare-and-swap —— 「我改的是我读到的那一份」
+ * 是唯一能让外部改写不被静默覆盖的判定依据。正文被截断时 version 仍然覆盖全文（尾部的改动
+ * 也必须能被判定出来）。
+ */
+export interface FsReadResult {
+	text: string;
+	/** 磁盘字节超预算（128KiB）被裁剪：`text` **不是**全文，调用方不得据此整段写回。 */
+	truncated: boolean;
+	version: string;
+}
+
+/** fs_write 结果：落盘字节数 + 写入后文件的新身份（客户端直接采纳，免二次读）。 */
+export interface FsWriteResult {
+	path: string;
+	bytesWritten: number;
+	version: string;
+	/**
+	 * 落盘内容与请求正文不同（服务端 writethrough 改写过，如 `lsp.formatOnWrite`）。
+	 * true 时客户端必须回读一次同步编辑器——否则屏幕上留着的是发出去的文本，不是文件现在的样子。
+	 */
+	normalized: boolean;
+}
+
+/** fs_diff 结果（与 coding-agent `generateUnifiedDiffString` 同形的带行号统一 diff）。 */
+export interface FsDiffResult {
+	diff: string;
+	firstChangedLine?: number;
+}
+
+/**
+ * 保存被拒绝：文件在磁盘上已不是编辑器读到的那一份（fs_write 的 compare-and-swap 失败）。
+ *
+ * 这是**可恢复**的判决，不是故障：调用方应当重新读一次磁盘、把差异摆给用户看，
+ * 再让用户决定保留哪一份。服务端在拒绝时一个字节都没写 —— 抛错即「磁盘上仍是别人的版本」。
+ */
+export class FsConflictError extends Error {
+	/** 服务端原始判决文本（`fs_conflict: expected <version>, actual <version>`）。 */
+	readonly detail: string;
+
+	constructor(detail: string) {
+		super("文件已在磁盘上被外部修改，保存已拒绝");
+		this.name = "FsConflictError";
+		this.detail = detail;
+	}
 }
 
 /**
@@ -399,6 +461,25 @@ export interface PiClient {
 	 */
 	listProjects(sessionId?: string): Promise<ProjectListDto>;
 
+	// ── Agent Todo（T10A：Agent 级 Todo 板，owner = Agent、Project 可选绑定）──
+	/**
+	 * 读一个 Agent 的整块 Todo 板（list_agent_todos）。
+	 *
+	 * 读不出来（存储损坏 / 版本不符）会招错，**不**退化成空板 —— 调用方必须把「没记过」
+	 * 与「记过但读坏了」分开显示。sessionId 缺省 = 本连接当前焦点的 Agent。
+	 */
+	listAgentTodos(sessionId?: string): Promise<AgentTodoListDto>;
+	/**
+	 * 新建或更新一条 Todo（set_agent_todo），返回存储真正落盘的那一份。
+	 *
+	 * `createdAt` / `updatedAt` 由存储盖章、`sessionRefs` 由存储保留，所以调用方必须用返回的
+	 * 记录替换自己手上那份。owner 与 Project 绑定由 serve 校验（不属于这个 Agent 的板子、
+	 * 没声明过的 Project、绑定范围外的 Project、声明读不出来的 Agent 都会招错）。
+	 */
+	setAgentTodo(todo: AgentTodoDto, sessionId?: string): Promise<AgentTodoUpsertDto>;
+	/** 删除一条 Todo（delete_agent_todo）。幂等：本来就不在板上返回 deleted:false。 */
+	deleteAgentTodo(todoId: string, sessionId?: string): Promise<AgentTodoDeleteDto>;
+
 	/** 诊断会话（diagnose_session；异步启动诊断，返回任务句柄）。 */
 	diagnoseSession(sessionFile: string): Promise<{ reportId: string; sessionId: string; state: "running" | "done" }>;
 	/** 列出诊断报告与后台任务（list_diagnosis_reports）。 */
@@ -410,8 +491,27 @@ export interface PiClient {
 	// ── 文件系统（Agent 详情页只读浏览）──
 	/** 列出 agent workspace 目录（fs_list，相对 agentDir；省略 path = 根）。 */
 	fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }>;
-	/** 读 agent workspace 文件（fs_read；>128KB 截断并标记 truncated）。 */
-	fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }>;
+	/**
+	 * 读 agent workspace 文件（fs_read）。
+	 *
+	 * 磁盘字节 > 128KiB 就截断并标记 `truncated`（按**字节**判、UTF-8 安全截断；不是按字符数），
+	 * `version` = 整份文件的磁盘内容身份。编辑器用 `truncated` 决定只读降级 —— 漏报一次就会
+	 * 让人拿半份内容写回、把文件真截断。
+	 */
+	fsRead(sessionId: string, path: string): Promise<FsReadResult>;
+	/**
+	 * 整段写文件（fs_write）。
+	 *
+	 * `expectedVersion` **必填**（新建文件传空串）：服务端核对磁盘现状后才会写，不一致就拒绝，
+	 * 一个字节都不落盘。让它必填而不是可选，是因为「可选 = 忘传就能静默覆盖外部修改」。
+	 * 拒绝时抛 {@link FsConflictError}。
+	 */
+	fsWrite(sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult>;
+	/**
+	 * 两段纯文本的统一 diff（fs_diff 的 before/after 分支，不落地）。
+	 * 保存预览与外部冲突对比共用它 —— 前端不再实现第二套 diff 生成。
+	 */
+	fsDiff(before: string, after: string): Promise<FsDiffResult>;
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限，MIME 按扩展名）。 */
 	fsReadImage(sessionId: string, path: string): Promise<FsImageResult>;
 	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。 */
