@@ -6,7 +6,7 @@
  *
  * With `console.log` each of them came back cut when stdout was a pipe —
  * `agent validate --json` wrote 1215695 bytes into a file and 196608 into a
- * pipe, exit code 0 — so `omp agent validate --json | jq` parsed a truncated
+ * pipe, exit code 0 — so `cornfield agent validate --json | jq` parsed a truncated
  * document.
  */
 
