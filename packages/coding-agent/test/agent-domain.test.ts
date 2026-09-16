@@ -11,10 +11,12 @@
 
 import { describe, expect, test } from "bun:test";
 
+import { AGENT_TODO_TRANSITIONS, isAgentTodoTransitionAllowed } from "@cornfield/wire";
 import * as domain from "../src/agent-domain";
 import {
 	type AgentRecord,
 	type AgentTodo,
+	type AgentTodoStatus,
 	type DomainSnapshot,
 	type DomainViolation,
 	isSessionExecutionPolicy,
@@ -504,6 +506,18 @@ describe("validateAgentTodoTransition", () => {
 		expect(violation?.rule).toBe("todo.status-transition");
 		expect(violation?.subject).toBe("todo-1");
 		expect(validateAgentTodoTransition("t", "cancelled", "in_progress")?.rule).toBe("todo.status-transition");
+	});
+
+	// 词表只有一份（`@cornfield/wire` 的 AGENT_TODO_TRANSITIONS），两个消费者逐对钉住它：
+	// 表放宽而界面不知道时，用户的能力会静默消失（没有任何错误）。这条用例把域这一侧绑到表上。
+	test("accepts exactly the transitions the shared wire table declares", () => {
+		const statuses = Object.keys(AGENT_TODO_TRANSITIONS) as AgentTodoStatus[];
+		expect(statuses.length).toBe(4);
+		for (const from of statuses) {
+			for (const to of statuses) {
+				expect(validateAgentTodoTransition("t", from, to) === null).toBe(isAgentTodoTransitionAllowed(from, to));
+			}
+		}
 	});
 });
 

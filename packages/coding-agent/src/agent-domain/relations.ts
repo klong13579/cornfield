@@ -17,6 +17,7 @@
  *     under the declared snapshot", which is not the same as "valid on disk".
  */
 
+import { AGENT_TODO_TRANSITIONS } from "@cornfield/wire";
 import type {
 	AgentId,
 	AgentRecord,
@@ -677,17 +678,15 @@ export function validateTodoBoardPaths(snapshot: DomainSnapshot): DomainViolatio
 	];
 }
 
-/** Legal AgentTodo lifecycle. Same → same is a legal no-op; terminal states are terminal. */
-const AGENT_TODO_TRANSITIONS: Record<AgentTodoStatus, readonly AgentTodoStatus[]> = {
-	open: ["open", "in_progress", "completed", "cancelled"],
-	in_progress: ["open", "in_progress", "completed", "cancelled"],
-	completed: ["completed"],
-	cancelled: ["cancelled"],
-};
-
 /**
  * A Todo is completed by an explicit actor, never by a Session reaching a terminal
  * status: session end does not complete a Todo (§37).
+ *
+ * The lifecycle table itself is not owned here: it is `@cornfield/wire`'s
+ * `AGENT_TODO_TRANSITIONS`, because the Todo workbench in web-app decides which status
+ * buttons to render from the same table. Two copies drift, and the quiet direction of
+ * that drift (this side loosening) silently removes a capability from the UI with no
+ * error anywhere — so there is exactly one copy, and it lives in the shared package.
  */
 export function validateAgentTodoTransition(
 	todoId: string,

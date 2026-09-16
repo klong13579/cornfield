@@ -16,7 +16,12 @@
  * 那会把「记过但读坏了」显示成「没有任务」。
  */
 
-/** Todo 生命周期（终态不可重开：完成了不会再回到进行中）。 */
+/**
+ * Todo 生命周期（终态不可重开：完成了不会再回到进行中）。
+ *
+ * 词表（哪些转移合法、哪些要渲染成按钮）见 `../agent-todo-lifecycle.ts` —— 全仓唯一一份，
+ * serve 的校验与 web-app 的按钮集合都读它。
+ */
 export type AgentTodoStatusDto = "open" | "in_progress" | "completed" | "cancelled";
 export type AgentTodoPriorityDto = "low" | "medium" | "high";
 /** 这条 Todo 是谁提出的 —— 展示用来源标注，不是权限。 */

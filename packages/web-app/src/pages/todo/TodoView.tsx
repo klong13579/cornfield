@@ -1,3 +1,4 @@
+import { agentTodoStatusActions, isAgentTodoTransitionAllowed } from "@cornfield/wire";
 import { useEffect, useMemo, useState } from "react";
 import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
@@ -11,7 +12,6 @@ import {
 	bindableProjects,
 	bindingLabelOf,
 	canDefer,
-	canTransition,
 	countsOf,
 	DEFER_PRESETS,
 	deferredPatch,
@@ -28,7 +28,6 @@ import {
 	sameFilter,
 	serveVerdictOf,
 	sortAgentTodos,
-	statusActionsOf,
 } from "./agent-todo-logic";
 
 /** Agent-owned Todo 工作台；Project 仅作为筛选维度，不读取独立项目台账。 */
@@ -96,7 +95,7 @@ const STATUS_LABEL: Record<AgentTodoStatusDto, string> = {
 	cancelled: "已取消",
 };
 
-/** 状态按钮文案。按钮集合由 {@link statusActionsOf} 决定，这里只说每个目标叫什么。 */
+/** 状态按钮文案。按钮集合由 {@link agentTodoStatusActions}（wire 的唯一词表）决定，这里只说每个目标叫什么。 */
 const STATUS_ACTION_LABELS: Record<AgentTodoStatusDto, string> = {
 	open: "退回",
 	in_progress: "开始",
@@ -297,7 +296,7 @@ export function AgentTodoBoard(): React.JSX.Element {
 				const pinned = failure?.todoId === todo.id ? failure : null;
 				// 「完成」由左侧复选框承担（列表里最顺手的位置），操作组只渲染其余合法转移 ——
 				// 同一个动作不给两个按钮，否则用户会以为它们不一样。
-				const actions = statusActionsOf(todo.status).filter(target => target !== "completed");
+				const actions = agentTodoStatusActions(todo.status).filter(target => target !== "completed");
 				return (
 					<div key={todo.id} className="border-b border-hairline first:border-t">
 						<div className="group flex items-start gap-2.5 px-1 py-2.5 hover:bg-surface">
@@ -305,7 +304,7 @@ export function AgentTodoBoard(): React.JSX.Element {
 								type="checkbox"
 								checked={todo.status === "completed"}
 								// 终态不可重开（§37）：勾不上就是勾不上，不做「点了才被 serve 拒绝」的控件。
-								disabled={busy || !canTransition(todo.status, "completed")}
+								disabled={busy || !isAgentTodoTransitionAllowed(todo.status, "completed")}
 								onChange={() => setStatus(todo, "completed")}
 								className="mt-[4px] size-4 shrink-0 accent-[var(--color-accent)]"
 								aria-label={`完成 ${todo.title}`}

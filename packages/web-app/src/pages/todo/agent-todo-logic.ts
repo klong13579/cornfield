@@ -1,4 +1,5 @@
 import { PiServerError } from "@cornfield/client";
+import { isTerminalAgentTodoStatus } from "@cornfield/wire";
 import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto, ProjectRecordDto } from "../../lib/pi-client-api";
 
 /**
@@ -44,11 +45,6 @@ export function projectRegistryOf(view: {
 	return { state: "loaded", projects: view.projects };
 }
 
-/** 终态：完成了或取消了，都不会再回到进行中（§37 生命周期）。 */
-export function isTerminal(status: AgentTodoStatusDto): boolean {
-	return status === "completed" || status === "cancelled";
-}
-
 export function matchesAgentTodoFilter(todo: AgentTodoDto, filter: AgentTodoFilter): boolean {
 	switch (filter.kind) {
 		case "all":
@@ -75,7 +71,7 @@ export interface AgentTodoCounts {
 export function countsOf(todos: readonly AgentTodoDto[]): AgentTodoCounts {
 	return {
 		total: todos.length,
-		open: todos.filter(todo => !isTerminal(todo.status)).length,
+		open: todos.filter(todo => !isTerminalAgentTodoStatus(todo.status)).length,
 		completed: todos.filter(todo => todo.status === "completed").length,
 		cancelled: todos.filter(todo => todo.status === "cancelled").length,
 	};
@@ -205,37 +201,6 @@ export function sameFilter(a: AgentTodoFilter, b: AgentTodoFilter): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 // 编辑与延期（T16）
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 生命周期表 —— 镜像 `agent-domain/relations.ts` 的 `AGENT_TODO_TRANSITIONS`。
- *
- * 服务端按**已存盘的**状态判，客户端说什么都不算数，所以这张表在前端不是为了「再判一次」
- * 写权限，而是为了**不给用户一个必然失败的选择**：终态只有自己一条出路，所以终态行上
- * 不渲染任何状态控件 —— 能点、但永远被 serve 拒绝的按钮，是把服务端的规则伪装成「界面卡了」。
- *
- * 两处不一致时以服务端为准（它才是唯一会拒绝写入的一方）；这里跟着改。
- */
-const TRANSITIONS: Record<AgentTodoStatusDto, readonly AgentTodoStatusDto[]> = {
-	open: ["open", "in_progress", "completed", "cancelled"],
-	in_progress: ["open", "in_progress", "completed", "cancelled"],
-	completed: ["completed"],
-	cancelled: ["cancelled"],
-};
-
-/** 从 `status` 出发合法的目标（含「转到自己」这条无操作转移）。 */
-export function allowedTransitionsOf(status: AgentTodoStatusDto): readonly AgentTodoStatusDto[] {
-	return TRANSITIONS[status];
-}
-
-/** 这次转移合不合法 —— 合法不等于「界面该给按钮」，见 {@link statusActionsOf}。 */
-export function canTransition(from: AgentTodoStatusDto, to: AgentTodoStatusDto): boolean {
-	return TRANSITIONS[from].includes(to);
-}
-
-/** 界面上值得渲染成按钮的转移：去掉无操作的那条。终态返回空。 */
-export function statusActionsOf(status: AgentTodoStatusDto): readonly AgentTodoStatusDto[] {
-	return TRANSITIONS[status].filter(target => target !== status);
-}
 
 export const PRIORITY_LABELS: Record<AgentTodoPriorityDto, string> = {
 	low: "低",
@@ -382,7 +347,7 @@ export function deferredPatch(todo: AgentTodoDto, now: number, days: number): Ag
 
 /** 延期只对未完成的 Todo 有意义：终态没有被「以后再算」的余地。 */
 export function canDefer(todo: AgentTodoDto): boolean {
-	return !isTerminal(todo.status);
+	return !isTerminalAgentTodoStatus(todo.status);
 }
 
 // ── 截止时间输入（datetime-local，本地墙钟） ──
@@ -481,7 +446,7 @@ export interface DueBadge {
  * 也不欠谁一个交付。事实层（{@link dueLabel}）对终态照常显示截止时间，被压掉的只是告警。
  */
 export function dueBadgeOf(todo: AgentTodoDto, now: number): DueBadge | undefined {
-	if (isTerminal(todo.status)) return undefined;
+	if (isTerminalAgentTodoStatus(todo.status)) return undefined;
 	const due = dueStateOf(todo, now);
 	if (due.kind !== "overdue") return undefined;
 	const howLong = humanizeDuration(due.byMs);

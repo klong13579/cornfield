@@ -1,16 +1,20 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
+import {
+	AGENT_TODO_TRANSITIONS,
+	agentTodoStatusActions,
+	isAgentTodoTransitionAllowed,
+	isTerminalAgentTodoStatus,
+} from "@cornfield/wire";
 import type { AgentTodoDto, ProjectRecordDto } from "../src/lib/pi-client-api";
 import type { AgentTodoEditDraft, AgentTodoEditPatch } from "../src/pages/todo/agent-todo-logic";
 import {
 	ALL_TODOS,
-	allowedTransitionsOf,
 	applyTodoPatch,
 	bindableProjects,
 	bindingLabelOf,
 	canDefer,
-	canTransition,
 	countsOf,
 	DEFER_PRESETS,
 	deferDueAt,
@@ -23,7 +27,6 @@ import {
 	filterOptionsOf,
 	formatDueInput,
 	humanizeDuration,
-	isTerminal,
 	PRIORITY_LABELS,
 	PRIORITY_VALUES,
 	parseDueInput,
@@ -32,7 +35,6 @@ import {
 	sameFilter,
 	serveVerdictOf,
 	sortAgentTodos,
-	statusActionsOf,
 	UNBOUND_TODOS,
 } from "../src/pages/todo/agent-todo-logic";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
@@ -256,9 +258,9 @@ describe("agent todo workbench logic", () => {
 			makeTodo({ id: "d", status: "cancelled" }),
 		]);
 		expect(counts).toEqual({ total: 4, open: 2, completed: 1, cancelled: 1 });
-		expect(isTerminal("completed")).toBe(true);
-		expect(isTerminal("cancelled")).toBe(true);
-		expect(isTerminal("in_progress")).toBe(false);
+		expect(isTerminalAgentTodoStatus("completed")).toBe(true);
+		expect(isTerminalAgentTodoStatus("cancelled")).toBe(true);
+		expect(isTerminalAgentTodoStatus("in_progress")).toBe(false);
 	});
 
 	it("可绑的 Project 以 Agent 的声明为上限；无声明 = 未约束（不是「一个都不能绑」）", () => {
@@ -278,19 +280,46 @@ it("工作台只声明 Agent Todo，Project 仅作为筛选，不渲染 Session 
 
 describe("agent todo 编辑与延期", () => {
 	it("终态只有自己一条出路：completed / cancelled 不可重开（§37）", () => {
-		expect(allowedTransitionsOf("completed")).toEqual(["completed"]);
-		expect(allowedTransitionsOf("cancelled")).toEqual(["cancelled"]);
+		expect(AGENT_TODO_TRANSITIONS.completed).toEqual(["completed"]);
+		expect(AGENT_TODO_TRANSITIONS.cancelled).toEqual(["cancelled"]);
 		// 界面上要渲染的按钮集合：终态是空 —— 不是「按钮被置灰」，是根本没有按钮可点
-		expect(statusActionsOf("completed")).toEqual([]);
-		expect(statusActionsOf("cancelled")).toEqual([]);
-		expect(statusActionsOf("open")).toEqual(["in_progress", "completed", "cancelled"]);
-		expect(statusActionsOf("in_progress")).toEqual(["open", "completed", "cancelled"]);
+		expect(agentTodoStatusActions("completed")).toEqual([]);
+		expect(agentTodoStatusActions("cancelled")).toEqual([]);
+		expect(agentTodoStatusActions("open")).toEqual(["in_progress", "completed", "cancelled"]);
+		expect(agentTodoStatusActions("in_progress")).toEqual(["open", "completed", "cancelled"]);
 
-		expect(canTransition("open", "completed")).toBe(true);
-		expect(canTransition("in_progress", "cancelled")).toBe(true);
-		expect(canTransition("completed", "open")).toBe(false);
-		expect(canTransition("completed", "in_progress")).toBe(false);
-		expect(canTransition("cancelled", "open")).toBe(false);
+		expect(isAgentTodoTransitionAllowed("open", "completed")).toBe(true);
+		expect(isAgentTodoTransitionAllowed("in_progress", "cancelled")).toBe(true);
+		expect(isAgentTodoTransitionAllowed("completed", "open")).toBe(false);
+		expect(isAgentTodoTransitionAllowed("completed", "in_progress")).toBe(false);
+		expect(isAgentTodoTransitionAllowed("cancelled", "open")).toBe(false);
+	});
+
+	/**
+	 * 两侧同一份词表：工作台一次点击能到达的新状态，恰好是词表里的合法转移去掉无操作。
+	 *
+	 * 多一个 = 界面给出一个必然被 serve 拒的按钮（响的，可接受）；少一个 = 用户做不了本来合法的
+	 * 事且没有任何错误（静默的能力消失）。所以两侧不能各有一份词表：这里逐状态钉住集合相等，
+	 * 并顺手钉住工作台自己没有藏一张表（第二份定义就是漂移的入口）。
+	 */
+	it("工作台渲染的动作集合与词表同源：勾选框 + 按钮 = 合法转移去掉无操作", () => {
+		const statuses = Object.keys(AGENT_TODO_TRANSITIONS) as (keyof typeof AGENT_TODO_TRANSITIONS)[];
+		for (const status of statuses) {
+			// TodoView 的组合：「完成」由勾选框承担，状态按钮组渲染其余合法转移。
+			const buttons = agentTodoStatusActions(status).filter(target => target !== "completed");
+			for (const button of buttons) expect(isAgentTodoTransitionAllowed(status, button)).toBe(true);
+			// 勾选框能到达的**新**状态：合法且「还不是完成」（已完成的板子上它是勾上的，再点是无操作）。
+			const checkboxReaches = status !== "completed" && isAgentTodoTransitionAllowed(status, "completed");
+			const reachable = [...new Set([...buttons, ...(checkboxReaches ? ["completed"] : [])])].sort();
+			expect(reachable).toEqual(AGENT_TODO_TRANSITIONS[status].filter(target => target !== status).sort());
+		}
+
+		// 工作台的两处源码里没有第二张表 —— 再长一份就该红在这里，而不是等用户发现少了按钮。
+		const transitionRow = /open\s*:\s*\[\s*"open"\s*,\s*"in_progress"/;
+		for (const file of ["../src/pages/todo/TodoView.tsx", "../src/pages/todo/agent-todo-logic.ts"]) {
+			const source = readFileSync(new URL(file, import.meta.url), "utf8");
+			expect(transitionRow.test(source)).toBe(false);
+		}
 	});
 
 	it("编辑只动可写字段；清空 = 省略键，不是写空串 / 0", () => {
@@ -441,7 +470,7 @@ describe("agent todo 编辑与延期", () => {
 		expect(dueStateOf(makeTodo({ dueAt: now }), now)).toEqual({ kind: "upcoming", inMs: 0 });
 
 		// 状态层：过期不是状态 —— 它进的是未完成桶，不是终态桶
-		expect(isTerminal(overdueOpen.status)).toBe(false);
+		expect(isTerminalAgentTodoStatus(overdueOpen.status)).toBe(false);
 		expect(countsOf([overdueOpen, overdueCancelled, overdueCompleted])).toEqual({
 			total: 3,
 			open: 1,
@@ -449,7 +478,7 @@ describe("agent todo 编辑与延期", () => {
 			cancelled: 1,
 		});
 		// 一条过期的任务该能被完成，也不会因为过期而被顶到终态后面
-		expect(canTransition(overdueOpen.status, "completed")).toBe(true);
+		expect(isAgentTodoTransitionAllowed(overdueOpen.status, "completed")).toBe(true);
 		expect(sortAgentTodos([overdueCancelled, overdueOpen]).map(t => t.id)).toEqual(["a", "b"]);
 
 		// 判断层：「已过期」只给未完成的
@@ -505,9 +534,11 @@ describe("agent todo 编辑与延期", () => {
 
 it("编辑面：状态按钮由转移表推导，延期档位来自 DEFER_PRESETS，写失败显示 serve 原话", () => {
 	const source = readFileSync(new URL("../src/pages/todo/TodoView.tsx", import.meta.url), "utf8");
-	// 终态渲染不出状态按钮，是因为 statusActionsOf 返回空 —— 不是手写的 if
-	expect(source).toContain("statusActionsOf(todo.status)");
-	expect(source).toContain('canTransition(todo.status, "completed")');
+	// 终态渲染不出状态按钮，是因为 agentTodoStatusActions 返回空 —— 不是手写的 if
+	// （两个函数都来自 @cornfield/wire 的唯一词表，前端没有第二份）
+	// 组合本身也钉住：一旦谁把某个合法目标从按钮里滤掉，这里立刻红，不会变成静默的能力消失。
+	expect(source).toContain('agentTodoStatusActions(todo.status).filter(target => target !== "completed")');
+	expect(source).toContain('disabled={busy || !isAgentTodoTransitionAllowed(todo.status, "completed")}');
 	expect(source).toContain("DEFER_PRESETS.map");
 	expect(source).toContain("serveVerdictOf(err)");
 	expect(source).toContain("applyTodoPatch(todo, patch)");
