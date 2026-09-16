@@ -142,7 +142,10 @@ export class AstGrepTool implements AgentTool<typeof astGrepSchema, AstGrepToolD
 			});
 
 			const normalizedParseErrors = (result.parseErrors ?? []).map(error => {
-				const parseError = error.match(/^.+: (.+: parse error \(syntax tree contains error nodes\))$/);
+				// The parenthetical describes the tree, not the query — match it loosely so a
+				// wording change in the native parser (e.g. "error nodes" → "error or missing
+				// nodes") cannot silently stop the query prefix from being stripped.
+				const parseError = error.match(/^.+: (.+: parse error \(syntax tree contains [^)]+\))$/);
 				return parseError?.[1] ?? error;
 			});
 			const dedupedParseErrors = dedupeParseErrors(normalizedParseErrors);

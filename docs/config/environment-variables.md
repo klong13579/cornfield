@@ -16,7 +16,7 @@ Most runtime lookups use `$env` from `@cornfield/utils` (`packages/utils/src/env
 
 1. Existing process environment (`Bun.env`)
 2. Project `.env` (`$PWD/.env`) for keys not already set
-3. Agent `.env` (`~/.cornfield/agent/.env`, respecting `CORNFIELD_CONFIG_DIR` / `CORNFIELD_CODING_AGENT_DIR`) for keys not already set
+3. Agent `.env` (`~/.cornfield/agent/.env`, respecting `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR`) for keys not already set
 4. Config-root `.env` (`~/.cornfield/.env`, respecting `CORNFIELD_CONFIG_DIR`) for keys not already set
 5. Home `.env` (`~/.env`) for keys not already set
 

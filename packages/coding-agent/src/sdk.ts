@@ -1538,6 +1538,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				toolSnippets: extensionToolSnippets,
 				toolGuidelines: extensionToolGuidelines,
 				xdevDevices: xdevPromptCatalog,
+				pythonUnavailable: toolSession.pythonUnavailable,
 			});
 
 			if (options.systemPrompt === undefined) {
@@ -1562,6 +1563,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					toolSnippets: extensionToolSnippets,
 					toolGuidelines: extensionToolGuidelines,
 					xdevDevices: xdevPromptCatalog,
+					pythonUnavailable: toolSession.pythonUnavailable,
 				});
 			}
 			return options.systemPrompt(defaultPrompt);

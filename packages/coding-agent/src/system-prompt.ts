@@ -556,6 +556,8 @@ export interface BuildSystemPromptOptions {
 	toolSnippets?: string[];
 	/** Budget-constrained xd:// device catalog; rendered as a "Mounted devices" section when devices are mounted. */
 	xdevDevices?: { entries: Array<{ name: string; summary: string }>; truncated: number };
+	/** Why the `python` tool is missing from this session; rendered as a capability notice when set. */
+	pythonUnavailable?: { pythonPath: string | null; reason: string };
 	/** Guideline bullets for extension-provided tools (ToolDefinition.promptGuidelines). Rendered under a "Tool Guidelines" section. */
 	toolGuidelines?: string[];
 }
@@ -584,6 +586,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		toolSnippets = [],
 		toolGuidelines = [],
 		xdevDevices,
+		pythonUnavailable,
 	} = options;
 	const resolvedCwd = cwd ?? getProjectDir();
 
@@ -746,6 +749,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		toolSnippets,
 		toolGuidelines,
 		xdevDevices,
+		pythonUnavailable,
 		skills: _filteredSkills,
 		hasMissionMd,
 		userProfile,

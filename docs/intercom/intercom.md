@@ -120,8 +120,8 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 - **planner-worker**:规划会话 `ask` 给执行会话,阻塞取回决定
 - **跨账号业务 agent**:gateway 账号(如 hr、finance)互发,或 TUI 直接指挥账号
 - **主 cornfield 监控子 cornfield(父子编排)**:主会话通过 `send ... openProjectPaneIfMissing: true` 拉起
-  子 cornfield 时,子进程启动注入 `CORNFIELD_SUBAGENT_ORCHESTRATOR_TARGET` / `_SESSION_ID` / `_RUN_ID` /
-  `_CHILD_AGENT` / `_CHILD_INDEX`,完成三件事:
+  子 cornfield 时,子进程启动注入 `PI_SUBAGENT_ORCHESTRATOR_TARGET` / `PI_SUBAGENT_ORCHESTRATOR_SESSION_ID` /
+  `PI_SUBAGENT_RUN_ID` / `PI_SUBAGENT_CHILD_AGENT` / `PI_SUBAGENT_CHILD_INDEX`,完成三件事:
   1. 子注册时携带 `parentId`,主会话 `intercom({ action: "children" })` 即可看到全部在线的子
      (状态/上下文占比随 presence 实时刷新,不轮询);
   2. 子每完成一个任务回合(`agent_end`)自动向父发送结构化完成报告(5s 防抖,标题
@@ -133,7 +133,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 
   **gateway 账号当子**:`~/.cornfield/gateway.json` 的账号配置加 `intercomParent`
   (父的目标名或 stableId,通常是操作者 TUI 会话的 `/name` 或 `stableId`),该账号
-  的 agent cornfield 启动时即注入 `CORNFIELD_SUBAGENT_*` 元数据并注册为父的子——主会话同样
+  的 agent cornfield 启动时即注入 `PI_SUBAGENT_*` 元数据并注册为父的子——主会话同样
   `children` 可见、收到自动完成报告、可裁决其 `contact_supervisor` 升级。
 
 ```json

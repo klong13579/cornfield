@@ -28,6 +28,7 @@ import {
 import { getThemeByName } from "@cornfield/coding-agent/modes/theme/theme";
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { clampTimeout } from "@cornfield/coding-agent/tools/tool-timeouts";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import { sanitizeText } from "@cornfield/natives";
 import * as piUtils from "@cornfield/utils";
 import { TempDir } from "@cornfield/utils";
@@ -352,7 +353,7 @@ describe("lsp regressions", () => {
 				client.diagnosticsVersion += 1;
 			}, 80);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool({ cwd: tempDir.path(), settings: Settings.isolated() } as ToolSession);
 			const result = await tool.execute("diag-stale", {
 				action: "diagnostics",
 				file: targetFile,

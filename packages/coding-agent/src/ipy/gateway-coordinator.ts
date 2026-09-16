@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import { createServer } from "node:net";
 import * as path from "node:path";
-import { getAgentDir, isEnoent, logger, procmgr } from "@cornfield/utils";
+import { $flag, getAgentDir, isEnoent, logger, procmgr } from "@cornfield/utils";
 import type { Subprocess } from "bun";
 import { Settings } from "../config/settings";
 import { getOrCreateSnapshot } from "../utils/shell-snapshot";
-import { filterEnv, resolvePythonRuntime } from "./runtime";
+import { filterEnv, resolvePythonRuntime, selectKernelRuntime } from "./runtime";
 
 const GATEWAY_DIR_NAME = "python-gateway";
 const GATEWAY_INFO_FILE = "gateway.json";
@@ -271,7 +271,13 @@ async function startGatewayProcess(
 	const settings = await Settings.init();
 	const { shell, env } = settings.getShellConfig();
 	const filteredEnv = filterEnv(env);
-	const runtime = resolvePythonRuntime(cwd, filteredEnv);
+	// The preflight decides which interpreter hosts kernels; consuming the same
+	// selection here is what keeps "the check passed" and "the kernel runs on it"
+	// from disagreeing. `null` can only mean the preflight was skipped
+	// (`PI_PYTHON_SKIP_CHECK`), where the operator opted out of probing and the
+	// highest-priority candidate is used unprobed.
+	const selected = $flag("PI_PYTHON_SKIP_CHECK") ? null : (await selectKernelRuntime(cwd, filteredEnv)).runtime;
+	const runtime = selected ?? resolvePythonRuntime(cwd, filteredEnv);
 	const snapshotPath = await getOrCreateSnapshot(shell, env).catch((err: unknown) => {
 		logger.warn("Failed to resolve shell snapshot for shared Python gateway", {
 			error: err instanceof Error ? err.message : String(err),

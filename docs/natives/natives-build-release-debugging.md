@@ -86,7 +86,7 @@ Runtime x64 candidate order also includes the unsuffixed default filename after 
 ## Runtime flags
 
 - `CORNFIELD_NATIVE_VARIANT`: x64 runtime override; valid values are `modern` and `baseline`.
-- `CORNFIELD_COMPILED`: legacy compiled-mode signal. A populated embedded-addon manifest is also a compiled-mode signal and is the authoritative signal for Bun standalone builds that do not preserve `process.env.CORNFIELD_COMPILED`.
+- `PI_COMPILED`: legacy compiled-mode signal. A populated embedded-addon manifest is also a compiled-mode signal and is the authoritative signal for Bun standalone builds that do not preserve `process.env.PI_COMPILED`.
 
 ## Build-time flags/options
 
@@ -102,7 +102,7 @@ Runtime x64 candidate order also includes the unsuffixed default filename after 
     - non-x64 / no variant: `-C target-cpu=native`
   - if already set, script does not override.
 - `ZIG`: optional real Zig path used when the host Zig CPU contract wrapper is enabled.
-- `CORNFIELD_NATIVE_REAL_ZIG`, `CORNFIELD_NATIVE_ZIG_TARGET`, `CORNFIELD_NATIVE_ZIG_CPU`: set internally for `zig-safe-wrapper.ts` when building local x64 Linux/macOS artifacts with Zig available.
+- `PI_NATIVE_REAL_ZIG`, `PI_NATIVE_ZIG_TARGET`, `PI_NATIVE_ZIG_CPU`: set internally for `zig-safe-wrapper.ts` when building local x64 Linux/macOS artifacts with Zig available.
 
 ## Build state/lifecycle transitions
 
@@ -148,7 +148,7 @@ Typical local loop:
 
 ## Shipped/compiled binary workflow
 
-In compiled mode (`CORNFIELD_COMPILED`, Bun embedded URL markers, or populated embedded manifest):
+In compiled mode (`PI_COMPILED`, Bun embedded URL markers, or populated embedded manifest):
 
 1. Loader computes versioned cache dir: `<getNativesDir()>/<packageVersion>`.
 2. If embedded manifest matches current platform+version, loader may extract the selected embedded file into that versioned dir.

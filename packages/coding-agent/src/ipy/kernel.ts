@@ -1,12 +1,11 @@
 import { $env, $flag, isBunTestRuntime, logger, Snowflake } from "@cornfield/utils";
-import { $ } from "bun";
 import { Settings } from "../config/settings";
 import { htmlToBasicMarkdown } from "../web/scrapers/types";
 import { createCancellationError, getAbortReason, getExecutionCancellationError } from "./cancellation";
 import { acquireSharedGateway, releaseSharedGateway, shutdownSharedGateway } from "./gateway-coordinator";
 import { loadPythonModules } from "./modules";
 import { PYTHON_PRELUDE } from "./prelude";
-import { filterEnv, resolvePythonRuntime } from "./runtime";
+import { filterEnv, type PythonRuntime, selectKernelRuntime } from "./runtime";
 
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
@@ -218,6 +217,8 @@ export interface PythonKernelAvailability {
 	ok: boolean;
 	pythonPath?: string;
 	reason?: string;
+	/** The runtime that will host the kernel — present whenever `ok` and a local gateway is used. */
+	runtime?: PythonRuntime;
 }
 
 export async function checkPythonKernelAvailability(cwd: string): Promise<PythonKernelAvailability> {
@@ -234,18 +235,23 @@ export async function checkPythonKernelAvailability(cwd: string): Promise<Python
 		const settings = await Settings.init();
 		const { env } = settings.getShellConfig();
 		const baseEnv = filterEnv(env);
-		const runtime = resolvePythonRuntime(cwd, baseEnv);
-		const checkScript =
-			"import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('kernel_gateway') and importlib.util.find_spec('ipykernel') else 1)";
-		const result = await $`${runtime.pythonPath} -c ${checkScript}`.quiet().nothrow().cwd(cwd).env(runtime.env);
-		if (result.exitCode === 0) {
-			return { ok: true, pythonPath: runtime.pythonPath };
+		const selection = await selectKernelRuntime(cwd, baseEnv);
+		if (selection.runtime) {
+			return { ok: true, pythonPath: selection.runtime.pythonPath, runtime: selection.runtime };
 		}
+		const tried = selection.tried.map(runtime => runtime.pythonPath);
+		if (tried.length === 0) {
+			return { ok: false, reason: "Python executable not found on PATH" };
+		}
+		// Name every interpreter that was probed, not just the first: the whole
+		// point of the fallback chain is that the project's own interpreter is not
+		// the only candidate, and the reader needs to know which ones were ruled out.
 		return {
 			ok: false,
-			pythonPath: runtime.pythonPath,
+			pythonPath: tried[0],
 			reason:
-				"kernel_gateway (jupyter-kernel-gateway) or ipykernel not installed. Run: python -m pip install jupyter_kernel_gateway ipykernel",
+				`None of the ${tried.length} Python interpreter(s) available here provides kernel_gateway + ipykernel (checked: ${tried.join(", ")}). ` +
+				`Install for the interpreter this project uses: ${tried[0]} -m pip install jupyter_kernel_gateway ipykernel`,
 		};
 	} catch (err: unknown) {
 		return { ok: false, reason: err instanceof Error ? err.message : String(err) };

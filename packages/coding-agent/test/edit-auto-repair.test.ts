@@ -141,6 +141,25 @@ describe("edit post-write validation", () => {
 		await expect(fs.readFile(file, "utf8")).resolves.toBe(original);
 	});
 
+	test("accepts TypeScript 5.0 `export type *` re-exports instead of rolling the edit back", async () => {
+		// Regression (2026-09-16): the native TS grammar had no rule for
+		// `export type * from "mod"` (or `export type * as ns from "mod"`), so any file
+		// using the form parsed with an ERROR node and this gate rolled back *every*
+		// edit to it — 14 files in this repo were uneditable. Fixed by vendoring a
+		// patched grammar: crates/tree-sitter-typescript-vendored.
+		const file = path.join(dir, "barrel.ts");
+		const original = 'export type * from "./a";\n';
+		const edited = 'export type * from "./a";\nexport type * as ns from "./b";\n';
+		await fs.writeFile(file, edited);
+
+		const session = makeSession({});
+		await expect(
+			validateEditedFile({ session, absolutePath: file, displayPath: "barrel.ts", originalContent: original }),
+		).resolves.toMatchObject({ outcome: "clean" });
+
+		await expect(fs.readFile(file, "utf8")).resolves.toBe(edited);
+	});
+
 	test("reports the first changed line in the validation error", async () => {
 		const file = path.join(dir, "a.ts");
 		const original = "const a = 1;\nconst b = 2;\nconst c = 3;\n";

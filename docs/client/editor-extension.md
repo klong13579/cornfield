@@ -474,11 +474,11 @@
 | **协议耦合度** | 低：纯走现有 wire，extension 走 webview iframe | 中：ACP（已上线） + MCP（已上线） + 自定义 fs-edit-protocol（⚠ 新增） + wire port（⚠ Rust port 成本） | OpenSumi | 新增协议面越少越好；内核 0 改动才是金句本意 |
 | **编辑器内核选择** | Monaco (Battle-tested) 或 CodeMirror 6 (小、轻)；都纯 JS、MIT | Zed 原生（GPUI、Rust、Apache/GPL-3.0） | OpenSumi | 编辑光标/buffer 不是差异化，不值得为它背 fork 维护账 |
 | **扩展性** | webview + 自定义 contribution，纯 web 生态（vscode extension API 风格） | Zed extension API（Rust + WASM）；扩展机制成熟但需要 Rust 写扩展 | OpenSumi | 50 人团队主导 web，扩展成本 CornField 团队可消化；Rust 扩展团队门槛高 |
-| **跟 cornfield 现状契合度** | 极高：现有 `desktop` + `web-app` 资产直接复用；`CORNFIELD_DESKTOP_DEV_URL` 已支持多窗口入口（✓ 已确认 `desktop/main.ts:50`） | 中：需新建 `repos/zomp`（类比 brush-vendored），双 Cargo workspace 双 release pipeline | OpenSumi | 一致性：避免在尚未拍板的位置再次深入 |
+| **跟 cornfield 现状契合度** | 极高：现有 `desktop` + `web-app` 资产直接复用；`OMP_DESKTOP_DEV_URL` 已支持多窗口入口（✓ 已确认 `desktop/main.ts:50`） | 中：需新建 `repos/zomp`（类比 brush-vendored），双 Cargo workspace 双 release pipeline | OpenSumi | 一致性：避免在尚未拍板的位置再次深入 |
 | **MVP 人力成本** | 1 名资深 Web 工程师 | 1-2 名资深 Rust + 部分 Web；且需先做 P0 spike 验证 GPUIView 嵌入可行性 | OpenSumi | 时间/人力账差 2 倍；web-app 已有 agent 卡片、MCP、agent UI 资产 |
 | **长期演化** | 路径平滑：从 web-app 内 iframe → 抽出独立 extension → 演进为完整 IDE 形态（OpenSumi/Code-OSS 都走过这条路） | 起点即重 fork：`gpui` 上游主分支日更，季度 rebase 账 +1，GPL-3.0 合规复审账 +1 | OpenSumi | 风险账更小，**演化路径是"渐进"，不是"先冲一把"** |
 
-**推荐：OpenSumi 风格作为主推。** 理由：(1) 跟现有 `desktop` + `web-app` 资产契合度最高，`CORNFIELD_DESKTOP_DEV_URL` 这个口子已经留好了；(2) 编辑器内核（Monaco/CM6）不背 fork 维护账——光标/buffer/LSP 是红海，不是 CornField 差异化位面；(3) 内核 0 改动严格满足用户"改内核大家跟着变"原则；(4) MVP 时间/人力账短一倍以上。
+**推荐：OpenSumi 风格作为主推。** 理由：(1) 跟现有 `desktop` + `web-app` 资产契合度最高，`OMP_DESKTOP_DEV_URL` 这个口子已经留好了；(2) 编辑器内核（Monaco/CM6）不背 fork 维护账——光标/buffer/LSP 是红海，不是 CornField 差异化位面；(3) 内核 0 改动严格满足用户"改内核大家跟着变"原则；(4) MVP 时间/人力账短一倍以上。
 
 **可混搭点**（保留 Zed 优势的子项）：
 
@@ -560,7 +560,7 @@
 | 改动对象 | 内容 | 理由 |
 |---|---|---|
 | **新建** `packages/editor-extension` | OpenSumi-style workbench 框架、extension slot、布局引擎 | 不污染 `web-app`，编辑器是独立前端 |
-| **扩展** `packages/desktop` | 加 "IDE 模式" 菜单项 / 多窗口 / dev URL 指向 editor-extension dev server | `desktop/main.ts:50` 已支持 `CORNFIELD_DESKTOP_DEV_URL`（✓ 已确认） |
+| **扩展** `packages/desktop` | 加 "IDE 模式" 菜单项 / 多窗口 / dev URL 指向 editor-extension dev server | `desktop/main.ts:50` 已支持 `OMP_DESKTOP_DEV_URL`（✓ 已确认） |
 | **不扩** `packages/web-app` | 渲染层复用 web-app 资产，但不在 web-app 包内编辑器化 | 避免 web-app 变成编辑器壳 |
 | **只读** `packages/coding-agent` | ACP mode + 现有 tools 不动；新增可选 `fileEditStream` 走 `wire` 扩展位 | 内核稳定 |
 | **复用** `packages/wire` / `packages/client` | 加 wire 命令 / 客户端订阅类型；web-app 升级时同步受益 | 与金句一致 |
