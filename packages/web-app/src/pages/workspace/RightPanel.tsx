@@ -83,7 +83,11 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 							</div>
 						))}
 					{tab === "artifacts" && (
-						<ArtifactsPanel attachmentAddress={attachmentAddress} sessionFile={view.sessionFile} />
+						<ArtifactsPanel
+							attachmentAddress={attachmentAddress}
+							sessionFile={view.sessionFile}
+							connected={view.connected}
+						/>
 					)}
 					{tab === "changes" && (
 						<ChangesPanel
