@@ -1,13 +1,30 @@
 import { Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { RemoteSkillItemDto, SkillScope, SkillScopeRowDto, SkillsResultDto } from "../../lib/pi-client-api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type {
+	EvolvedSkillDto,
+	EvolvedSkillsDto,
+	RemoteSkillItemDto,
+	SkillScope,
+	SkillScopeRowDto,
+	SkillsResultDto,
+} from "../../lib/pi-client-api";
 import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
+	evolvedDeprecationText,
+	evolvedGroupState,
+	evolvedQualityText,
+	evolvedRatingText,
+	evolvedUsageText,
+	evolvedVersionText,
 	SKILL_ACTIVATION_LABELS,
+	SKILL_OVERRIDE_RULE,
 	SKILL_SCOPE_LABELS,
 	SKILL_STATUS_LABELS,
+	skillBlockedDetail,
+	skillDayText,
+	skillReasonText,
 	skillStatusClass,
 	skillVersionText,
 } from "./skill-display";
@@ -25,18 +42,17 @@ import {
  * 换 Agent 必须重读：列表锚在焦点 Agent（activeAgentIdOf）上，不重读就会把上一个 Agent 的
  * 技能显示成这一个的。
  *
+ * 另外两栏与上面那套不是同一件事，分开展示、不合并：
+ *   受阻技能  同名落选者（`name collision`）—— 先到者生效，后到的同名不加载（SKILL_OVERRIDE_RULE）；
+ *           但 `blocked` 不只装同名：自定义目录的扫描告警也走这条（path 是目录），逐行看 serve 的原因。
+ *   演化技能  get_evolved_skills 读 evolution.db 的 skills 表（提炼/评分/使用统计）。
+ *           它与磁盘技能可以同名不同源；**读失败按错误显示，不显示成空组**。
+ *
  * 顶部「开源 Skill Hub」（h2）：list_remote_skills 浏览远程技能市场 + install_remote_skill 装到本机 skills。
  */
 
 /** 范围分组的展示顺序（本页专有：Agent 详情页不按范围分组）。 */
 const SCOPE_ORDER: SkillScope[] = ["agent", "project", "global"];
-
-function fmtDay(ts: number | undefined): string | null {
-	if (ts === undefined) return null;
-	const date = new Date(ts);
-	if (Number.isNaN(date.getTime())) return null;
-	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
 
 export function SkillsView(): React.JSX.Element {
 	const view = useSession();
@@ -48,6 +64,18 @@ export function SkillsView(): React.JSX.Element {
 	const [showDisabled, setShowDisabled] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState<string | null>(null);
+
+	// ── 演化技能（get_evolved_skills）：另一条命令、另一套事实，自己持有自己的状态 ──
+	/** `null` = 还没读到（不是空组）；读失败走 evolvedError，不落进空清单。 */
+	const [evolved, setEvolved] = useState<EvolvedSkillsDto | null>(null);
+	const [evolvedError, setEvolvedError] = useState<string | null>(null);
+	/** 展开详情的演化技能名（做法/工具/坑都在详情里，收起时只给统计行）。 */
+	const [expandedEvolved, setExpandedEvolved] = useState<string | null>(null);
+	/**
+	 * 读取代际。两个列表锚在同一个焦点 Agent 上，所以共用一道门 —— 各自放行就会出现
+	 * 「技能列表已经是新 Agent 的、演化技能还是旧的」这种半对半错的屏。
+	 */
+	const readGeneration = useRef(0);
 
 	// ── 开源 Skill Hub（h2）：远程技能市场浏览 + 安装。remote 为 null = 尚未加载 ──
 	const [remote, setRemote] = useState<RemoteSkillItemDto[] | null>(null);
@@ -128,15 +156,35 @@ export function SkillsView(): React.JSX.Element {
 		}
 	};
 
-	/** 重读技能工作台数据（焦点 Agent 定向；换 Agent / 启停后都走这一条）。 */
+	/**
+	 * 重读本地技能列表与演化技能（焦点 Agent 定向；换 Agent / 启停后都走这一条）。
+	 *
+	 * 两条命令并行发、各记各的结果：它们问的是两件事（磁盘上装了什么 vs 演化系统沉淀了什么），
+	 * 一条读失败不能连坐另一条 —— 也不能把失败的一方写成对方的空态。
+	 */
 	const refresh = async (): Promise<void> => {
-		try {
-			const result = await store.fetchSkills(agentId);
-			setData(result);
+		const ticket = ++readGeneration.current;
+		const [skills, evolvedSkills] = await Promise.allSettled([
+			store.fetchSkills(agentId),
+			store.fetchEvolvedSkills(agentId),
+		]);
+		// 焦点 Agent 已经换了：这份答复答的是别人，两半一起丢。
+		if (ticket !== readGeneration.current) return;
+		if (skills.status === "fulfilled") {
+			setData(skills.value);
 			setError(null);
-		} catch (err) {
+		} else {
 			setData(null);
-			setError(err instanceof Error ? err.message : String(err));
+			setError(skills.reason instanceof Error ? skills.reason.message : String(skills.reason));
+		}
+		if (evolvedSkills.status === "fulfilled") {
+			setEvolved(evolvedSkills.value);
+			setEvolvedError(null);
+		} else {
+			setEvolved(null);
+			setEvolvedError(
+				evolvedSkills.reason instanceof Error ? evolvedSkills.reason.message : String(evolvedSkills.reason),
+			);
 		}
 	};
 
@@ -180,6 +228,9 @@ export function SkillsView(): React.JSX.Element {
 	useEffect(() => {
 		if (!view.connected) {
 			setData(null);
+			// 断开时两个列表一起清：留着一个页面的旧数据，重连后会在重读回来之前先露一次脸
+			setEvolved(null);
+			setEvolvedError(null);
 			return;
 		}
 		void refresh();
@@ -216,20 +267,34 @@ export function SkillsView(): React.JSX.Element {
 	}, [loaded, disabled]);
 	const isInstalledRemote = (name: string): boolean => localInstalled.has(name) || installedRemote.has(name);
 
-	/** 需要人看见的问题：发现错误、被挡住的技能、Project registry 读不出来。 */
+	/** 需要人看见的问题：Project registry 读不出来 + 发现阶段错误。
+	 * 受阻技能（同名落选者）不在这里 —— 它不是「发现出错」，是「没轮到它」，另立一栏带覆盖规则。 */
 	const problems = useMemo(() => {
 		const items: Array<{ title: string; detail: string }> = [];
 		if (data?.scope.projectError) {
 			items.push({ title: "Project 归属未知", detail: data.scope.projectError });
-		}
-		for (const blocked of data?.blocked ?? []) {
-			items.push({ title: `受阻：${blocked.name}`, detail: `${blocked.path} —— ${blocked.reason}` });
 		}
 		for (const err of data?.errors ?? []) {
 			items.push({ title: "发现错误", detail: err.path ? `${err.path} —— ${err.message}` : err.message });
 		}
 		return items;
 	}, [data]);
+
+	/** 演化技能分组的显示态（读失败 / 未连接 / 读中 / 空集 / 清单，五态分开）。 */
+	const evolvedState = evolvedGroupState({ connected: view.connected, dto: evolved, error: evolvedError });
+
+	/** 演化技能列表跟着同一个搜索框过滤（与本地技能一套规则，不搞两个过滤器）。 */
+	const evolvedRows = useMemo(() => {
+		const rows = evolved?.skills ?? [];
+		const q = query.trim().toLowerCase();
+		if (!q) return rows;
+		return rows.filter(
+			s =>
+				s.name.toLowerCase().includes(q) ||
+				s.description.toLowerCase().includes(q) ||
+				s.taskPattern.toLowerCase().includes(q),
+		);
+	}, [evolved, query]);
 
 	const toggleCollapsed = (level: string) => {
 		setCollapsed(prev => {
@@ -294,6 +359,34 @@ export function SkillsView(): React.JSX.Element {
 							{problems.map(problem => (
 								<div key={`${problem.title}:${problem.detail}`} className="text-2xs text-ink-subtle">
 									<span className="font-medium text-ink">{problem.title}</span>：{problem.detail}
+								</div>
+							))}
+						</div>
+					</div>
+				)}
+
+				{/* 受阻技能：进不了本次会话的行（同名落选者是一类，校验失败的目录扫描是另一类），
+				    逐行给 serve 的原文原因；覆盖规则作为“同名时怎么算”的规则放在上面。 */}
+				{(data?.blocked.length ?? 0) > 0 && (
+					<div className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface">
+						<div className="flex items-center gap-2.5 px-5 py-3">
+							<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">受阻技能</span>
+							<span className="font-mono text-xs text-ink-faint">未进入本次会话</span>
+							<span className="ml-auto font-mono text-xs text-ink-faint">{data?.blocked.length}</span>
+						</div>
+						<div className="border-t border-hairline px-5 py-2.5 text-2xs leading-relaxed text-ink-subtle">
+							{SKILL_OVERRIDE_RULE}
+						</div>
+						<div className="border-t border-hairline">
+							{(data?.blocked ?? []).map(blocked => (
+								<div
+									key={`${blocked.name}:${blocked.path}`}
+									className="border-b border-hairline px-5 py-3 last:border-b-0"
+								>
+									<div className="text-xs font-medium text-ink">{blocked.name}</div>
+									<div className="mt-0.5 font-mono text-3xs break-all text-ink-faint">
+										{skillBlockedDetail(blocked)}
+									</div>
 								</div>
 							))}
 						</div>
@@ -517,6 +610,58 @@ export function SkillsView(): React.JSX.Element {
 					</div>
 				))}
 
+				{/* 演化技能：self-evolution 从会话里提炼出来的技能（evolution.db 的 skills 表）。
+				    与上面的磁盘技能是两套事实（同名也不合并）：读失败按错误显示，绝不显示成空组。 */}
+				<div className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface">
+					<div className="flex items-center gap-2.5 px-5 py-3">
+						<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">演化技能</span>
+						<span className="font-mono text-xs text-ink-faint">演化系统沉淀</span>
+						<span className="ml-auto font-mono text-xs text-ink-faint">
+							{evolvedState.kind === "rows" ? evolvedRows.length : "—"}
+						</span>
+					</div>
+					<div className="border-t border-hairline">
+						{evolvedState.kind === "disconnected" ? (
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">未连接——演化技能不可用</div>
+						) : evolvedState.kind === "loading" ? (
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">正在读演化技能…</div>
+						) : evolvedState.kind === "error" ? (
+							<div className="px-5 py-6 text-center text-xs text-danger">
+								演化技能读不到（不是「还没演化出技能」）：{evolvedState.message}
+							</div>
+						) : evolvedState.kind === "empty" ? (
+							<div className="px-5 py-6 text-center text-xs text-ink-faint">
+								演化库里还没有技能（读到了，确实没有）
+								{evolvedState.degraded && (
+									<span className="mt-1 block text-danger">部分行没读全：{evolvedState.degraded}</span>
+								)}
+							</div>
+						) : (
+							<>
+								{evolvedState.degraded && (
+									<div className="border-b border-hairline px-5 py-2 text-2xs text-danger">
+										部分行没读全（整份读不到不走这里）：{evolvedState.degraded}
+									</div>
+								)}
+								{evolvedRows.length === 0 ? (
+									<div className="px-5 py-6 text-center text-xs text-ink-faint">
+										没有匹配「{query}」的演化技能
+									</div>
+								) : (
+									evolvedRows.map(skill => (
+										<EvolvedSkillRow
+											key={skill.name}
+											skill={skill}
+											expanded={expandedEvolved === skill.name}
+											onToggle={() => setExpandedEvolved(expandedEvolved === skill.name ? null : skill.name)}
+										/>
+									))
+								)}
+							</>
+						)}
+					</div>
+				</div>
+
 				{/* 已停用组（显示已停用 开关）——灰显 + 启用回切 */}
 				{showDisabled && (
 					<div className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface">
@@ -531,45 +676,52 @@ export function SkillsView(): React.JSX.Element {
 							</div>
 						) : (
 							<div className="border-t border-hairline">
-								{disabledFiltered.map(row => (
-									<div
-										key={row.name}
-										className="flex items-start gap-3 border-b border-hairline px-5 py-3 opacity-70 last:border-b-0"
-									>
-										<div className="min-w-0 flex-1">
-											<div className="flex items-baseline gap-2">
-												<span className="text-xs font-medium text-ink-faint line-through">{row.name}</span>
-												<span
-													className={`rounded px-1.5 py-0.5 font-mono text-2xs ${skillStatusClass(row.status)}`}
-												>
-													{SKILL_STATUS_LABELS[row.status]}
-												</span>
-												<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
-													{SKILL_SCOPE_LABELS[row.scope]}
-												</span>
-											</div>
-											{row.description && (
-												<div className="mt-0.5 line-clamp-2 text-xs text-ink-faint">{row.description}</div>
-											)}
-											<div className="mt-0.5 font-mono text-3xs text-ink-faint">{row.reason ?? "—"}</div>
-										</div>
-										<button
-											type="button"
-											onClick={() => void toggleSkill(row, true)}
-											disabled={busy === row.name}
-											aria-label={`${row.name} 启用`}
-											className="mt-0.5 shrink-0 rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-2xs text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default"
+								{disabledFiltered.map(row => {
+									const reason = skillReasonText(row);
+									return (
+										<div
+											key={row.name}
+											className="flex items-start gap-3 border-b border-hairline px-5 py-3 opacity-70 last:border-b-0"
 										>
-											{busy === row.name ? "启用中…" : "启用"}
-										</button>
-									</div>
-								))}
+											<div className="min-w-0 flex-1">
+												<div className="flex items-baseline gap-2">
+													<span className="text-xs font-medium text-ink-faint line-through">
+														{row.name}
+													</span>
+													<span
+														className={`rounded px-1.5 py-0.5 font-mono text-2xs ${skillStatusClass(row.status)}`}
+													>
+														{SKILL_STATUS_LABELS[row.status]}
+													</span>
+													<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
+														{SKILL_SCOPE_LABELS[row.scope]}
+													</span>
+												</div>
+												{row.description && (
+													<div className="mt-0.5 line-clamp-2 text-xs text-ink-faint">
+														{row.description}
+													</div>
+												)}
+												{reason && <div className="mt-0.5 font-mono text-3xs text-ink-faint">{reason}</div>}
+											</div>
+											<button
+												type="button"
+												onClick={() => void toggleSkill(row, true)}
+												disabled={busy === row.name}
+												aria-label={`${row.name} 启用`}
+												className="mt-0.5 shrink-0 rounded-md border border-hairline bg-surface-2 px-2.5 py-1 text-2xs text-ink-subtle transition-colors hover:border-hairline-strong hover:text-ink disabled:cursor-default"
+											>
+												{busy === row.name ? "启用中…" : "启用"}
+											</button>
+										</div>
+									);
+								})}
 							</div>
 						)}
 					</div>
 				)}
 
-				{view.connected && !error && query && groups.length === 0 && (
+				{view.connected && !error && query && groups.length === 0 && evolvedRows.length === 0 && (
 					<div className="py-16 text-center text-[13px] text-ink-faint">没有匹配「{query}」的技能</div>
 				)}
 			</div>
@@ -577,7 +729,7 @@ export function SkillsView(): React.JSX.Element {
 	);
 }
 
-/** 一行技能：名字 + 来源 + 范围 + 版本 + 激活/状态 + 启停开关。 */
+/** 一行技能：名字 + 来源 + 范围 + 版本 + 激活/状态 + 原因 + 启停开关。 */
 function SkillRowView({
 	row,
 	busy,
@@ -587,7 +739,9 @@ function SkillRowView({
 	busy: boolean;
 	onToggle: () => void;
 }): React.JSX.Element {
-	const day = fmtDay(row.updatedAt);
+	const day = skillDayText(row.updatedAt);
+	// 已加载的行也可能有原因：SKILL.md 刚被删/读不了时 serve 把它标成 unavailable 并带出失败原文。
+	const reason = skillReasonText(row);
 	return (
 		<div className="flex items-start gap-3 border-b border-hairline px-5 py-3 last:border-b-0">
 			<div className="min-w-0 flex-1">
@@ -616,6 +770,14 @@ function SkillRowView({
 					</span>
 					<span>{skillVersionText(row)}</span>
 					{day && <span>更新 {day}</span>}
+					{reason && (
+						<span
+							className={`max-w-[560px] truncate ${row.status === "unavailable" ? "text-danger" : "text-ink-faint"}`}
+							title={reason}
+						>
+							原因：{reason}
+						</span>
+					)}
 				</div>
 			</div>
 
@@ -630,6 +792,117 @@ function SkillRowView({
 			>
 				<span className="ml-auto h-4 w-4 rounded-full bg-ink" />
 			</button>
+		</div>
+	);
+}
+
+/**
+ * 一行演化技能：名字 + 版本 + 废弃态 + 质量/评分 + 使用统计；展开给做法与坑。
+ *
+ * 字段一律「有就说、没有就不说」：`qualityScore` / `userRating` 缺省是「没评过」，不是 0 ——
+ * 编一个 0 出来会让「从没评分」和「评分很低」长得一样。`lastUsedAt` 同理：`usageCount` 为 0 时
+ * 不拿创建时间冒充「最近使用」（提炼时会写一次 `Date.now()`，它不是一次使用）。
+ */
+function EvolvedSkillRow({
+	skill,
+	expanded,
+	onToggle,
+}: {
+	skill: EvolvedSkillDto;
+	expanded: boolean;
+	onToggle: () => void;
+}): React.JSX.Element {
+	const quality = evolvedQualityText(skill);
+	const rating = evolvedRatingText(skill);
+	const created = skillDayText(skill.createdAt);
+	// 「使用过」才谈得上「最近使用」：0 次的行的 lastUsedAt 是提炼时间，不是使用时间。
+	const lastUsed = skill.usageCount > 0 ? skillDayText(skill.lastUsedAt) : null;
+	const lastOptimized = skillDayText(skill.lastOptimizedAt);
+	const deprecated = skill.deprecated === true;
+	return (
+		<div className="border-b border-hairline px-5 py-3 last:border-b-0">
+			<div className="flex flex-wrap items-baseline gap-2">
+				<button
+					type="button"
+					onClick={onToggle}
+					title="查看详情"
+					className={`text-xs font-medium transition-colors hover:text-accent ${deprecated ? "text-ink-faint line-through" : "text-ink"}`}
+				>
+					{skill.name}
+				</button>
+				<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
+					{evolvedVersionText(skill)}
+				</span>
+				<span
+					className={`rounded px-1.5 py-0.5 font-mono text-2xs ${deprecated ? "bg-surface-2 text-ink-faint" : "bg-success/10 text-success"}`}
+				>
+					{evolvedDeprecationText(skill)}
+				</span>
+				{quality && (
+					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">{quality}</span>
+				)}
+				{rating && (
+					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">{rating}</span>
+				)}
+			</div>
+			{skill.description && (
+				<div className={`mt-0.5 text-xs text-ink-subtle ${expanded ? "" : "line-clamp-2"}`}>
+					{skill.description}
+				</div>
+			)}
+			<div className="mt-0.5 flex flex-wrap items-center gap-x-3 font-mono text-3xs text-ink-faint">
+				<span>{evolvedUsageText(skill)}</span>
+				{created && <span>创建 {created}</span>}
+				{lastUsed && <span>最近使用 {lastUsed}</span>}
+			</div>
+			{expanded && (
+				<div className="mt-2 space-y-1.5 rounded-md border border-hairline bg-surface-2 px-3 py-2">
+					{skill.taskPattern && (
+						<div className="text-2xs leading-relaxed text-ink-subtle">
+							<span className="font-medium text-ink">适用任务</span>：{skill.taskPattern}
+						</div>
+					)}
+					{skill.approach && (
+						<div className="text-2xs leading-relaxed text-ink-subtle">
+							<span className="font-medium text-ink">做法</span>：{skill.approach}
+						</div>
+					)}
+					{skill.tools.length > 0 && (
+						<div className="flex flex-wrap items-center gap-1.5 text-2xs text-ink-subtle">
+							<span className="font-medium text-ink">工具</span>
+							{skill.tools.map((tool, index) => (
+								<span
+									key={`${tool}:${index}`}
+									className="rounded bg-surface px-1.5 py-0.5 font-mono text-3xs text-ink-faint"
+								>
+									{tool}
+								</span>
+							))}
+						</div>
+					)}
+					{skill.pitfalls.length > 0 && (
+						<div className="text-2xs leading-relaxed text-ink-subtle">
+							<span className="font-medium text-ink">坑</span>
+							<ul className="mt-0.5 list-disc pl-4">
+								{skill.pitfalls.map((pitfall, index) => (
+									<li key={`${pitfall}:${index}`}>{pitfall}</li>
+								))}
+							</ul>
+						</div>
+					)}
+					{skill.autonomyNotes && (
+						<div className="text-2xs leading-relaxed text-ink-subtle">
+							<span className="font-medium text-ink">自主性备注</span>：{skill.autonomyNotes}
+						</div>
+					)}
+					{lastOptimized && <div className="font-mono text-3xs text-ink-faint">最近优化 {lastOptimized}</div>}
+					{skill.optimizedPrompt && (
+						<pre className="max-h-48 overflow-auto rounded border border-hairline bg-surface px-2.5 py-2 font-mono text-2xs leading-relaxed whitespace-pre-wrap text-ink-subtle">
+							{skill.optimizedPrompt}
+						</pre>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

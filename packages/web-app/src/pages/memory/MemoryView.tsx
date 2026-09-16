@@ -23,7 +23,7 @@ import { useSession } from "../../state/use-session";
  * 三条不能混的语义（旧实现全混成「空态」）：
  *   读不到 ≠ 没内容：每个区带 error，读失败按红色错误显示；
  *   没沉淀 ≠ 空记忆：session 区 pending 是「管线还没处理过这个会话」；
- *   不适用 ≠ 没有：区为 null 时说明原因，不显示成「空」。
+ *   不适用 ≠ 没有：`zone.unavailableReason` 原样显示（有它就不再说「尚未生成」）；zone 为 null 时由 `resolution.notes` 说明原因。
  *
  * 换 Agent 必须重读：投影锚在焦点 Agent（activeAgentIdOf）上。
  */
@@ -238,20 +238,32 @@ function FileZoneCard({
 			subtitle={zone.memoryRoot ? `${zone.rootKind ? `${zone.rootKind} · ` : ""}${zone.memoryRoot}` : undefined}
 			tone={zone.error ? "error" : undefined}
 		>
+			{/*
+			 * 「不适用」不是「读失败」，也不是「没有内容」：serve 说这个 scope 在当前上下文算不出来时，
+			 * 把它的话原样放出来。不置 error 色调 —— 它不是错误。
+			 */}
+			{zone.unavailableReason && (
+				<div className="px-5 pb-3">
+					<div className="rounded-md border border-hairline bg-surface-2 px-3 py-2 text-[12px] text-ink-faint">
+						本区不适用：{zone.unavailableReason}
+					</div>
+				</div>
+			)}
 			{zone.error ? (
 				<ZoneError error={zone.error} />
-			) : files.length === 0 ? (
+			) : files.length > 0 ? (
+				<div className="space-y-3">
+					{files.map(entry => (
+						<FileBlock key={entry.label} label={entry.label} file={entry.file} />
+					))}
+				</div>
+			) : zone.unavailableReason ? null : (
+				// 只有在 serve 没给「不适用」的理由时才说自己的那句空态 —— 两者同时出现是互相矛盾的两句话。
 				<div className="px-5 pb-6 text-xs text-ink-faint">
 					{emptyHint}
 					{zone.searchedRoots.length > 0 && (
 						<span className="mt-1 block font-mono text-3xs">已查：{zone.searchedRoots.join(" · ")}</span>
 					)}
-				</div>
-			) : (
-				<div className="space-y-3">
-					{files.map(entry => (
-						<FileBlock key={entry.label} label={entry.label} file={entry.file} />
-					))}
 				</div>
 			)}
 		</SectionCard>
