@@ -43,6 +43,8 @@ let agentDir: string;
 let extraRoot: string;
 let outsideDir: string;
 let opsDir: string;
+/** agentDir 的 workspace.json 坏掉的 agent（声明读不出 ≠ 没声明过）。 */
+let badDir: string;
 
 /** agentDir 的 workspace.json 声明的额外根（相对 agentDir 或绝对，这里给绝对路径）。 */
 const EXTRA_FILE = "extra-only.txt";
@@ -75,6 +77,7 @@ async function writeRegistry(): Promise<void> {
 			agents: {
 				hr: { path: agentDir, registeredAt: new Date().toISOString(), template: "default" },
 				ops: { path: opsDir, registeredAt: new Date().toISOString(), template: "default" },
+				bad: { path: badDir, registeredAt: new Date().toISOString(), template: "default" },
 			},
 		}),
 	);
@@ -117,11 +120,13 @@ beforeAll(async () => {
 	extraRoot = path.join(home, "work", "extra");
 	outsideDir = path.join(home, "outside");
 	opsDir = path.join(home, "agents", "ops");
+	badDir = path.join(home, "agents", "bad");
 
 	await fs.mkdir(agentDir, { recursive: true });
 	await fs.mkdir(extraRoot, { recursive: true });
 	await fs.mkdir(outsideDir, { recursive: true });
 	await fs.mkdir(opsDir, { recursive: true });
+	await fs.mkdir(path.join(badDir, "sessions"), { recursive: true });
 
 	// ── Project root：自己的 git 仓库（分支名与 agentDir 那个不同，用来分辨 git 读的是哪个根）──
 	await runGit(projectRoot, ["init", "-b", "project-main"]);
@@ -148,6 +153,9 @@ beforeAll(async () => {
 
 	await writeAgentWorkspace(agentDir, "hr", [extraRoot]);
 	await writeAgentWorkspace(opsDir, "ops");
+	// 声明文件在、但读不出来的 agent（损坏 JSON）——它不是「没声明过」，是「声明读不出」。
+	await fs.mkdir(path.join(badDir, ".cornfield"), { recursive: true });
+	await fs.writeFile(path.join(badDir, ".cornfield", "workspace.json"), '{ "schemaVersion": 2, "id":\n');
 	await writeRegistry();
 
 	// ── 符号链接逃逸的两条路（读穿已存在的链接 / 往链接里新建）──
@@ -177,7 +185,8 @@ beforeAll(async () => {
 	);
 	serveInfo = await waitForServe(proc, port);
 
-	// 两个注册 agent 都 attach（fs_* 的会话面判定需要会话；serve 启动时也会预挂载，幂等）。
+	// 两个可用的注册 agent 都 attach（fs_* 的会话面判定需要会话；serve 启动时也会预挂载，幂等）。
+	// “bad”（声明读不出的那个）故意不 attach：它连 attach 都过不去，见 F 组。
 	await withClient(async client => {
 		for (const agentId of ["hr", "ops"]) {
 			await client.request({ type: "attach", sessionId: agentId } as never);
@@ -396,6 +405,83 @@ describe("D session-index：projectId 只从会话头读，不拿 cwd 反推", (
 			expect(undeclared?.projectId).toBeUndefined();
 			// cwd 还在（证明这条会话确实被索引到了、而且它的 cwd 就在 Project root 里）
 			expect(undeclared?.cwd).toBe(agentDir);
+		});
+	}, 30_000);
+});
+
+/** 一个目录下现有的 jsonl 名单 —— 「一个会话都不建」的落盘证据（新建会话会立即落一个文件）。 */
+async function jsonlUnder(root: string): Promise<string[]> {
+	const out: string[] = [];
+	for await (const rel of new Bun.Glob("**/*.jsonl").scan({ cwd: root, onlyFiles: true })) out.push(rel);
+	return out.sort();
+}
+
+describe("E new_session.projectId：解析与失败语义（工厂接线尚未落地）", () => {
+	/** 会话目录里现有的 jsonl 名单 —— 「一个会话都不建」的落盘证据（新建会话会立刻落一个文件）。 */
+	const hrSessionFiles = (): Promise<string[]> => jsonlUnder(path.join(agentDir, "sessions"));
+	test("未声明的 projectId → ok:false，且一个会话都不建", async () => {
+		await withClient(async client => {
+			const before = await hrSessionFiles();
+			const refusal = await refusalOf(() =>
+				client.request({ type: "new_session", sessionId: "hr", projectId: "proj-nope" } as never),
+			);
+			expect(refusal).toContain("proj-nope");
+			expect(await hrSessionFiles()).toEqual(before);
+		});
+	}, 30_000);
+
+	test("已声明的 projectId → 解析通过后被「尚未接通」拦下（不退回旧根建会话）", async () => {
+		await withClient(async client => {
+			const before = await hrSessionFiles();
+			const refusal = await refusalOf(() =>
+				client.request({ type: "new_session", sessionId: "hr", projectId: "proj-work" } as never),
+			);
+			expect(refusal).toContain("Project 绑定尚未接通");
+			// 报的是**解出来的那个根**：声明的 Project root，不是 agentDir
+			expect(refusal).toContain(projectRoot);
+			expect(await hrSessionFiles()).toEqual(before);
+		});
+	}, 30_000);
+
+	test("不带 projectId → 走今天的路（ok:true，不落进归属分支）", async () => {
+		await withClient(async client => {
+			// 归属分支恒为 ok:false，所以「ok:true」本身就是「没走那条」的证据。
+			const res = await client.request<{ cancelled: boolean }>({ type: "new_session", sessionId: "hr" } as never);
+			expect(typeof res.cancelled).toBe("boolean");
+		});
+	}, 30_000);
+});
+
+/**
+ * 读不出来 ≠ 没声明过。
+ *
+ * agentDir 的 `workspace.json` 在、但读不出（损坏 JSON / 不是 schema-v2）—— 这是「归属未知」，
+ * 不是「没声明过」：降级成后者会把边界悄悄换成 agentDir，把一次真故障渲染成一次正常的「没绑项目」。
+ *
+ * （Project 注册表本身读坏的情况在 serve 层观祭不到：进程启动就死在 `agent-directory` 的
+ * `loadProjects` 上（不是本模块的判定），所以这里钉的是能观察到的那个入口 —— 声明读不出。
+ * 注册表读坏的 resolver 级语义由 T24 的 `session-workspace.test.ts` 负责。）
+ */
+describe("F 声明读不出：答不出来就说读不出（不降级成「没声明过」）", () => {
+	test("损坏的 workspace.json：文件面拒，而不是拿 agentDir 冒充边界", async () => {
+		await withClient(async client => {
+			const refusal = await refusalOf(() =>
+				client.request({ type: "fs_read", sessionId: "bad", path: "whatever.txt" } as never),
+			);
+			expect(refusal).toContain("workspace.json");
+
+			// 隔离：坏声明只影响它自己那个 agent
+			expect((await fsRead(client, "hr", SHARED_FILE)).text).toBe("shared\n");
+		});
+	}, 30_000);
+
+	test("同一个 agent 连 attach 都过不去（会话不得以一个它没声明过的 Agent 起）", async () => {
+		// 这是 `./agent-scope` 之外的另一道门（session-agent 的默认 Agent 解析）在拒：
+		// 它把「new_session + 声明读不出」这条路彻底堵在前面，所以本模块的 ok:false 看不到实跑。
+		// 断言它是为了“没人静默降级”这条事实，不是为了本模块的判定。
+		await withClient(async client => {
+			const refusal = await refusalOf(() => client.request({ type: "attach", sessionId: "bad" } as never));
+			expect(refusal).toContain("workspace.json");
 		});
 	}, 30_000);
 });

@@ -20,6 +20,7 @@ import type {
 } from "@cornfield/wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
+import type { ProjectId } from "../agent-domain/types";
 import { withFileLock } from "../config/file-lock";
 import { parseModelString } from "../config/model-resolver";
 import { getDefault, SETTINGS_SCHEMA, type SettingPath, Settings } from "../config/settings";
@@ -1481,6 +1482,43 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					break;
 				}
 				case "new_session": {
+					/**
+					 * 归属解析（终态，与 T25 无关）：调用方给了 `projectId` 就必须能解出根 —— 解析走 T24 的唯一
+					 * resolver（`./session-workspace`），这里不写第二份判定。
+					 *
+					 * 解不出来（注册表没声明这个 id / 注册表读坏 / agentDir 的声明读不出）→ `ok:false`，
+					 * 且**一个会话都不建**：静默落回启动根会造出一个「声称在 Project 里、实际不在」的会话，
+					 * 正是这一波要修的东西。
+					 *
+					 * 传的是「要装配的那个 Project」而不是现有会话的位置（不带 session）：新建会话没有已记录的
+					 * 归属，调用方这次点的是哪个 Project 就是哪个 —— 否则「切到另一个 Project 再建会话」会被
+					 * resolver 的 project-conflict 当成一次非法重绑。
+					 */
+					if (command.projectId !== undefined) {
+						const agentDir = registry.getMeta(agentId)?.agentDir ?? session.sessionManager.getCwd();
+						const anchor = await workspaceAnchorOf({
+							agentDir,
+							session: undefined,
+							projectId: command.projectId,
+						});
+						if (!anchor.ok) {
+							fail(anchor.error);
+							break;
+						}
+						const root = anchor.workspace.projectRoot;
+						if (root === undefined) {
+							// resolver 的契约是「有归属就有根」。缺了就是不变量被破坏 —— 不猜一个根，如实报出来。
+							fail(`Project 绑定解析不出根：projectId "${command.projectId}" 有归属却没有 root。`);
+							break;
+						}
+						// ── 待替换点（T25）：拿 `root` 交给按 (agentId, root) 装配的工厂。
+						//    在它落地前**不许**退回旧根建会话（那正是这一波存在的理由），所以这里响亮地失败。──
+						fail(
+							`Project 绑定尚未接通：projectId "${command.projectId}" 已解析到根 "${root}"，` +
+								"但「按 (agentId, root) 装配会话」的工厂还没落地（T25）；本次不建会话。",
+						);
+						break;
+					}
 					const opts = command.parentSession ? { parentSession: command.parentSession } : undefined;
 					const success = await session.newSession(opts);
 					sessionDone({ cancelled: !success });
@@ -2562,11 +2600,15 @@ async function contentVersionOfFile(file: string): Promise<string> {
 async function resolveWorkspaceAnchor(input: {
 	agentDir: string;
 	session: AgentSession | undefined;
+	/**
+	 * 调用方为这次装配解析出的 Project（`new_session.projectId`）。给了就必须能被注册表解出来，
+	 * 解不出来由 resolver 抛，调用方回 ok:false。
+	 */
+	projectId?: ProjectId;
 }): Promise<ResolvedSessionWorkspace> {
 	const manager = input.session?.sessionManager;
-	return resolveSessionWorkspace(
-		manager ? { agentDir: input.agentDir, session: manager } : { agentDir: input.agentDir },
-	);
+	const base = manager ? { agentDir: input.agentDir, session: manager } : { agentDir: input.agentDir };
+	return resolveSessionWorkspace(input.projectId === undefined ? base : { ...base, projectId: input.projectId });
 }
 
 /**
@@ -2685,6 +2727,7 @@ async function resolveFsTarget(input: {
 async function workspaceAnchorOf(input: {
 	agentDir: string;
 	session: AgentSession | undefined;
+	projectId?: ProjectId;
 }): Promise<{ ok: true; workspace: ResolvedSessionWorkspace } | { ok: false; error: string }> {
 	try {
 		return { ok: true, workspace: await resolveWorkspaceAnchor(input) };
