@@ -213,8 +213,7 @@ export type {
  * 三项都是**请求**，都被这一条命令带上 wire，但只有「真的建了」才是事实：serve 可以拒
  * （`ok:false`，如未知 projectId、目标 Agent 没 attach），也可以接而不做（`cancelled:true`）。
  * 两种都不是「建成了」，见 {@link NewSessionResult} 与 store 的 `NewSessionOutcome`。
- */
-export interface NewSessionOptions {
+ */ export interface NewSessionOptions {
 	/**
 	 * 目标 Agent（注册表名）→ wire `new_session` 的 `sessionId`。缺省 = 本连接当前焦点 agent。
 	 *
@@ -238,7 +237,7 @@ export interface NewSessionOptions {
 }
 
 /**
- * 新建会话的结果 —— 回答「真的建了吗」。
+ * 新建会话的结果 —— 回答「真的建了吗」+「哪些入参没落地」。
  *
  * 命令本身的传输失败不走这里：失败抛错（未连接 / serve 拒绝），与其它写命令同一个约定。
  * 但 **serve 接了命令不等于建了会话** —— `new_session` 可以回 `cancelled:true`（比如上一回合
@@ -252,6 +251,17 @@ export interface NewSessionResult {
 	 * 那一跳会改到**上一个**会话的名字）。
 	 */
 	created: boolean;
+	/**
+	 * 本次请求里 wire **表达不出来**的入参名（空数组 = 全部落上了）。
+	 *
+	 * 这个出口必须留着：将来有一个 wire 上表达不出来的字段时，字段名要出现在这里，
+	 * 而不是被静默丢掉 —— 静默丢弃会让调用方把一个**没发生**的事实渲染成已生效。
+	 *
+	 * 今天**恒为空**：三个入参都有去处（`agentId` → `new_session.sessionId`，
+	 * `projectId` → `new_session.projectId`，`title` → 创建后紧跟一次 `set_session_name`）。
+	 * `projectId` 曾经在这个列表里，那是「归属只能由 serve 按 cwd 算出来」的年代留下的。
+	 */
+	notApplied: string[];
 }
 
 export interface GatewayGroupInfo {
@@ -417,6 +427,9 @@ export interface PiClient {
 	 * `opts.projectId` 定为权威归属（wire 的 `projectId`），`opts.title` 在创建后用
 	 * `set_session_name` 落上。失败抛错 —— serve 的拒绝是 `PiServerError`（错误原文在
 	 * `serverError` 上），与其它写命令同一个约定。
+	 *
+	 * 三个入参今天都发得出去；万一将来有表达不出来的，走 {@link NewSessionResult}.`notApplied`
+	 * 报出去，不静默丢。
 	 */
 	newSession(opts?: NewSessionOptions): Promise<NewSessionResult>;
 	forkFrom(entryId: string): Promise<void>;

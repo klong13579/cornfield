@@ -272,7 +272,7 @@ describe("新建会话选另一个 Agent：先等 serve 确认，再带显式目
 
 		const outcome = await store.newSession({ agentId: "hr" });
 
-		expect(outcome).toEqual({ kind: "created" });
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
 		// serve 侧事实：新会话**真的建在 hr 上**，而不是按客户端显示的那个焦点碰运气
 		expect(serve.createdOn).toEqual(["hr"]);
 		// 竞态判据：new_session 到达那一刻，连接焦点已经切到 hr（切换是被 await 过的），
@@ -309,7 +309,7 @@ describe("新建会话选另一个 Agent：先等 serve 确认，再带显式目
 
 		const outcome = await store.newSession();
 
-		expect(outcome).toEqual({ kind: "created" });
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
 		expect(serve.createdOn).toEqual(["default"]);
 		expect(serve.arrivals).toEqual([{ activeAgent: "default", sessionId: "default" }]);
 		// 焦点已经是它：不再 attach / switch（默认路径的表现与以前一致）
@@ -327,7 +327,7 @@ describe("新建会话选另一个 Agent：先等 serve 确认，再带显式目
 		const duplicate = await second;
 		expect(duplicate.kind).toBe("not-created");
 		expect(duplicate.kind === "not-created" ? duplicate.error : "").toContain("重复提交");
-		expect(await first).toEqual({ kind: "created" });
+		expect(await first).toEqual({ kind: "created", notApplied: [] });
 		expect(serve.createdOn).toEqual(["hr"]);
 		expect(creationFrames(serve).filter(t => t === "new_session")).toHaveLength(1);
 	});
@@ -360,7 +360,7 @@ describe("新建会话的标题：真的建出来之后才发改名，改的是*
 
 		const outcome = await store.newSession({ agentId: "hr", title: "季度复盘" });
 
-		expect(outcome).toEqual({ kind: "created" });
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
 		// serve 侧事实一：改名这一帧是**创建回执之后**才到的，没跑到创建前面去
 		expect(creationFrames(serve)).toEqual(["attach", "switch_session", "new_session", "set_session_name"]);
 		// serve 侧事实二：只建了一个会话，改名落在它身上（hr-1 = 这一次新建出来的那个）
@@ -378,7 +378,7 @@ describe("新建会话的标题：真的建出来之后才发改名，改的是*
 
 		const outcome = await store.newSession({ agentId: "hr", title: "季度复盘" });
 
-		expect(outcome).toEqual({ kind: "created" });
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
 		expect(serve.createdOn).toEqual(["hr", "hr"]);
 		// 改名那一刻 hr 当刻的会话已经是**第二个**（hr-2）——改的不是上一个（hr-1）
 		expect(serve.renames).toEqual([
@@ -405,19 +405,19 @@ describe("新建会话的标题：真的建出来之后才发改名，改的是*
 describe("标题的边界：没给 / 空串 / 创建被拒 —— 都不发改名帧", () => {
 	it("没给标题、或标题是空串：一个改名帧都不发（不拿空名字当标题）", async () => {
 		const withoutTitle = await createConnectedStore();
-		expect(await withoutTitle.store.newSession({ agentId: "hr" })).toEqual({ kind: "created" });
+		expect(await withoutTitle.store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
 		expect(withoutTitle.serve.renames).toEqual([]);
 		expect(creationFrames(withoutTitle.serve)).toEqual(["attach", "switch_session", "new_session"]);
 
 		const emptyTitle = await createConnectedStore();
-		expect(await emptyTitle.store.newSession({ title: "" })).toEqual({ kind: "created" });
+		expect(await emptyTitle.store.newSession({ title: "" })).toEqual({ kind: "created", notApplied: [] });
 		expect(emptyTitle.serve.renames).toEqual([]);
 		expect(creationFrames(emptyTitle.serve)).toEqual(["new_session"]);
 	});
 
 	it("标题在、但创建被 serve 拒（ok:false）：报「确定没建」并把 serve 的原文给出来，不发改名帧", async () => {
 		const { store, serve } = await createConnectedStore();
-		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created" });
+		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
 		// serve 侧：hr 的会话没了（agent 进程退出 / 另一条连接 detach），而焦点还停在 hr
 		serve.detach("hr");
 
@@ -449,7 +449,10 @@ describe("新建会话带 Project：落到 new_session.projectId，未知 id 原
 
 		const outcome = await store.newSession({ agentId: "hr", projectId: "dtc" });
 
-		expect(outcome).toEqual({ kind: "created" });
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
+		// 验收点：projectId 曾经只会出现在 notApplied 里（「wire 落不下去」），现在它发得出去 ——
+		// 出口还在（将来有表达不出来的字段仍然要从那里说），但它里面不该再有 projectId。
+		expect(outcome.kind === "created" ? outcome.notApplied : ["not-created"]).not.toContain("projectId");
 		// 命令面的事实：new_session 那一帧确实带了它（不是「客户端以为带了」）
 		const create = creationCommands(serve).find(c => c.type === "new_session");
 		expect(create).toMatchObject({ type: "new_session", sessionId: "hr", projectId: "dtc" });
@@ -459,7 +462,7 @@ describe("新建会话带 Project：落到 new_session.projectId，未知 id 原
 	it("不指定 Project：new_session 不带这个字段（不拿空串冒充一个声明）", async () => {
 		const { store, serve } = await createConnectedStore();
 
-		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created" });
+		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
 
 		const create = creationCommands(serve).find(c => c.type === "new_session");
 		expect(create).not.toHaveProperty("projectId");
@@ -494,6 +497,7 @@ describe("新建会话带 Project：落到 new_session.projectId，未知 id 原
 
 		expect(await store.newSession({ agentId: "hr", projectId: store.getSnapshot().workingProjectId })).toEqual({
 			kind: "created",
+			notApplied: [],
 		});
 		expect(serve.projectArrivals).toEqual(["dtc"]);
 
@@ -509,13 +513,31 @@ describe("新建会话带 Project：落到 new_session.projectId，未知 id 原
 
 		// 这两处调的就是 `store.newSession()`（不传任何入参）——「建在哪个 Project」的规则在 store 一处，
 		// 所以它们与表单得到的是同一个答案；在调用点各自决定就会出现半生效。
-		expect(await store.newSession()).toEqual({ kind: "created" });
+		expect(await store.newSession()).toEqual({ kind: "created", notApplied: [] });
 		expect(serve.projectArrivals).toEqual(["dtc"]);
 
 		// 显式指名优先于工作上下文
 		serve.projects.add("mkt");
-		expect(await store.newSession({ projectId: "mkt" })).toEqual({ kind: "created" });
+		expect(await store.newSession({ agentId: "hr", projectId: "mkt" })).toEqual({
+			kind: "created",
+			notApplied: [],
+		});
+
 		expect(serve.projectArrivals).toEqual(["dtc", "mkt"]);
+	});
+
+	it("notApplied 是空数组而不是缺字段 —— 调用方看得出「全部落上了」", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+		store.setWorkingProject("dtc");
+
+		const outcome = await store.newSession();
+		if (outcome.kind !== "created") throw new Error(`预期建成功，实际 ${outcome.kind}`);
+
+		// 这个出口留着（将来有 wire 表达不出来的字段要在这里说），今天确实一个都没有。
+		// 缺字段与空数组不是一回事：前者说不出「有没有被落下」。
+		expect(Array.isArray(outcome.notApplied)).toBe(true);
+		expect(outcome.notApplied).toEqual([]);
 	});
 
 	it("工作上下文不随会话变：开新会话作废的是**归属**，不是我的选择", async () => {

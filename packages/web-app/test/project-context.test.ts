@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import { attributionTextOf, projectLabelOf, sessionAttributionOf } from "../src/lib/project-read-model";
+import { sessionProjectLabel } from "../src/lib/records";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import type { SessionView } from "../src/state/session-store";
 import { SessionStore } from "../src/state/session-store";
@@ -632,5 +633,48 @@ describe("sessionAttributionOf / attributionTextOf", () => {
 			viewOf({ projects: PROJECTS, currentProjectId: "ghost", currentProjectSource: "session" }),
 		);
 		expect(attribution).toMatchObject({ kind: "unlisted", projectId: "ghost" });
+	});
+});
+
+/**
+ * 会话**自己记下的**归属（`list_sessions[].projectId`）。
+ *
+ * 它是另外两个问题的答案之外的第三个：「这条会话的 JSONL 里写的是什么」。所以两件事要钉：
+ * 一、serve 发过来的这个字段不许在路上被丢掉；二、没记过就说没记过，不拿 cwd 反推一个。
+ */
+describe("会话自身的 projectId", () => {
+	it("list_sessions 带上来的归属原样过桥：记过的照实说，没记过的就是没有", async () => {
+		const { adapter } = await createConnectedStore();
+		const pending = adapter.listSessions();
+		await Bun.sleep(0);
+		const request = sentRequests().find(row => row.command.type === "list_sessions");
+		if (!request) throw new Error("没有发出 list_sessions");
+
+		respondTo(request.id, {
+			sessions: [
+				{
+					sessionId: "s-recorded",
+					startTime: "2026-09-15T10:00:00.000Z",
+					messageCount: 3,
+					cwd: "/Users/me/dtc",
+					projectId: "dtc",
+				},
+				// 旧会话：cwd 落在 dtc 的 root 下，但它**没记过**归属 —— 不许拿 cwd 反推一个出来
+				{ sessionId: "s-legacy", startTime: "2026-09-15T11:00:00.000Z", messageCount: 1, cwd: "/Users/me/dtc" },
+			],
+		});
+
+		const rows = await pending;
+		expect(rows[0]?.projectId).toBe("dtc");
+		expect(rows[1]?.projectId).toBeUndefined();
+	});
+
+	it("显示：记过的能显示成名字，没记过的说「未记录」，不拿「未归属」顶", () => {
+		expect(sessionProjectLabel({ projectId: "dtc" }, PROJECTS)).toBe("米克原子 DTC（dtc）");
+		// 注册表还没读到：显示 id —— id 是会话里的事实，名字只是好看
+		expect(sessionProjectLabel({ projectId: "dtc" }, undefined)).toBe("dtc");
+		// 注册表里查不到：同上，不编一个名字
+		expect(sessionProjectLabel({ projectId: "ghost" }, PROJECTS)).toBe("ghost");
+		expect(sessionProjectLabel({}, PROJECTS)).toBe("会话未记录归属");
 	});
 });

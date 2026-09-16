@@ -8,7 +8,7 @@ import type {
 } from "@cornfield/wire";
 import { useEffect, useMemo, useState } from "react";
 import { attributionSourceLabel, projectRegistryState, sessionAttributionOf } from "../../lib/project-read-model";
-import { recordStatusLabel, type SessionRecordSummary } from "../../lib/records";
+import { recordStatusLabel, type SessionRecordSummary, sessionProjectLabel } from "../../lib/records";
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { type SessionView, useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -918,6 +918,7 @@ function SessionScopeCard({
 					<div className="grid grid-cols-1 gap-x-6 gap-y-2 text-[12.5px] xl:grid-cols-3">
 						<FactRow label="会话" value={`${current.session.name} · ${current.session.id}`} />
 						<FactRow label="Agent" value={current.session.agent} />
+						<FactRow label="Project（会话记下的）" value={sessionProjectLabel(current.session, view.projects)} />
 						<FactRow label="开始时间" value={fmtTimestamp(current.session.startedAt)} />
 						<FactRow label="消息数" value={String(current.session.messageCount)} />
 						<FactRow label="状态" value={recordStatusLabel(current.session.status)} />

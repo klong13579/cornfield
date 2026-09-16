@@ -87,6 +87,8 @@ interface WireSessionIndexEntryDto {
 	agentName?: string;
 	title?: string;
 	cwd?: string;
+	/** 会话自己记下的归属（header.projectId）；旧会话没有就是没有，serve 不拿 cwd 猜。 */
+	projectId?: string;
 	startTime: string;
 	endTime?: string;
 	messageCount: number;
@@ -271,7 +273,10 @@ export class PiClientAdapter implements PiClient {
 				...(target ? { sessionId: target } : {}),
 			});
 		}
-		return { created };
+		// 三个入参都有去处，所以这里是空的 —— **但出口得在**：将来有一个 wire 上表达不出来的字段，
+		// 就在这个数组里点名（并同步更新 `NewSessionResult` 的文档），别让它静默消失。
+		// 它说的是**能力**（wire 有没有对应的字段），不是结果：所以只看入参，不看 created。
+		return { created, notApplied: [] };
 	}
 	forkFrom(entryId: string): Promise<void> {
 		return this.#req({ type: "fork_from", entryId }).then(() => undefined);
@@ -565,8 +570,9 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * 历史会话索引（serve list_sessions）。
-	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/sessionFile），
-	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt/source）。失败返回空数组，UI 空态。
+	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/
+	 * sessionFile/projectId），映射到前端 SessionRecordSummary（id/name/agent/startedAt/source…）。
+	 * 失败返回空数组，UI 空态。
 	 */
 	async listSessions(): Promise<SessionRecordSummary[]> {
 		try {
@@ -581,6 +587,8 @@ export class PiClientAdapter implements PiClient {
 				source: s.source ?? (s.agentId === "default" ? "cli" : "agent"),
 				sessionFile: s.sessionFile,
 				cwd: s.cwd,
+				// 原样带上会话记下的归属：它缺省就是缺省（旧会话没记过），不拿 cwd 反推一个。
+				...(s.projectId === undefined ? {} : { projectId: s.projectId }),
 			}));
 		} catch (err) {
 			console.warn("[web-app] list_sessions unavailable", err);

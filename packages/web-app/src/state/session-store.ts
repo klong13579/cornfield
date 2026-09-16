@@ -56,6 +56,7 @@ import type {
 	ListenRecordingDto,
 	McpServerDto,
 	NewSessionOptions,
+	NewSessionResult,
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
@@ -231,9 +232,12 @@ export type FocusAgentResult = { ok: true } | { ok: false; error: string };
  *
  * 三态的分界线就在 `PiServerError`：serve 回了 `ok:false` 就是它**看过并拒了**（一条确定的
  * 否定，`error` 是它的原话）；断线 / 超时没有答复，只能是 `unknown`。
+ *
+ * `created` 带着 `notApplied`（wire 表达不出来的入参名）**原样交出去**：那个出口今天是空的，
+ * 但「谁被落下了」这件事只能从适配层知道，在这里吞掉就等于替它说「全都落上了」。
  */
 export type NewSessionOutcome =
-	| { kind: "created" }
+	| { kind: "created"; notApplied: NewSessionResult["notApplied"] }
 	| { kind: "not-created"; error: string }
 	| { kind: "unknown"; error: string };
 
@@ -537,7 +541,7 @@ export class SessionStore {
 					return this.#creationFailed("serve 拒绝了这次新建（上一回合还没收尾）——没有新会话");
 				}
 				this.#clearCommandError();
-				return { kind: "created" };
+				return { kind: "created", notApplied: result.notApplied };
 			} catch (err) {
 				// serve 的判决（ok:false）与「没等到答复」必须分开报：前者是它看过并给出的**确定否定**
 				// （未知 projectId / Agent 没 attach），报成 unknown 就让用户以为「可能建成了」；后者
