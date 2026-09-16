@@ -5,7 +5,7 @@ import { getFileWorkflow } from "../../state/file-workflow-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { ArtifactsPanel } from "./ArtifactsPanel";
-import { ChangesPanel } from "./ChangesPanel";
+import { ChangesPanel, fileOpenTargetOf } from "./ChangesPanel";
 import { FileExplorer } from "./FileExplorer";
 
 /**
@@ -16,9 +16,10 @@ import { FileExplorer } from "./FileExplorer";
  *
  * Terminal 是一个明确的**不做**：右栏不做终端。这里也没有留一个空 tab 占位。
  *
- * 数据源：Files 按**会话身份**（`view.attachmentAddress`，即焦点附件的地址）列 —— 绑了 Project 的
- * 会话只有它能指认得动自己的工作根；Artifacts 取当前 attached agent 的 registry id（未挂载回退
- * 首个 agent）；Changes 自己按会话读（本会话 + 子会话各一组），不靠调用方传 agent。
+ * 数据源：Files 与 Changes 的**本会话组**都按**会话身份**（`view.attachmentAddress`，即焦点附件的
+ * 地址）指路 —— 绑了 Project 的会话只有它能指认得动自己的工作根；Artifacts 同样按会话身份取
+ * （它还要按 `sessionFile` 隔离到本会话）。`agentId`（当前 attached agent 的 registry id）只用于
+ * 归属/展示。
  */
 
 type TabId = "files" | "artifacts" | "changes";
@@ -81,19 +82,16 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 								{view.connected ? "等待会话挂载…" : "未连接——文件系统不可用"}
 							</div>
 						))}
-					{tab === "artifacts" && <ArtifactsPanel agentId={agentId} sessionFile={view.sessionFile} />}
+					{tab === "artifacts" && (
+						<ArtifactsPanel attachmentAddress={attachmentAddress} sessionFile={view.sessionFile} />
+					)}
 					{tab === "changes" && (
 						<ChangesPanel
-							onOpenFile={(targetAgentId, path) => {
-								// 打开的是**那条改动所属会话**的文件（不是当前焦点 agent 的）；
+							onOpenFile={(group, path) => {
+								// 打开的是**那条改动所属会话**的文件（不是当前焦点会话的）；打开用的身份就是那份
+								// 清单读的时候用的身份（fileOpenTargetOf 一个口子给出两个身份，见它的注释）；
 								// 编辑/保存的窗口在文件 tab 里，所以打开后切过去 —— 否则点了没反应。
-								// 改动面板手上的身份就是一个 Agent（它的清单也是拿这个身份读的）：两个入参
-								// 因此同值 —— 清单从哪个根读的，就从哪个根开（一致性优先于猜测）。
-								getFileWorkflow().requestOpen({
-									attachmentAddress: targetAgentId,
-									agentId: targetAgentId,
-									path,
-								});
+								getFileWorkflow().requestOpen(fileOpenTargetOf(group, path));
 								setTab("files");
 							}}
 						/>

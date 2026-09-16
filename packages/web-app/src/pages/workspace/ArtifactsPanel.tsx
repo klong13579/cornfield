@@ -9,15 +9,19 @@ import { useSession } from "../../state/use-session";
 /**
  * Artifacts 产物面板（工作台右栏 Artifacts tab，R-ARTIFACTS 接真数据）。
  *
- * 数据源：store.listArtifacts(agentId, sessionFile)——有 sessionFile 时按会话隔离视图
- * （只提当前会话的产物），缺省 agent 维度。
+ * 数据源：store.listArtifacts(attachmentAddress, sessionFile) —— 第一个入参是**会话身份**
+ * （`view.attachmentAddress`，焦点附件的地址），不是屏幕上那个 Agent 名：
+ * - 列表：wire 拿它 + `sessionFile` 解出那个会话的工作面（产物路径就是相对它报的）
+ * - 预览：/preview 的第一段也是它 —— 拿 Agent 名指过去，服务端解到的是该 Agent **未绑定**的
+ *   附件（另一个根），Project 根里的产物会 404
+ * - markdown/text：fs_read 同样按会话身份定向
  * 预览（点条目）：
- * - html → iframe（/preview 静态路由，serve 端 agentDir docroot）
+ * - html → iframe（/preview 静态路由，serve 端按那个附件的工作面当 docroot）
  * - image → img（同路由；比 fs_read_image dataUrl 支持更大文件）
  * - markdown → fs_read + Markdown 渲染
  * - text → fs_read + 纯文本
  *
- * agentId 未挂载（undefined）→ 空态提示；加载中/失败 → loading/error 态。
+ * 会话身份未挂载（空串）→ 空态提示；加载中/失败 → loading/error 态。
  */
 
 type PreviewState =
@@ -52,7 +56,7 @@ function fmtSize(n: number): string {
 }
 
 function useArtifacts(
-	agentId: string | undefined,
+	attachmentAddress: string,
 	sessionFile: string | undefined,
 	isStreaming: boolean,
 ): ArtifactsState {
@@ -61,13 +65,13 @@ function useArtifacts(
 
 	useEffect(() => {
 		let cancelled = false;
-		if (!agentId) {
+		if (attachmentAddress === "") {
 			setState({ status: "ready", entries: [], error: null });
 			return;
 		}
 		setState(prev => ({ ...prev, status: "loading", error: null }));
 		store
-			.listArtifacts(agentId, sessionFile)
+			.listArtifacts(attachmentAddress, sessionFile)
 			.then(({ artifacts }) => {
 				if (cancelled) return;
 				setState({ status: "ready", entries: artifacts, error: null });
@@ -79,42 +83,43 @@ function useArtifacts(
 		return () => {
 			cancelled = true;
 		};
-	}, [agentId, sessionFile, store, isStreaming]);
+	}, [attachmentAddress, sessionFile, store, isStreaming]);
 
 	return state;
 }
 
 export function ArtifactsPanel({
-	agentId,
+	attachmentAddress,
 	sessionFile,
 }: {
-	agentId?: string;
+	/** **会话身份**（`view.attachmentAddress`）：list_artifacts / fs_read / /preview 的定向身份。 */
+	attachmentAddress: string;
 	sessionFile?: string;
 }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
-	const { status, entries, error } = useArtifacts(agentId, sessionFile, view.isStreaming);
+	const { status, entries, error } = useArtifacts(attachmentAddress, sessionFile, view.isStreaming);
 	const [selected, setSelected] = useState<ArtifactDto | null>(null);
 	const [preview, setPreview] = useState<PreviewState | null>(null);
 	const [zoomed, setZoomed] = useState(false);
 
-	// 产物列表刷新/切换 agent/切换会话时清选择态
+	// 产物列表刷新/换会话身份时清选择态
 	useEffect(() => {
 		setSelected(null);
 		setPreview(null);
-	}, [agentId, sessionFile]);
+	}, [attachmentAddress, sessionFile]);
 
 	const openPreview = (entry: ArtifactDto): void => {
 		setSelected(entry);
 		if (entry.type === "html" || entry.type === "image") {
-			const url = agentId ? store.artifactPreviewUrl(agentId, entry.path) : "";
+			const url = attachmentAddress === "" ? "" : store.artifactPreviewUrl(attachmentAddress, entry.path);
 			setPreview({ kind: entry.type === "html" ? "iframe" : "image", path: entry.path, url });
 			return;
 		}
 		setPreview({ kind: "loading", path: entry.path });
-		if (!agentId) return;
+		if (attachmentAddress === "") return;
 		store
-			.fsRead(agentId, entry.path)
+			.fsRead(attachmentAddress, entry.path)
 			.then(({ text, truncated }) => {
 				setPreview({
 					kind: entry.type === "markdown" ? "markdown" : "text",

@@ -815,7 +815,8 @@ export class PiClientAdapter implements PiClient {
 		} as never);
 	}
 
-	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；sessionFile 定向单会话；失败抛错由调用方空态）。 */
+	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；`sessionId` = 会话身份（附件地址），
+	 * sessionFile 定向单会话；失败抛错由调用方空态）。 */
 	async listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }> {
 		const result = await this.#req<{ artifacts?: ArtifactDto[] | null }>({
 			type: "list_artifacts",
@@ -825,8 +826,8 @@ export class PiClientAdapter implements PiClient {
 		return { artifacts: result.artifacts ?? [] };
 	}
 
-	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 同源端口，逐段编码；token 非空时带上）。 */
-	artifactPreviewUrl(agentId: string, path: string): string {
+	/** 产物静态预览 URL（/preview/<附件地址>/<relpath>，serve 同源端口，逐段编码；token 非空时带上）。 */
+	artifactPreviewUrl(attachmentAddress: string, path: string): string {
 		const wsUrl = this.#connection.wsUrl;
 		const base = wsUrl.replace(/^ws:/, "http:").replace(/\/ws$/, "");
 		const segs = path
@@ -834,7 +835,7 @@ export class PiClientAdapter implements PiClient {
 			.map(s => encodeURIComponent(s))
 			.join("/");
 		const tokenQuery = this.#token ? `?token=${encodeURIComponent(this.#token)}` : "";
-		return `${base}/preview/${encodeURIComponent(agentId)}/${segs}${tokenQuery}`;
+		return `${base}/preview/${encodeURIComponent(attachmentAddress)}/${segs}${tokenQuery}`;
 	}
 
 	/** 本机 gateway 运行状态（gateway_status；gateway 生产端点直连）。 */

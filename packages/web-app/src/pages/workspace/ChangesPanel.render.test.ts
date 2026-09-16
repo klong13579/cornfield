@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionView } from "../../state/session-store";
 import * as sessionStoreModule from "../../state/session-store";
 import * as useSessionModule from "../../state/use-session";
-import { ChangesPanel, type ChangesReadState, changeBadgesOf, changesGroupsOf } from "./ChangesPanel";
+import { ChangesPanel, type ChangesReadState, changeBadgesOf, changesGroupsOf, fileOpenTargetOf } from "./ChangesPanel";
 
 /**
  * 右栏改动面板：三种「没有」不许互相顶替。
@@ -41,6 +41,9 @@ const CODING_AGENT: AgentInfoDto = {
 };
 
 const REPO_ROOT = "/Users/me/work/mika";
+
+/** **会话身份**（焦点附件的地址）：绑了 Project 的会话，地址 != Agent 名 —— 这组用例的前提。 */
+const SESSION_ADDRESS = "hr\u0000/Users/me/work/mika";
 
 function change(patch: Partial<GitChangeDto> & { path: string }): GitChangeDto {
 	return { index: null, worktree: "modified", ...patch };
@@ -106,7 +109,7 @@ function viewOf(patch: Partial<SessionView>): SessionView {
 		sessionId: "s-1",
 		sessionName: "改动面板",
 		sessionFile: "/Users/me/.cornfield/agent/sessions/by-date/2026-09-16/143205__a1b2c3d4.jsonl",
-		attachmentAddress: "hr",
+		attachmentAddress: SESSION_ADDRESS,
 		messages: [],
 		messageEntryIds: {},
 		isStreaming: false,
@@ -132,6 +135,40 @@ function render(patch: Partial<SessionView>): string {
 	viewOf(patch);
 	return renderToStaticMarkup(createElement(ChangesPanel, { onOpenFile: () => undefined }));
 }
+
+describe("ChangesPanel 本会话组的 wire 身份 = 会话身份（不是 Agent 名）", () => {
+	it("读与开用的是同一个值：附件地址；agentId 只用于归属展示", () => {
+		const [root] = changesGroupsOf(viewOf({}), new Map());
+		// 屏幕上这个 Agent 叫 hr，但它绑了 Project：wire 定向必须是地址，不是 "hr"
+		expect(root?.agentId).toBe("hr");
+		expect(root?.wireTarget).toEqual({ kind: "session", address: SESSION_ADDRESS });
+		expect(fileOpenTargetOf(root!, "src/a.ts").attachmentAddress).toBe(SESSION_ADDRESS);
+		expect(fileOpenTargetOf(root!, "src/a.ts").attachmentAddress).not.toBe("hr");
+	});
+
+	it("点开一条改动带的 wire 目标就是这个地址，归属带动的是那个 Agent", () => {
+		const [root] = changesGroupsOf(viewOf({}), new Map());
+		expect(fileOpenTargetOf(root!, "src/a.ts")).toEqual({
+			attachmentAddress: SESSION_ADDRESS,
+			agentId: "hr",
+			path: "src/a.ts",
+		});
+	});
+
+	it("子会话组没有附件地址可用：继续用 Agent 名，并且类型上就说清了它不是附件地址", () => {
+		const groups = changesGroupsOf(viewOf({ sessionTree: TREE }), new Map());
+		const child = groups[1];
+		expect(child?.agentId).toBe("coding");
+		expect(child?.wireTarget).toEqual({ kind: "agent", agentName: "coding" });
+		expect(fileOpenTargetOf(child!, "src/a.ts").attachmentAddress).toBe("coding");
+	});
+
+	it("还没收到快照（地址为空串）→ 不冒充任何根，说等待挂载", () => {
+		const html = render({ attachmentAddress: "" });
+		expect(html).toContain("等待会话挂载");
+		expect(html).not.toContain("工作区没有改动");
+	});
+});
 
 describe("ChangesPanel 三种「没有」分开显示", () => {
 	it("未连接 → 说未连接，不说没有改动", () => {

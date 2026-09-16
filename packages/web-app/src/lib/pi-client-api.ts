@@ -630,10 +630,13 @@ export interface PiClient {
 	 */
 	getGitChanges(sessionId?: string): Promise<GitChangesDto>;
 
-	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。 */
+	/** 产物列表（list_artifacts；从会话 toolCall 提取写出文件，按 mtime 倒序）。
+	 * `sessionId` 是 **wire 定向身份**（会话身份 = 附件地址），不是 Agent 名。 */
 	listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }>;
-	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 端只读 docroot 路由）。 */
-	artifactPreviewUrl(agentId: string, path: string): string;
+	/** 产物静态预览 URL（/preview/<附件地址>/<relpath>，serve 端只读 docroot 路由）。
+	 * 第一段传**会话身份**（`SessionView.attachmentAddress`）；serve 也认 Agent 名，但那解到的是
+	 * 该 Agent **未绑定**的附件（另一个根），绑了 Project 的产物会 404。 */
+	artifactPreviewUrl(attachmentAddress: string, path: string): string;
 	/** 本机 gateway 运行状态（gateway_status；未运行/文件缺失抛错）。 */
 	gatewayStatus(): Promise<GatewayStatusDto>;
 

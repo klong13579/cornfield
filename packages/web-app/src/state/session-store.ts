@@ -1309,7 +1309,9 @@ export class SessionStore {
 	 * 手动重读当前会话所在仓库的改动（Changes 面板的刷新入口）。
 	 *
 	 * 不降级：读不到就错误态（调用方把「读失败」与「确实没改动」分开显示）。
-	 * `agentId` 只在「看别的 agent 的仓库」时才传（缺省 = 本连接焦点）。
+	 * `agentId` 只在「看**别的** Agent 的仓库」时才传（Changes 面板的子会话组就是这种：
+	 * `ChildSessionNodeDto` 只给 Agent 名）；缺省 = **本会话身份**（焦点附件的地址），
+	 * 与右栏文件面/产物面同一个身份。
 	 */
 	async refreshGitChanges(agentId?: string): Promise<void> {
 		const generation = ++this.#gitChangesGeneration;
@@ -1328,6 +1330,10 @@ export class SessionStore {
 	 * 改了什么」（跟着会话身份走、要作废），这个是「另一个会话 / 子会话的仓库改了什么」
 	 * （调用方自己持有结果，按 Root/Child Session 分组）。失败原样招错：分组视图里某一组读不到
 	 * 要显示成那一组自己的错误，不能跟着当前会话的错误一起混。
+	 *
+	 * 入参是 **Agent 名**：调用方（Changes 面板的子会话组）手上只有 `ChildSessionNodeDto.agentId`
+	 * —— 拿不到子会话的附件地址。wire 因此解到那个 Agent **未绑定**的附件，这是已知的上限，
+	 * 不是「它与会话身份一样」。本会话要读自己的仓库走 {@link refreshGitChanges}。
 	 */
 	fetchGitChanges(agentId?: string): Promise<GitChangesDto> {
 		return this.#client.getGitChanges(agentId);
@@ -1373,12 +1379,20 @@ export class SessionStore {
 		view.gitChangesPending = true;
 	}
 
-	/** 发一次读请求，并按代际提交（成功与失败走同一道门）。 */
+	/** 发一次读请求，并按代际提交（成功与失败走同一道门）。
+	 *
+	 * 缺省目标是**会话身份**（`#attachmentAddress`，焦点附件的地址）而不是 `#activeAgentId`：
+	 * 两者在「没切过焦点」时同为一个缺省，但切过之后 `#activeAgentId` 就是 Agent 名了 —— 拿它
+	 * 定向就是「清单按 Agent 未绑定的附件读」，与本会话真正的仓库不是同一个（右栏开文件用的是
+	 * 会话身份，两边一措就是两个根）。还没收到快照（地址为空）时才退回缺省 —— 此刻客户端确实
+	 * 不知道对方是谁。
+	 */
 	async #loadGitChanges(generation: number, agentId?: string): Promise<void> {
 		let changes: GitChangesDto | undefined;
 		let error: string | undefined;
+		const target = agentId ?? (this.#attachmentAddress || undefined);
 		try {
-			changes = await this.#client.getGitChanges(agentId ?? this.#activeAgentId ?? undefined);
+			changes = await this.#client.getGitChanges(target);
 		} catch (err) {
 			error = errorMessageOf(err);
 		}
@@ -1555,14 +1569,16 @@ export class SessionStore {
 		return this.#client.fsReadImage(sessionId, path);
 	}
 
-	/** 产物列表（list_artifacts，代理到 pi-client；sessionFile 定向单会话；ArtifactsPanel 数据源）。 */
+	/** 产物列表（list_artifacts，代理到 pi-client；`sessionId` 是**会话身份**（附件地址），
+	 * sessionFile 定向单会话；ArtifactsPanel 数据源）。 */
 	listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }> {
 		return this.#client.listArtifacts(sessionId, sessionFile);
 	}
 
-	/** 产物静态预览 URL（交互式 web：serve 同源 /preview 路由；代理到 pi-client）。 */
-	artifactPreviewUrl(agentId: string, path: string): string {
-		return this.#client.artifactPreviewUrl(agentId, path);
+	/** 产物静态预览 URL（交互式 web：serve 同源 /preview/<附件地址>/<relpath>；代理到 pi-client）。
+	 * 第一段要传**会话身份**（serve 同时认 Agent 名，但那是该 Agent 未绑定的附件 = 另一个根）。 */
+	artifactPreviewUrl(attachmentAddress: string, path: string): string {
+		return this.#client.artifactPreviewUrl(attachmentAddress, path);
 	}
 
 	/** 本机 gateway 运行状态（gateway_status，代理到 pi-client）。 */

@@ -9,7 +9,7 @@ import { composePrompt, hasFileVersion } from "../../lib/context-items";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { SCOPE_LABELS } from "../../lib/scope-display";
 import { getFileWorkflow, useFileWorkflow } from "../../state/file-workflow-store";
-import { useSessionStore } from "../../state/session-store";
+import { type SessionView, useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { DEFAULT_COMMANDS, filterSlashCommands, type SlashCommandDef, SlashPalette } from "./SlashPalette";
@@ -44,6 +44,22 @@ export function groupModelsByProvider(
 }
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
+
+/**
+ * 发消息时 wire 的定向身份（`prompt.sessionId`）= **会话身份**（`view.attachmentAddress`，本屏焦点附件的地址）。
+ *
+ * 不能拿屏幕上的 Agent 名（`activeAgentIdOf(view)` / 下拉里选的那个）当 `sessionId`：wire 把
+ * Agent 名解到那个 Agent **未绑定**的附件 —— 对绑了 Project 的会话，那是**另一个根**（屏幕上
+ * 根本没在看的那个会话），消息会进错会话。
+ *
+ * 为什么在载荷里点名地址，而不是省掉 `sessionId` 让 wire 取「焦点附件」这个缺省：两者指向
+ * 同一个附件，但缺省是一个客户端看不见的服务端状态；载荷里写出地址，才答得上「这条消息进了
+ * 哪个会话」，也才与右栏文件面/产物面用的是同一个身份。地址为空串（还没收到快照）时退回缺省
+ * —— 此刻客户端确实不知道对方是谁。
+ */
+export function promptTargetOf(view: Pick<SessionView, "attachmentAddress">): string | undefined {
+	return view.attachmentAddress === "" ? undefined : view.attachmentAddress;
+}
 
 /** 上下文条目在输入区的展示名（选区带行范围，其它就是路径）。 */
 function contextItemLabel(item: ContextItem): string {
@@ -310,7 +326,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		}
 		setBlockedMsg(null);
 		getUiStore().setDraft("");
-		store.prompt(text, agentId, attachments.length > 0 ? attachments : undefined);
+		// 第二个入参是 wire 的定向身份（`prompt.sessionId`）—— 见 promptTargetOf：会话身份，不是 agentId。
+		store.prompt(text, promptTargetOf(view), attachments.length > 0 ? attachments : undefined);
 		// 条目随这条消息一起发走了：留着它会让下一条消息莫名其妙地带上一段旧代码
 		getFileWorkflow().clearContextItems();
 		setAttachments([]);

@@ -14,8 +14,11 @@ import { STATUS_BADGE, STATUS_LABEL, shortTime } from "./session-tree-logic";
  *
  * git 只知道「这个路径与 HEAD/index 不同」，不知道是哪次 agent 运行改的 —— 所以一条改动
  * **没有**会话归属（同一个工作区被两个会话改过时，它连唯一答案都没有）。本面板的分组因此是
- * 读的 provenance：本会话那一组是 store 按当前会话读的，每个子会话一组是按那个子会话的
- * Agent 工作区读的。组头写明是拿谁的工作区读的，子会话组给「切到该 Agent」的出口。
+ * 读的 provenance：本会话那一组是 store 按**会话身份**（焦点附件的地址）读的，每个子会话一组
+ * 是按那个子会话的 Agent 工作区读的。组头写明是拿谁的工作区读的，子会话组给「切到该 Agent」的出口。
+ *
+ * 「拿谁去问」与「是谁的」是两个身份（{@link ChangesGroup}）：读与开用前者，展示用后者。
+ * 它们不总是同一个值 —— 子会话组只有 Agent 名（客户端拿不到它的附件地址）。
  *
  * ## 三种「没有」必须分开说
  *
@@ -47,12 +50,32 @@ export interface ChangesReadState {
 	error?: string;
 }
 
+/**
+ * 一组改动清单的 **wire 定向身份**：读这份清单用它，点开它的一条改动也用它（同一个值）。
+ *
+ * 分成两档而不是共用一个字符串，是因为两种组手上的东西本来就不同 —— 共用一个字符串正是上一版
+ * 「清单按会话身份读、点开按 Agent 名开」的成因（两个根，点开的那份在另一个根里）。
+ * **它们不一样**：`session` 是会话身份（附件地址），`agent` 只是 Agent 名。
+ */
+export type ChangesWireTarget =
+	/** 本会话：**会话身份**（`view.attachmentAddress`，焦点附件的地址）。 */
+	| { kind: "session"; address: string }
+	/**
+	 * 子会话：只有 **Agent 名** —— `ChildSessionNodeDto` 不带附件地址，客户端拿不到它。
+	 * wire 因此解到那个 Agent **未绑定**的附件（该 Agent 自己根上的那一个）。这是本面板已知的
+	 * 精度上限：读与开都用它，两处至少是一致的。
+	 */
+	| { kind: "agent"; agentName: string };
+
 /** 一组改动清单：一组 = 一次读取（本会话 / 一个子会话）。 */
 export interface ChangesGroup {
 	/** 身份：本会话固定 "root"，子会话用它的 sessionId。 */
 	key: string;
 	kind: "root" | "child";
-	/** 读这份清单用的 agent —— 点条目就按它打开文件（清单里的路径相对它解析）。 */
+	/** 读这份清单、打开它的文件用的 wire 定向身份（与 `agentId` **不是**同一件事）。 */
+	wireTarget: ChangesWireTarget;
+	/** 归属/展示 Agent：组头写「按谁的 Agent 工作区读的」，子会话组「切到该 Agent」也用它。
+	 * 它**不**参与 wire 定向 —— 归属是「是谁的」，不是「在哪个根里」。 */
 	agentId: string;
 	title: string;
 	/** agent 名（+ 子会话的更新时间）。 */
@@ -126,6 +149,10 @@ export function changesGroupsOf(view: SessionView, childStates: ReadonlyMap<stri
 		{
 			key: "root",
 			kind: "root",
+			// 本会话组的 wire 身份 = **会话身份**（`view.attachmentAddress`）：绑了 Project 的会话
+			// 只有它能指认得动自己的仓库。拿屏幕上的 Agent 名当 `sessionId`，wire 解到的是那个 Agent
+			// **未绑定**的附件 —— 另一个根，清单与打开都会是另一份。
+			wireTarget: { kind: "session", address: view.attachmentAddress },
 			agentId: rootAgentId ?? "",
 			title: "本会话",
 			subtitle: agentLabelOf(view, rootAgentId),
@@ -141,6 +168,8 @@ export function changesGroupsOf(view: SessionView, childStates: ReadonlyMap<stri
 		groups.push({
 			key: child.sessionId,
 			kind: "child",
+			// 子会话只有 Agent 名（客户端拿不到它的附件地址）—— 见 ChangesWireTarget。
+			wireTarget: { kind: "agent", agentName: child.agentId },
 			agentId: child.agentId,
 			title: childTitleOf(child),
 			subtitle: `${agentLabelOf(view, child.agentId)} · ${shortTime(child.updatedAt)}`,
@@ -152,9 +181,30 @@ export function changesGroupsOf(view: SessionView, childStates: ReadonlyMap<stri
 	return groups;
 }
 
+/**
+ * 打开一条改动要交给文件工作流的两个身份（形状与 `FileWorkflowStore.requestOpen` 对齐；
+ * 把 {@link ChangesWireTarget} 折成 wire 参数字面的唯一一处）。
+ *
+ * `attachmentAddress` 是文件工作流的 **wire 目标**（fs_read/fs_write 的 `sessionId`）：本会话组
+ * = 会话身份；子会话组手上只有 Agent 名（wire 解到那个 Agent 未绑定的附件，见
+ * {@link ChangesWireTarget}）。`agentId` 是归属 Agent（范围判定与展示）。
+ */
+export function fileOpenTargetOf(
+	group: ChangesGroup,
+	path: string,
+): { attachmentAddress: string; agentId: string; path: string } {
+	const wire = group.wireTarget;
+	return {
+		attachmentAddress: wire.kind === "session" ? wire.address : wire.agentName,
+		agentId: group.agentId,
+		path,
+	};
+}
+
 interface ChangesPanelProps {
-	/** 打开一条改动（在文件编辑器里看真内容）；去哪个 tab / 面板由调用方决定。 */
-	onOpenFile: (agentId: string, path: string) => void;
+	/** 打开一条改动（在文件编辑器里看真内容）；去哪个 tab / 面板由调用方决定。
+	 * 收整组而不是只收一个 id：打开要用的身份就在组上（见 {@link fileOpenTargetOf}）。 */
+	onOpenFile: (group: ChangesGroup, path: string) => void;
 }
 
 export function ChangesPanel({ onOpenFile }: ChangesPanelProps): React.JSX.Element {
@@ -164,6 +214,9 @@ export function ChangesPanel({ onOpenFile }: ChangesPanelProps): React.JSX.Eleme
 	const children = view.sessionTree?.children ?? [];
 	const childStates = useChildChanges(children, view.connected, refreshToken);
 	const rootAgentId = activeAgentIdOf(view);
+	// 本会话组的两件事都要**会话身份**：读（store.refreshGitChanges 按它定向）与开
+	// （fileOpenTargetOf 给出的 wire 目标）。空串 = 还没收到快照，此刻没有任何根可读可开。
+	const sessionAddress = view.attachmentAddress;
 
 	// 刷新是**一次动作**：本会话那一份跟着 store 重读（它会作废在途响应），子会话那几份由
 	// refreshToken 触发重读。两处入口（面板头 / 某组的重试）走的是同一个动作。
@@ -184,7 +237,7 @@ export function ChangesPanel({ onOpenFile }: ChangesPanelProps): React.JSX.Eleme
 		);
 	}
 
-	if (rootAgentId === undefined) {
+	if (rootAgentId === undefined || sessionAddress === "") {
 		// 不知道读谁的工作区：既不能说「没改动」，也不能拿别的 Agent 的仓库顶上。
 		return <div className="py-10 text-center text-[12px] text-ink-faint">等待会话挂载…</div>;
 	}
@@ -231,7 +284,7 @@ function ChangesGroupCard({
 	onRetry,
 }: {
 	group: ChangesGroup;
-	onOpenFile: (agentId: string, path: string) => void;
+	onOpenFile: (group: ChangesGroup, path: string) => void;
 	onSwitchSession: (agentId: string) => void;
 	onRetry: () => void;
 }): React.JSX.Element {
@@ -291,7 +344,7 @@ function ChangesGroupCard({
 									data-change-path={change.path}
 									className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition-colors hover:bg-surface-2"
 									title="在文件编辑器里打开（内容以磁盘为准）"
-									onClick={() => onOpenFile(group.agentId, change.path)}
+									onClick={() => onOpenFile(group, change.path)}
 								>
 									<span className="min-w-0 flex-1">
 										<span className="block truncate font-mono text-[12px] text-ink">{change.path}</span>
