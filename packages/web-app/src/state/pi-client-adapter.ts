@@ -87,6 +87,8 @@ interface WireSessionIndexEntryDto {
 	agentName?: string;
 	title?: string;
 	cwd?: string;
+	/** 会话自己记下的归属（header.projectId）；旧会话没有就是没有，serve 不拿 cwd 猜。 */
+	projectId?: string;
 	startTime: string;
 	endTime?: string;
 	messageCount: number;
@@ -243,23 +245,25 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	/**
-	 * 新建会话（new_session）。
-	 *
-	 * wire 的入参只有 `sessionId`（定向注册表里的 agent），所以三个入参里只有两个落得下去：
+	 * 新建会话（new_session）。三个入参都落在这一条命令（+ 一次改名）上：
 	 * - `agentId` → `new_session.sessionId`（命令面所有状态命令的 `sessionId` 都是「哪个 agent」，
 	 *   serve 按它解析目标；目标 Agent 必须已 attach，否则 ok:false，错误原文上抛）
+	 * - `projectId` → `new_session.projectId`：会话的**权威归属**，serve 按它定工作根与边界根，
+	 *   并把结果作为事实记进会话（`SessionHeader.projectId`）。未知 id 直接 ok:false
 	 * - `title`   → 创建成功后紧跟一次 `set_session_name`（wire 没有「创建时命名」这条命令）
-	 * - `projectId` → **落不下去**：归属是 serve 按会话 cwd 匹配 Project root 算出来的，没有指派入口。
-	 *   它只会出现在 `notApplied` 里，不会被塞进命令载荷冒充已生效。
 	 *
-	 * `cancelled:true`（serve 拒了这次新建，如上一回合还没收尾）不当成功：**标题那一跳必须跳过**
+	 * 空串与缺省同义（不指定）——本地不替调用方把 `""` 变成一个具体的 Project。
+	 *
+	 * `cancelled:true`（serve 接了命令但没建，如上一回合还没收尾）不当成功：**标题那一跳必须跳过**
 	 * —— 否则改的是**上一个**会话的名字。这不是修饰：`created:false` 时调用方手上没有新会话。
 	 */
 	async newSession(opts?: NewSessionOptions): Promise<NewSessionResult> {
 		const target = opts?.agentId;
+		const project = opts?.projectId;
 		const result = await this.#req<{ cancelled?: boolean }>({
 			type: "new_session",
 			...(target ? { sessionId: target } : {}),
+			...(project ? { projectId: project } : {}),
 		});
 		const created = result?.cancelled !== true;
 		if (created && opts?.title) {
@@ -269,9 +273,10 @@ export class PiClientAdapter implements PiClient {
 				...(target ? { sessionId: target } : {}),
 			});
 		}
-		// `notApplied` 说的是**能力**（wire 有没有这条命令），不是结果：所以它只看入参，
-		// 不看 created —— 否则「这次没建成」会读成「projectId 落地了」。
-		return { created, notApplied: opts?.projectId === undefined ? [] : ["projectId"] };
+		// 三个入参都有去处，所以这里是空的 —— **但出口得在**：将来有一个 wire 上表达不出来的字段，
+		// 就在这个数组里点名（并同步更新 `NewSessionResult` 的文档），别让它静默消失。
+		// 它说的是**能力**（wire 有没有对应的字段），不是结果：所以只看入参，不看 created。
+		return { created, notApplied: [] };
 	}
 	forkFrom(entryId: string): Promise<void> {
 		return this.#req({ type: "fork_from", entryId }).then(() => undefined);
@@ -565,8 +570,9 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * 历史会话索引（serve list_sessions）。
-	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/sessionFile），
-	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt/source）。失败返回空数组，UI 空态。
+	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/
+	 * sessionFile/projectId），映射到前端 SessionRecordSummary（id/name/agent/startedAt/source…）。
+	 * 失败返回空数组，UI 空态。
 	 */
 	async listSessions(): Promise<SessionRecordSummary[]> {
 		try {
@@ -581,6 +587,8 @@ export class PiClientAdapter implements PiClient {
 				source: s.source ?? (s.agentId === "default" ? "cli" : "agent"),
 				sessionFile: s.sessionFile,
 				cwd: s.cwd,
+				// 原样带上会话记下的归属：它缺省就是缺省（旧会话没记过），不拿 cwd 反推一个。
+				...(s.projectId === undefined ? {} : { projectId: s.projectId }),
 			}));
 		} catch (err) {
 			console.warn("[web-app] list_sessions unavailable", err);

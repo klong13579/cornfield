@@ -1,4 +1,3 @@
-import { PiServerError } from "@cornfield/client";
 import { isTerminalAgentTodoStatus } from "@cornfield/wire";
 import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto, ProjectRecordDto } from "../../lib/pi-client-api";
 
@@ -461,32 +460,4 @@ export function humanizeDuration(ms: number): string {
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24) return `${hours} 小时`;
 	return `${Math.floor(hours / 24)} 天`;
-}
-
-// ── 写失败的 serve 判决 ──
-
-export interface ServeVerdict {
-	/** serve 给的原文（如 `todo.status-transition: illegal AgentTodo transition completed → open`）。 */
-	message: string;
-	/** 结构化错误码（协议批 B-4 的 `{ code, message }` 形状才有）。 */
-	code?: string;
-}
-
-/**
- * 从一次写入失败里取出 **serve 的原话**。
- *
- * `PiServerError.message` 是 `Server rejected "set_agent_todo": <serve 的话>` —— 前缀是客户端
- * 加的，界面要显示的是后面那半句。其余错误（断线 / 超时）没有「判决」，就说它自己的话。
- *
- * 不在这里做「翻译成友好文案」：serve 拒它的理由（owner 不对、Project 没声明过、状态非法）
- * 是用户唯一能据以修的东西，改写成一句「保存失败」就把它丢了。
- */
-export function serveVerdictOf(err: unknown): ServeVerdict {
-	if (err instanceof PiServerError) {
-		return typeof err.serverError === "string"
-			? { message: err.serverError }
-			: { message: err.serverError.message, code: err.serverError.code };
-	}
-	if (err instanceof Error) return { message: err.message };
-	return { message: String(err) };
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { AgentInfoDto, TodoPhaseDto } from "@cornfield/wire";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import { ProjectList, projectLabelOf } from "../src/components/ProjectContext";
+import { ProjectList } from "../src/components/ProjectContext";
 import { AgentSwitcher } from "../src/layout/AgentSwitcher";
 import { AppShell } from "../src/layout/AppShell";
 import { NotFoundView } from "../src/layout/NotFoundView";
@@ -15,6 +15,7 @@ import {
 } from "../src/layout/ProjectSwitcher";
 import { activePanelOf, getPanels, panelHandle } from "../src/layout/panel-registry";
 import type { ChildSessionNodeDto, ProjectRecordDto } from "../src/lib/pi-client-api";
+import { projectFieldState, projectLabelOf } from "../src/lib/project-read-model";
 import {
 	agentIdentitySource,
 	EMPTY_NEW_SESSION_DRAFT,
@@ -23,7 +24,6 @@ import {
 	newSessionInputOf,
 	newSessionSubmitState,
 	PROJECT_FIELD_NOTE,
-	projectFieldState,
 	TITLE_FIELD_NOTE,
 } from "../src/pages/workspace/NewSessionForm";
 import { ChildSessionCard } from "../src/pages/workspace/SessionTree";
@@ -367,15 +367,29 @@ describe("AgentSwitcher", () => {
 // ── 5. Project 上下文控件 ────────────────────────────────────────────
 
 describe("ProjectSwitcher", () => {
-	it("读得到并已归属：chip 是项目名，清单标出「当前」与 root", () => {
+	it("选了工作上下文：chip 是那个项目名，清单标出「工作」与「当前会话」与 root", () => {
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, {
+				view: viewOf({ projects: PROJECTS, currentProjectId: "dtc", workingProjectId: "dtc" }),
+			}),
+		);
+		expect(html).toContain(">DTC</b>");
+		// 两个标记是两件事：工作（下一个新会话落在哪）与会话归属（serve 的读数）
+		expect(html).toContain("工作");
+		expect(html).toContain("当前会话");
+		expect(html).toContain("/Users/me/cornfield");
+	});
+
+	it("没选工作上下文：chip 说「不指定」，不拿会话归属冒充选择，也不拿第一个凑数", () => {
 		const html = renderToStaticMarkup(
 			createElement(ProjectSwitcher, {
 				view: viewOf({ projects: PROJECTS, currentProjectId: "dtc" }),
 			}),
 		);
-		expect(html).toContain(">DTC</b>");
-		expect(html).toContain("当前");
-		expect(html).toContain("/Users/me/cornfield");
+		expect(html).toContain(">不指定</b>");
+		// 会话归属另有其事，在面板里单独一行说（不能顶替选择，但也不能丢掉）
+		expect(html).toContain("当前会话");
+		expect(html).toContain(">DTC<");
 	});
 
 	it("读不到 ≠ 没声明：错误态不画空态，也不说「未声明」", () => {
@@ -389,12 +403,22 @@ describe("ProjectSwitcher", () => {
 		expect(html).not.toContain("未声明");
 	});
 
-	it("归属还没算完：显示读取中，绝不显示「未归属」（那是一个尚未计算的答案）", () => {
-		const html = renderToStaticMarkup(
-			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, projectsPending: true }) }),
-		);
+	it("名单还没读到：chip 读取中，绝不显示「不指定」（那是一个尚未读到的问题的答案）", () => {
+		const html = renderToStaticMarkup(createElement(ProjectSwitcher, { view: viewOf({ projects: undefined }) }));
 		expect(html).toContain(">…</b>");
-		expect(html).not.toContain("未归属");
+		expect(html).not.toContain(">不指定</b>");
+	});
+
+	it("切会话后归属重算：工作上下文选择器照常可用（名单没变），归属读数不冒充「未归属」", () => {
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, {
+				view: viewOf({ projects: PROJECTS, workingProjectId: "dtc", projectsPending: true }),
+			}),
+		);
+		// 选择器读的是名单，不因归属重算而变成「读取中」
+		expect(html).toContain(">DTC</b>");
+		expect(html).toContain("归属未知");
+		expect(html).not.toContain(">未归属<");
 	});
 
 	it("确实没声明过：说清是空集，并给出声明文件路径", () => {
@@ -403,12 +427,42 @@ describe("ProjectSwitcher", () => {
 		expect(html).toContain("~/.cornfield/agent/projects.json");
 	});
 
-	it("声明了但当前会话不在其中：显示未归属，而不是未声明", () => {
+	it("工作上下文选过的项目已不在注册表：照实说出来，不静默改成别的", () => {
 		const html = renderToStaticMarkup(
-			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, currentProjectId: undefined }) }),
+			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, workingProjectId: "gone" }) }),
 		);
-		expect(html).toContain(">未归属</b>");
-		expect(html).not.toContain("未声明");
+		expect(html).toContain("gone（已不在注册表）");
+		expect(html).not.toContain(">不指定</b>");
+	});
+
+	it("当前会话归属：来源分开说（会话记录 / 按目录匹配），两者不是一个可信度", () => {
+		const recorded = renderToStaticMarkup(
+			createElement(ProjectSwitcher, {
+				view: viewOf({ projects: PROJECTS, currentProjectId: "dtc", currentProjectSource: "session" }),
+			}),
+		);
+		expect(recorded).toContain("来源：会话记录");
+
+		const matched = renderToStaticMarkup(
+			createElement(ProjectSwitcher, {
+				view: viewOf({ projects: PROJECTS, currentProjectId: "dtc", currentProjectSource: "cwd" }),
+			}),
+		);
+		expect(matched).toContain("来源：按目录匹配（旧会话回落）");
+
+		// 没问过 / 还没重算完：说不知道，不说「未归属」
+		const unasked = renderToStaticMarkup(
+			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, projectsPending: true }) }),
+		);
+		expect(unasked).toContain("归属未知");
+		// serve 真的答过「没有任何东西声明过」才是未归属
+		const none = renderToStaticMarkup(
+			createElement(ProjectSwitcher, {
+				view: viewOf({ projects: PROJECTS, currentProjectSource: "none" }),
+			}),
+		);
+		expect(none).toContain("未归属");
+		expect(none).toContain("没有任何东西声明过");
 	});
 
 	it("未连接：写明 registry 不可用，不拿空列表顶替", () => {
@@ -429,6 +483,17 @@ describe("ProjectSwitcher", () => {
 		const tree = panelOf({ view: viewOf({ projects: [] }), onRefresh: () => (refreshed += 1) });
 		fire(tree, "button", "onClick", undefined);
 		expect(refreshed).toBe(1);
+	});
+
+	it("选择器真的接 store：改它把选中的 projectId 交出去（空串 = 不指定）", () => {
+		const picked: string[] = [];
+		const tree = panelOf({
+			view: viewOf({ projects: PROJECTS, workingProjectId: "dtc" }),
+			onSelectProject: id => picked.push(id),
+		});
+		fire(tree, "select", "onChange", { target: { value: "mkt" } });
+		fire(tree, "select", "onChange", { target: { value: "" } });
+		expect(picked).toEqual(["mkt", ""]);
 	});
 });
 
@@ -544,6 +609,8 @@ async function createConnectedStore(): Promise<SessionStore> {
 function panelOf({
 	view,
 	state,
+	workingProjectId,
+	onSelectProject,
 	onRefresh,
 	onChange,
 	onDeclare,
@@ -551,6 +618,8 @@ function panelOf({
 }: {
 	view: SessionView;
 	state?: ProjectPanelState;
+	workingProjectId?: string;
+	onSelectProject?: (projectId: string) => void;
 	onRefresh?: () => void;
 	onChange?: (patch: Partial<ProjectPanelState>) => void;
 	onDeclare?: () => void;
@@ -559,6 +628,8 @@ function panelOf({
 	return ProjectPanel({
 		view,
 		state: state ?? { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false },
+		workingProjectId: workingProjectId ?? "",
+		onSelectProject: onSelectProject ?? noop,
 		...(onRefresh ? { onRefresh } : {}),
 		onChange: onChange ?? noop,
 		onDeclare: onDeclare ?? noop,
@@ -810,16 +881,20 @@ describe("Project 写面：声明 / 删除", () => {
  * 的能力范围内（没有 DOM 测试环境），表单按受控的无 hook 组件直接调用。
  */
 describe("NewSessionForm：三个意图各自落到哪", () => {
-	/** 表单外壳：没给的处理器一律空实现。 */
+	/** 表单外壳：没给的处理器一律空实现。Project 是 store 的工作上下文，由 props 传进来。 */
 	function formOf(props: {
 		view: SessionView;
 		draft?: typeof EMPTY_NEW_SESSION_DRAFT;
 		onChange?: (draft: typeof EMPTY_NEW_SESSION_DRAFT) => void;
+		projectId?: string;
+		onProjectChange?: (projectId: string) => void;
 		onCreate?: (input: NewSessionInput) => void;
 	}): ReactElement {
 		return NewSessionForm({
 			draft: EMPTY_NEW_SESSION_DRAFT,
 			onChange: noop,
+			projectId: "",
+			onProjectChange: noop,
 			onCreate: noop,
 			...props,
 		});
@@ -831,13 +906,15 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 				view: viewOf({ agents: AGENTS, activeAgentId: "hr" }),
 				draft: EMPTY_NEW_SESSION_DRAFT,
 				onChange: noop,
+				projectId: "",
+				onProjectChange: noop,
 				onCreate: noop,
 			}),
 		);
 		expect(html).toContain("新会话将由");
 		expect(html).toContain("本会话焦点（§10 第 1 级）");
 		expect(html).toContain("新建时用当前焦点的 Agent");
-		// 写不进去的两个字段当场明说，不靠一个点不动的控件暗示
+		// 两个字段各自的去向当场明说，不靠一个点不动的控件暗示
 		expect(html).toContain(PROJECT_FIELD_NOTE);
 		expect(html).toContain(TITLE_FIELD_NOTE);
 	});
@@ -857,6 +934,8 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 				view: viewOf({ agents: AGENTS, activeAgentId: "hr", projects: [] }),
 				draft: EMPTY_NEW_SESSION_DRAFT,
 				onChange: noop,
+				projectId: "",
+				onProjectChange: noop,
 				onCreate: noop,
 			}),
 		);
@@ -872,6 +951,8 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 				view: viewOf({ connected: false, projects: undefined }),
 				draft: EMPTY_NEW_SESSION_DRAFT,
 				onChange: noop,
+				projectId: "",
+				onProjectChange: noop,
 				onCreate: noop,
 			}),
 		);
@@ -897,6 +978,8 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 				view,
 				draft: { ...EMPTY_NEW_SESSION_DRAFT, agentId: "hr" },
 				onChange: noop,
+				projectId: "",
+				onProjectChange: noop,
 				onCreate: noop,
 			}),
 		);
@@ -911,6 +994,8 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 				view,
 				draft: EMPTY_NEW_SESSION_DRAFT,
 				onChange: noop,
+				projectId: "",
+				onProjectChange: noop,
 				onCreate: noop,
 			}),
 		);
@@ -952,25 +1037,24 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 		fire(bare, "form", "onSubmit", { preventDefault: noop });
 		expect(seen).toEqual([{}]);
 
-		// 三个都填：原样交出去（标题去空格）
+		// 两个都填：原样交出去（标题去空格）。Project 不在入参里 ——
+		// 「建在哪个 Project」由 store 按工作上下文统一决定（三个建会话的入口问同一个答案）。
 		const filled = NewSessionForm({
 			view,
-			draft: { agentId: "hr", projectId: "dtc", title: "  看下工单  " },
+			draft: { agentId: "hr", title: "  看下工单  " },
 			onChange: noop,
+			projectId: "dtc",
+			onProjectChange: noop,
 			onCreate: input => seen.push(input),
 		});
 		fire(filled, "form", "onSubmit", { preventDefault: noop });
-		expect(seen[1]).toEqual({ agentId: "hr", projectId: "dtc", title: "看下工单" });
+		expect(seen[1]).toEqual({ agentId: "hr", title: "看下工单" });
 	});
 
 	it("草稿→入参：只带真的选过/写过的字段", () => {
 		expect(newSessionInputOf(EMPTY_NEW_SESSION_DRAFT)).toEqual({});
-		expect(newSessionInputOf({ agentId: "  ", projectId: "", title: "  " })).toEqual({});
-		expect(newSessionInputOf({ agentId: "hr", projectId: "dtc", title: "标题" })).toEqual({
-			agentId: "hr",
-			projectId: "dtc",
-			title: "标题",
-		});
+		expect(newSessionInputOf({ agentId: "  ", title: "  " })).toEqual({});
+		expect(newSessionInputOf({ agentId: "hr", title: "标题" })).toEqual({ agentId: "hr", title: "标题" });
 	});
 });
 

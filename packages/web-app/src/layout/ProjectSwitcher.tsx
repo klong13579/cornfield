@@ -1,21 +1,26 @@
 import { FolderTree, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import { ProjectList, projectLabelOf } from "../components/ProjectContext";
+import { ProjectAttributionNote, ProjectList } from "../components/ProjectContext";
 import type { ProjectRecordDto } from "../lib/pi-client-api";
+import { projectLabelOf, projectRegistryState } from "../lib/project-read-model";
 import type { SessionView } from "../state/session-store";
 import { useSessionStore } from "../state/session-store";
 
 /**
- * ProjectSwitcher —— 工作台顶栏的 Project 上下文控件（唯一实现）。
+ * ProjectSwitcher —— 工作台顶栏的 **Project 工作上下文选择器**（唯一实现）。
  *
- * 它能做什么，老实说清楚：看当前会话的归属、看已声明的清单、重读，以及**真的**声明 / 删除一个
- * Project（wire 的 `set_project` / `delete_project`，落 `~/.cornfield/agent/projects.json`）。
- * 写失败（root 被别的 Project 占用 / 输入不成立 / 存储坏了）把 serve 的原始判决显示出来 ——
- * 吞掉错误比没有这个动作更坏。
+ * chip 上那个短标签是**选择**，不是读数：一个显示着别的值的选择器会让人以为切换没生效。
+ * 所以这里三块各说各的事，不许互相顶替：
+ *   - **chip（summary）**：工作上下文 —— 下一个新会话落在哪（`projectLabelOf`）；
+ *   - **顶部的选择器**：改这个选择（`store.setWorkingProject`，不重启 serve、不发命令）；
+ *   - **当前会话归属**：serve 的权威读数 + 来源（会话记下的 / 按目录算出的）。
+ *
+ * 它还能**真的**声明 / 删除一个 Project（wire 的 `set_project` / `delete_project`，落
+ * `~/.cornfield/agent/projects.json`）。写失败（root 被别的 Project 占用 / 输入不成立 /
+ * 存储坏了）把 serve 的原始判决显示出来 —— 吞掉错误比没有这个动作更坏。
  *
  * 展开态用原生 <details>：深链、刷新、键盘可达都不需要额外状态，也不会在刷新后丢失。
- * 三个「没有」（读不到 / 空集 / 不属于这条会话）由 projectLabelOf + ProjectList 一处判定，
- * 写面不改写它们的意思：清单照旧是只读读数，写动作另外摆，并且只在有东西可写时才画。
+ * 读不到 registry 与「没声明过」由 `ProjectList` 一处判定并分开显示，写面不改写它们的意思。
  *
  * 分层：`ProjectPanel` 是受控的无状态面板（只画 + 回调），`ProjectSwitcher` 是持有草稿、错误与
  * 忙碌态的壳，并把动作接到 store。面板因此可以脱离 React 渲染单独验证（测试直接调用它）。
@@ -69,13 +74,15 @@ export function projectDraftToRecord(
 }
 
 /**
- * 面板本体（受控、无 hook）：清单 + 声明表单 + 删除动作 + 错误回显。
+ * 面板本体（受控、无 hook）：工作上下文选择器 + 当前会话归属 + 清单 + 声明表单 + 删除动作 + 错误回显。
  *
  * 未连接时不画写面：一条发不出去的命令不是「声明」，ProjectList 已经在那里说明 registry 不可用。
  */
 export function ProjectPanel({
 	view,
 	state,
+	workingProjectId,
+	onSelectProject,
 	onRefresh,
 	onChange,
 	onDeclare,
@@ -83,6 +90,10 @@ export function ProjectPanel({
 }: {
 	view: SessionView;
 	state: ProjectPanelState;
+	/** 工作上下文当前选中的 id（空串 = 不指定）；它由 store 持有，不是面板的草稿状态。 */
+	workingProjectId: string;
+	/** 改工作上下文（接 store.setWorkingProject）；空串 = 不指定。 */
+	onSelectProject: (projectId: string) => void;
 	/** 重读 registry（含当前会话归属）；缺省时不显示刷新钮。 */
 	onRefresh?: () => void;
 	/** 改草稿 / 改删除目标 / 清错（一次一处，仍然是同一个受控状态）。 */
@@ -91,7 +102,13 @@ export function ProjectPanel({
 	onDelete: () => void;
 }): React.JSX.Element {
 	const { draft } = state;
-	const declared = view.projects ?? [];
+	const registry = projectRegistryState(view);
+	const declared = registry.kind === "ready" ? registry.projects : [];
+	/** 选过、但已声明清单里没有它：得给它一个选项，否则 <select> 会把 value 画成空白。 */
+	const staleId =
+		workingProjectId !== "" && !declared.some(project => project.projectId === workingProjectId)
+			? workingProjectId
+			: undefined;
 	const field =
 		"min-w-0 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink outline-none placeholder:text-ink-faint";
 
@@ -112,6 +129,33 @@ export function ProjectPanel({
 					</button>
 				)}
 			</div>
+
+			<div className="mb-2.5">
+				<div className="mb-1.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+					工作上下文
+				</div>
+				<select
+					value={workingProjectId}
+					onChange={e => onSelectProject(e.target.value)}
+					aria-label="工作上下文"
+					disabled={!view.connected}
+					title="下一个新会话落在哪个 Project 的根上；切换不重启 serve"
+					className={`${field} w-full`}
+				>
+					<option value="">不指定（新会话不声明归属）</option>
+					{declared.map(project => (
+						<option key={project.projectId} value={project.projectId}>
+							{project.name}
+						</option>
+					))}
+					{staleId !== undefined && <option value={staleId}>{staleId}（已不在注册表）</option>}
+				</select>
+				<div className="mt-1 text-[11px] text-ink-faint">
+					切它不重启 serve：只在建**新**会话时带上去，已经在跑的会话不动。
+				</div>
+			</div>
+
+			<ProjectAttributionNote view={view} />
 
 			<ProjectList view={view} />
 
@@ -273,6 +317,8 @@ export function ProjectSwitcher({
 			<ProjectPanel
 				view={view}
 				state={state}
+				workingProjectId={view.workingProjectId ?? ""}
+				onSelectProject={projectId => store.setWorkingProject(projectId)}
 				{...(onRefresh ? { onRefresh } : {})}
 				onChange={patch}
 				onDeclare={declare}

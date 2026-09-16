@@ -2,8 +2,9 @@ import { ArrowRight, Bot, CalendarDays, Cpu, History, Mic, Send } from "lucide-r
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Orb } from "../../components/Orb";
-import { ProjectSection, projectLabelOf } from "../../components/ProjectContext";
+import { ProjectSection } from "../../components/ProjectContext";
 import { AgentSwitcher } from "../../layout/AgentSwitcher";
+import { attributionTextOf, sessionAttributionOf } from "../../lib/project-read-model";
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -102,7 +103,7 @@ export function HomeView(): React.JSX.Element {
 	}, []);
 
 	const exchange = useMemo(() => lastExchange(view), [view]);
-	const project = useMemo(() => projectLabelOf(view), [view]);
+	const project = useMemo(() => attributionTextOf(sessionAttributionOf(view)), [view]);
 	const canSend = view.connected && !view.isStreaming && query.trim().length > 0;
 
 	/** 切到某个 Agent：serve 侧焦点 + 权威快照一起过来（不是前端滤镜）。 */

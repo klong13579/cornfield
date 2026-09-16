@@ -8,6 +8,7 @@ import {
 	isTerminalAgentTodoStatus,
 } from "@cornfield/wire";
 import type { AgentTodoDto, ProjectRecordDto } from "../src/lib/pi-client-api";
+import { serveVerdictOf } from "../src/lib/serve-verdict";
 import type { AgentTodoEditDraft, AgentTodoEditPatch } from "../src/pages/todo/agent-todo-logic";
 import {
 	ALL_TODOS,
@@ -33,7 +34,6 @@ import {
 	patchOfDraft,
 	projectRegistryOf,
 	sameFilter,
-	serveVerdictOf,
 	sortAgentTodos,
 	UNBOUND_TODOS,
 } from "../src/pages/todo/agent-todo-logic";

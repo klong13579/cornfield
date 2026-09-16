@@ -36,6 +36,10 @@ class FakeServe implements PiWebSocketLike {
 	activeAgent = "default";
 	/** 每条 new_session 到达时的「那一刻的连接焦点 + 命令带的目标」。 */
 	readonly arrivals: Array<{ activeAgent: string; sessionId: string | undefined }> = [];
+	/** 每条 `new_session` 到达时带的 Project（未声明归属时不带这个字段）。 */
+	readonly projectArrivals: Array<string | undefined> = [];
+	/** 已声明的 Project（serve 的注册表）；未声明过的 id 会被拒（ok:false）。 */
+	readonly projects = new Set<string>();
 	/** 真正建了会话的 Agent（serve 侧事实）。 */
 	readonly createdOn: string[] = [];
 	/** 推出去的 session_snapshot 帧上的 Agent（serve 对「本连接焦点是谁」的权威说法）。 */
@@ -104,10 +108,15 @@ class FakeServe implements PiWebSocketLike {
 			}
 			case "new_session": {
 				this.arrivals.push({ activeAgent: this.activeAgent, sessionId });
+				this.projectArrivals.push(command.projectId);
 				// serve：没带 sessionId 就按这一刻的焦点定目标（这正是会建错的那条路）
 				const landing = sessionId ?? this.activeAgent;
 				if (!this.attached.has(landing)) {
 					return this.#fail(id, `agent not attached: ${landing} (send attach first)`);
+				}
+				// serve：未声明的 projectId 直接 ok:false（不静默落回启动根），错误原文就是这个
+				if (command.projectId !== undefined && !this.projects.has(command.projectId)) {
+					return this.#fail(id, `no Project declared with projectId "${command.projectId}"; nothing was created.`);
 				}
 				// serve：`sessionDone({ cancelled: !success })` —— 命令受理了但这次没建（上一个会话还在）
 				if (this.cancelNextCreate) {
@@ -209,6 +218,16 @@ interface ServeCommand {
 	type?: string;
 	sessionId?: string;
 	name?: string;
+	projectId?: string;
+}
+
+/** 相关请求帧的 `command` 原文（断言「命令里到底带了什么」）。 */
+function creationCommands(serve: FakeServe): Array<Record<string, unknown>> {
+	const interesting = new Set(["attach", "switch_session", "new_session", "set_session_name"]);
+	return serve.sent
+		.map(line => JSON.parse(line) as { type?: string; command?: Record<string, unknown> })
+		.filter(f => f.type === "request" && interesting.has(String(f.command?.type)))
+		.map(f => f.command ?? {});
 }
 
 const fakeCtor: PiWebSocketCtor = FakeServe;
@@ -396,19 +415,141 @@ describe("标题的边界：没给 / 空串 / 创建被拒 —— 都不发改�
 		expect(creationFrames(emptyTitle.serve)).toEqual(["new_session"]);
 	});
 
-	it("标题在、但创建被 serve 拒（ok:false）：不发改名帧", async () => {
+	it("标题在、但创建被 serve 拒（ok:false）：报「确定没建」并把 serve 的原文给出来，不发改名帧", async () => {
 		const { store, serve } = await createConnectedStore();
 		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
 		// serve 侧：hr 的会话没了（agent 进程退出 / 另一条连接 detach），而焦点还停在 hr
 		serve.detach("hr");
 
-		// 这里不断言调用的返回值：ok:false 走 store 的 catch-all，被归成 `unknown`（「建没建不知道」），
-		// 与 serve 说的「确定没建」不是一回事 —— 那是另一条票的事。本票钉的是下面这两条 serve 侧事实。
-		await store.newSession({ title: "季度复盘" });
+		const outcome = await store.newSession({ title: "季度复盘" });
+
+		// serve 回了 ok:false = 它看过并拒了：这是一个**确定的否定**，不是「建没建不知道」
+		expect(outcome.kind).toBe("not-created");
+		expect(outcome.kind === "not-created" ? outcome.error : "").toBe("agent not attached: hr (send attach first)");
+		// 用户看得见的就是 serve 的原话（不加客户端前缀、不翻译）
+		expect(store.getSnapshot().commandError).toContain("agent not attached: hr (send attach first)");
 
 		// 创建本身被 serve 拒了：没有第二个会话，也没有改名帧
 		expect(serve.createdOn).toEqual(["hr"]);
 		expect(creationFrames(serve)).toEqual(["attach", "switch_session", "new_session", "new_session"]);
 		expect(serve.renames).toEqual([]);
+	});
+});
+
+/**
+ * T28：新建会话的 Project **真的生效**（`new_session.projectId`）。
+ *
+ * 这一组钉的是「用户的选择真的上了命令」与「服务端的判决真的回得上屏」：
+ * 前者以前落不下去（只会出现在 notApplied 里），后者以前被归成「说不准」。
+ */
+describe("新建会话带 Project：落到 new_session.projectId，未知 id 原样报错", () => {
+	it("带 Project 新建：命令载荷里有那个 projectId，会话真的建在它上面", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+
+		const outcome = await store.newSession({ agentId: "hr", projectId: "dtc" });
+
+		expect(outcome).toEqual({ kind: "created", notApplied: [] });
+		// 验收点：projectId 曾经只会出现在 notApplied 里（「wire 落不下去」），现在它发得出去 ——
+		// 出口还在（将来有表达不出来的字段仍然要从那里说），但它里面不该再有 projectId。
+		expect(outcome.kind === "created" ? outcome.notApplied : ["not-created"]).not.toContain("projectId");
+		// 命令面的事实：new_session 那一帧确实带了它（不是「客户端以为带了」）
+		const create = creationCommands(serve).find(c => c.type === "new_session");
+		expect(create).toMatchObject({ type: "new_session", sessionId: "hr", projectId: "dtc" });
+		expect(serve.projectArrivals).toEqual(["dtc"]);
+	});
+
+	it("不指定 Project：new_session 不带这个字段（不拿空串冒充一个声明）", async () => {
+		const { store, serve } = await createConnectedStore();
+
+		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
+
+		const create = creationCommands(serve).find(c => c.type === "new_session");
+		expect(create).not.toHaveProperty("projectId");
+		expect(serve.projectArrivals).toEqual([undefined]);
+	});
+
+	it("未知 projectId：serve 拒了 —— 报「确定没建」+ 它的原文，界面上看得到、不吞", async () => {
+		const { store, serve } = await createConnectedStore();
+
+		const outcome = await store.newSession({ agentId: "hr", projectId: "ghost" });
+
+		expect(outcome.kind).toBe("not-created");
+		expect(outcome.kind === "not-created" ? outcome.error : "").toContain(
+			'no Project declared with projectId "ghost"',
+		);
+		// 唯一可见的错误面拿到的就是 serve 的原话
+		const shown = store.getSnapshot().commandError ?? "";
+		expect(shown).toContain('no Project declared with projectId "ghost"');
+		// 一个会话都没建：不被静默落回启动根
+		expect(serve.createdOn).toEqual([]);
+	});
+
+	it("工作上下文是客户端状态：切它不重启 serve、不发命令；下一次新建才带上它", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+		const framesBefore = serve.sent.length;
+
+		store.setWorkingProject("dtc");
+		expect(store.getSnapshot().workingProjectId).toBe("dtc");
+		// 切上下文不是一个服务端动作：一帧都不发
+		expect(serve.sent.length).toBe(framesBefore);
+
+		expect(await store.newSession({ agentId: "hr", projectId: store.getSnapshot().workingProjectId })).toEqual({
+			kind: "created",
+			notApplied: [],
+		});
+		expect(serve.projectArrivals).toEqual(["dtc"]);
+
+		// 切回「不指定」：下一个会话又不声明归属
+		store.setWorkingProject(undefined);
+		expect(store.getSnapshot().workingProjectId).toBeUndefined();
+	});
+
+	it("不带 opts.projectId 的入口（侧栏直建钮 / 设置页）也落在工作上下文上", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+		store.setWorkingProject("dtc");
+
+		// 这两处调的就是 `store.newSession()`（不传任何入参）——「建在哪个 Project」的规则在 store 一处，
+		// 所以它们与表单得到的是同一个答案；在调用点各自决定就会出现半生效。
+		expect(await store.newSession()).toEqual({ kind: "created", notApplied: [] });
+		expect(serve.projectArrivals).toEqual(["dtc"]);
+
+		// 显式指名优先于工作上下文
+		serve.projects.add("mkt");
+		expect(await store.newSession({ agentId: "hr", projectId: "mkt" })).toEqual({
+			kind: "created",
+			notApplied: [],
+		});
+
+		expect(serve.projectArrivals).toEqual(["dtc", "mkt"]);
+	});
+
+	it("notApplied 是空数组而不是缺字段 —— 调用方看得出「全部落上了」", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+		store.setWorkingProject("dtc");
+
+		const outcome = await store.newSession();
+		if (outcome.kind !== "created") throw new Error(`预期建成功，实际 ${outcome.kind}`);
+
+		// 这个出口留着（将来有 wire 表达不出来的字段要在这里说），今天确实一个都没有。
+		// 缺字段与空数组不是一回事：前者说不出「有没有被落下」。
+		expect(Array.isArray(outcome.notApplied)).toBe(true);
+		expect(outcome.notApplied).toEqual([]);
+	});
+
+	it("工作上下文不随会话变：开新会话作废的是**归属**，不是我的选择", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+		store.setWorkingProject("dtc");
+
+		await store.newSession({ agentId: "hr" });
+
+		// 新会话的归属被作废了（新会话还没声明过归属），但工作上下文还是我选的那个
+		const view = store.getSnapshot();
+		expect(view.currentProjectId).toBeUndefined();
+		expect(view.workingProjectId).toBe("dtc");
 	});
 });

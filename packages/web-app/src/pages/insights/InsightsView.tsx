@@ -7,7 +7,8 @@ import type {
 	StatsPeriodDto,
 } from "@cornfield/wire";
 import { useEffect, useMemo, useState } from "react";
-import { recordStatusLabel, type SessionRecordSummary } from "../../lib/records";
+import { attributionSourceLabel, projectRegistryState, sessionAttributionOf } from "../../lib/project-read-model";
+import { recordStatusLabel, type SessionRecordSummary, sessionProjectLabel } from "../../lib/records";
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { type SessionView, useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -142,22 +143,49 @@ function agentAnchorOf(agent: AgentInfoDto | undefined): AnchorValue {
 }
 
 /**
- * Project 锚点。四态互不可顶替：读失败 / 还没算出来 / registry 没读到 / 未归属。
- * `projectsPending` 期间渲染成「未归属」是替一个尚未计算的答案发言。
+ * Project 锚点 —— 当前**会话**的归属读数（serve 的权威 `currentProjectId` + 它的来源）。
+ *
+ * 四态互不可顶替：读不到（未连接 / 读失败 / 还没读到）/ 归属未知（还没问过）/ 未归属（serve
+ * 说没有任何东西声明过）/ 已归属。渲染成「未归属」就是替一个尚未得到的答案发言；而把「没问过」
+ * 说成「未归属」，则是把一个没发生的事实当成结论。判据只有一份，在 `lib/project-read-model`。
  */
 function projectAnchorOf(view: SessionView): AnchorValue {
-	if (view.projectsError) return { value: "读取失败", detail: view.projectsError, tone: "error" };
-	if (view.projectsPending)
+	// 归属正在重算（切会话后的窗口期）不是「未归属」：这是**归属**这一侧的 pending，
+	// 与名单读到哪一步是两件事（名单可能早就读到了）。
+	if (view.projectsPending) {
 		return { value: "计算中", detail: "Project 归属尚未算出来（不是「未归属」）", tone: "pending" };
-	if (view.projects === undefined) return { value: "未读到", detail: "Project registry 尚未读取", tone: "muted" };
-	if (!view.currentProjectId) {
-		return { value: "未归属", detail: "当前会话 cwd 不落在任何已声明 Project", tone: "muted" };
 	}
-	const project = view.projects.find(p => p.projectId === view.currentProjectId);
-	if (!project) {
-		return { value: view.currentProjectId, detail: "registry 里找不到这个 projectId", tone: "muted" };
+	const registry = projectRegistryState(view);
+	if (registry.kind === "disconnected") {
+		return { value: "未连接", detail: "Project registry 不可用（未连接）", tone: "muted" };
 	}
-	return { value: project.name, detail: `${project.projectId} · ${project.root}`, tone: "ok" };
+	if (registry.kind === "error") return { value: "读取失败", detail: registry.message, tone: "error" };
+	if (registry.kind === "unread") {
+		return { value: "未读到", detail: "Project registry 尚未读取", tone: "muted" };
+	}
+	const attribution = sessionAttributionOf(view);
+	switch (attribution.kind) {
+		case "unknown":
+			return {
+				value: "未问到",
+				detail: "serve 还没被问过这个会话的归属 —— 不是「未归属」",
+				tone: "muted",
+			};
+		case "none":
+			return {
+				value: "未归属",
+				detail: "serve 查过：没有任何东西声明过这个会话的归属（source: none）",
+				tone: "muted",
+			};
+		case "unlisted":
+			return { value: attribution.projectId, detail: "registry 里找不到这个 projectId", tone: "muted" };
+		case "attributed":
+			return {
+				value: attribution.project.name,
+				detail: `${attribution.projectId} · ${attribution.project.root} · 来源：${attributionSourceLabel(attribution.from)}`,
+				tone: "ok",
+			};
+	}
 }
 
 function sessionAnchorOf(view: SessionView): AnchorValue {
@@ -890,6 +918,7 @@ function SessionScopeCard({
 					<div className="grid grid-cols-1 gap-x-6 gap-y-2 text-[12.5px] xl:grid-cols-3">
 						<FactRow label="会话" value={`${current.session.name} · ${current.session.id}`} />
 						<FactRow label="Agent" value={current.session.agent} />
+						<FactRow label="Project（会话记下的）" value={sessionProjectLabel(current.session, view.projects)} />
 						<FactRow label="开始时间" value={fmtTimestamp(current.session.startedAt)} />
 						<FactRow label="消息数" value={String(current.session.messageCount)} />
 						<FactRow label="状态" value={recordStatusLabel(current.session.status)} />

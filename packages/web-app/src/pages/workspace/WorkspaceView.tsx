@@ -268,6 +268,10 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 						view={view}
 						draft={newSessionDraft}
 						onChange={setNewSessionDraft}
+						// Project 不在表单草稿里：它就是顶栏那个工作上下文（store 一处持有）——
+						// 表单里再存一份，就等于有两个「这次要建到哪」的值。
+						projectId={view.workingProjectId ?? ""}
+						onProjectChange={projectId => store.setWorkingProject(projectId)}
 						onCreate={async input => {
 							// 提交顺序在 store 那一条唯一路径里：await 目标 Agent 的 attach / switch_session →
 							// 看结果 → 确认后才带显式目标发 new_session（见 SessionStore.newSession）。

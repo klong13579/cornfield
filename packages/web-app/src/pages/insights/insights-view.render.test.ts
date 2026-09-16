@@ -142,9 +142,21 @@ describe("InsightsView 的未知状态不被顶替", () => {
 		expect(html).toContain("projects.json 解析失败");
 	});
 
-	it("registry 读到了但没有归属 → 才显示「未归属」", () => {
+	it("registry 读到了但**没问过**归属 → 「未问到」，不说「未归属」（那是一个还没得到的答案）", () => {
 		const html = render({ currentProjectId: undefined });
+		expect(html).toContain(">未问到<");
+		expect(html).not.toContain(">未归属<");
+	});
+
+	it("serve 答过「没有任何东西声明过」（source: none）→ 才显示「未归属」", () => {
+		const html = render({ currentProjectId: undefined, currentProjectSource: "none" });
 		expect(html).toContain(">未归属<");
+		expect(html).not.toContain(">未问到<");
+	});
+
+	it("归属来源照实说：会话记录 / 按目录匹配不是一个可信度", () => {
+		expect(render({ currentProjectSource: "session" })).toContain("来源：会话记录");
+		expect(render({ currentProjectSource: "cwd" })).toContain("来源：按目录匹配（旧会话回落）");
 	});
 
 	it("stats 还没到 → 分区与目录级数字都说「加载中」，不冒充「没有数据」", () => {
