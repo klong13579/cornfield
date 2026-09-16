@@ -48,7 +48,7 @@ function toolCallPaths(content: unknown): string[] {
 	return out;
 }
 
-/** 归一化工具路径：file:// → 绝对路径；绝对路径原样；相对路径留给 resolveFsPath。 */
+/** 归一化工具路径：file:// → 绝对路径；绝对路径原样；相对路径留给 `fileWithinRoots` 落根。 */
 function normalizeToolPath(raw: string): string {
 	if (raw.startsWith("file://")) {
 		try {

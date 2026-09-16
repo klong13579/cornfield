@@ -20,7 +20,6 @@ import type {
 } from "@cornfield/wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
-import type { ProjectId } from "../agent-domain/types";
 import { withFileLock } from "../config/file-lock";
 import { parseModelString } from "../config/model-resolver";
 import { getDefault, SETTINGS_SCHEMA, type SettingPath, Settings } from "../config/settings";
@@ -126,7 +125,7 @@ export interface WireServerOptions {
 interface Connection {
 	connectionId: string;
 	ws: Bun.ServerWebSocket<Connection | undefined>;
-	/** 本连接当前焦点 agent（P1：恒为 default）。 */
+	/** 本连接当前焦点的**附件地址**（未绑定的附件地址就是 Agent 名）。 */
 	activeAgentId: string;
 	/** 本连接注册的 host tool bridge（per agent）。发 set_host_tools 的连接 = 执行者。 */
 	hostToolBridges: Map<string, WireHostToolBridge>;
@@ -139,9 +138,9 @@ interface Connection {
  * ws 层把 Connection 适配成此接口；未来 TUI 进程内客户端传内存实现。
  */
 export interface CommandContext {
-	/** 当前焦点 agent id。 */
+	/** 当前焦点的**附件地址**（`AttachedSession.address`；未绑定附件的地址就是 Agent 名）。 */
 	activeAgentId: string;
-	/** attach/switch 后更新焦点。 */
+	/** attach/switch 后更新焦点（传入附件的地址）。 */
 	setActiveAgentId(id: string): void;
 	/** 本上下文注册的 host tool bridge（per agent）。 */
 	hostToolBridges: Map<string, WireHostToolBridge>;
@@ -203,14 +202,14 @@ const TOOL_SWITCH_DEFS: Array<{ tool: string; label: string; path: SettingPath }
  * 职责（且仅此）：
  * - 升级 /ws 连接前校验 query token；hello → hello_ack
  * - request/response 按 id 关联；ping → pong（不消耗 session）
- * - 命令按 command.sessionId ?? conn.activeAgentId 定向 agent（P1：无 sessionId 即 default）
- * - 事件路由：session_snapshot/progress 只推给 active 在该 agent 上的连接；
+ * - 命令按 command.sessionId 定向（Agent 名或**附件地址**）；缺省 = 本连接焦点附件
+ * - 事件路由：session_snapshot/progress 只推给焦点就在**那个附件**上的连接（按附件地址比）；
  *   server_snapshot（agent 列表）广播全连接
  * - host tool：set_host_tools 注册 bridge，call 帧只发给执行者连接；断开全拒
  */
 export interface WireCoreTarget {
 	id: string;
-	/** 当前焦点 agent id（可变：ws 连接 switch_session；内存客户端切换）。 */
+	/** 当前焦点的**附件地址**（可变：ws 连接 switch_session；内存客户端切换）。 */
 	getActiveAgentId(): string;
 	/** 推帧给本接收端（ws: send(ws)；内存: 直接投递）。 */
 	send(frame: ServerFrame): void;
@@ -224,6 +223,30 @@ export interface WireCore {
 	/** 推目标 agent 的权威快照。 */
 	sendSessionSnapshotTo(target: WireCoreTarget): void;
 	broadcastServerSnapshot(): void;
+}
+
+/**
+ * 按**地址**取附件。地址是附件自己的事实，所以按 `listAttached()` 比对 —— 不拼 key
+ * （拼 key 是 registry 的事，`attachmentKey` 不从那里漏出来）。
+ */
+function focusedAttachment(registry: SessionRegistry, address: string): AttachedSession | undefined {
+	return registry.listAttached().find(attached => attached.address === address);
+}
+
+/**
+ * 一个 id（`session_snapshot.sessionId` / 命令的 `sessionId` / `/preview` 的那一段）指的是哪个附件。
+ *
+ * 两种可能的写法指的是同一件东西的两面，所以两种都认：
+ *   - **附件地址** —— 绑了 Project 的会话只能这样指认，而客户端拿到的快照 `sessionId` 就是地址，
+ *     它会把这个值原样回传，所以地址不是服务端内部的私事；
+ *   - **Agent 名** —— 今天的形状（点名一个 Agent = 它自己根上的那个附件）。
+ *
+ * 先地址后 Agent 名：未绑定附件的地址就是 Agent 名，两者重合时结果一样；Agent 名里不可能含地址的
+ * 分隔符（NUL），所以不存在遮蔽。认不出来返回 `undefined`，由调用方按「未知 agent」报。
+ */
+function attachmentFor(registry: SessionRegistry, sessionId: string | undefined): AttachedSession | undefined {
+	if (sessionId === undefined) return undefined;
+	return focusedAttachment(registry, sessionId) ?? registry.getAttached(sessionId);
 }
 
 /**
@@ -261,9 +284,35 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			if (targets.size === 0) gate.clearAll();
 		};
 	};
+	/**
+	 * 本命令指的是哪个 Agent：点名的认（附件地址或 Agent 名），**认不出来就把那个名字原样交回去**
+	 * —— 由调用方的 `getMeta` 决定「未知 agent」还是「注册了但没 attach」，不许拿焦点的 Agent 顶上
+	 * （那会把「读 X」变成「读我正在看的那个」）。缺省才用焦点附件的 Agent。
+	 */
+	const agentOf = (ctx: { activeAgentId: string }, sessionId: string | undefined): string => {
+		if (sessionId !== undefined) return attachmentFor(registry, sessionId)?.meta.id ?? sessionId;
+		return attachmentFor(registry, ctx.activeAgentId)?.meta.id ?? ctx.activeAgentId;
+	};
+
+	/**
+	 * 本命令指的是哪个附件：点名的**只**取那个（点名的东西不在就是不在 —— 拿焦点顶上会让「读 X」变成
+	 * 「读我正在看的那个」，那是另一份事实），缺省才是本连接焦点附件。
+	 */
+	const attachmentOf = (
+		ctx: { activeAgentId: string },
+		sessionId: string | undefined,
+	): AttachedSession | undefined => {
+		if (sessionId !== undefined) return attachmentFor(registry, sessionId);
+		return attachmentFor(registry, ctx.activeAgentId);
+	};
+
 	const activeAgentIds = (): Set<string> => {
 		const ids = new Set<string>();
-		for (const target of targets) ids.add(target.getActiveAgentId());
+		// 焦点是**附件地址**；server_snapshot 是 Agent 列表（一行一个 Agent），所以换回 Agent 名。
+		for (const target of targets) {
+			const focused = focusedAttachment(registry, target.getActiveAgentId());
+			if (focused) ids.add(focused.meta.id);
+		}
 		return ids;
 	};
 	const broadcastServerSnapshot = (): void => {
@@ -276,12 +325,12 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 		}
 	};
 	const sendSessionSnapshotTo = (target: WireCoreTarget): void => {
-		const attached = registry.getAttached(target.getActiveAgentId());
-		if (!attached) return;
+		const focused = focusedAttachment(registry, target.getActiveAgentId());
+		if (!focused) return;
 		const event: WireServerEvent = {
 			type: "session_snapshot",
-			sessionId: target.getActiveAgentId(),
-			snapshot: attached.store.getSnapshot(),
+			sessionId: focused.address,
+			snapshot: focused.store.getSnapshot(),
 		};
 		target.send({ type: "push", event });
 	};
@@ -295,7 +344,10 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 	};
 	options.registerPermissionBroadcast?.(broadcastPermission);
 
-	// ── 事件路由：只推给 active 在该 agent 上的连接 ──
+	// ── 事件路由：只推给焦点就在**那个附件**上的连接 ──
+	// 事件的 `sessionId` 是附件地址（`AttachedSession.address`）：未绑定的附件地址就是 Agent 名，
+	// 所以「按 agentId 比」的旧行为逐字节不变；绑了 Project 的附件按地址比，一个 Agent 两个附件
+	// 因此不会互相串台。
 	registry.subscribe(event => {
 		if (event.kind === "snapshot") {
 			for (const target of targets) {
@@ -321,35 +373,43 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 		broadcastServerSnapshot();
 	});
 
-	/** 命令解析：返回目标 attached session；未 attach / 未注册时报错。 */
+	/**
+	 * 命令解析：返回目标 attached session；未 attach / 未注册时报错。
+	 * `sessionId` 可能是 Agent 名，也可能是附件地址（见 `attachmentFor`）；
+	 * 缺省 = 本连接焦点附件（焦点也是附件地址）。
+	 */
 	const resolveTarget = (
 		ctx: { activeAgentId: string },
 		command: { sessionId?: string },
 	): { agentId: string; attached: AttachedSession } | { error: string } => {
-		const agentId = command.sessionId ?? ctx.activeAgentId;
-		if (!registry.getMeta(agentId)) {
-			return { error: `unknown agent: ${agentId}` };
+		const attached = attachmentOf(ctx, command.sessionId);
+		if (attached) return { agentId: attached.meta.id, attached };
+		// 报错文案按今天的两条分开报：点名了一个不存在的 Agent ≠ 点名了一个还没 attach 的 Agent。
+		const named = command.sessionId ?? ctx.activeAgentId;
+		if (!registry.getMeta(named)) {
+			return { error: `unknown agent: ${named}` };
 		}
-		const attached = registry.getAttached(agentId);
-		if (!attached) {
-			return { error: `agent not attached: ${agentId} (send attach first)` };
-		}
-		return { agentId, attached };
+		return { error: `agent not attached: ${named} (send attach first)` };
 	};
 
 	/**
-	 * 听记的写入方来源（T10C）：焦点 agent 的 scope。
+	 * 听记的写入方来源（T10C）：焦点**附件**的 scope。
 	 *
 	 * 听记存在客户端级目录，页面要按 Agent/Project/Session 分它就必须在写入时标上 —— 但
 	 * **转写本身不能因为归属解析失败而失败**（音频是用户的数据，丢不得）。所以解析不到时
 	 * 返回空 provenance：落盘上就是「未标注」，而不是把这条录音冒充成焦点 Agent 的。
+	 *
+	 * 收的是**附件**而不是一个字符串 id：焦点是附件地址，绑了 Project 的会话要按它自己的工作根
+	 * 标（`sessionCwd` 在 `./agent-scope` 里就是从附件会话取的）—— 拿地址去查 agent 只会查出
+	 * 一个不存在的 Agent，那份 provenance 就变成一条错的。
 	 */
-	const listenProvenance = async (agentId: string): Promise<ListenProvenance> => {
+	const listenProvenance = async (attached: AttachedSession | undefined): Promise<ListenProvenance> => {
+		if (!attached) return {};
 		try {
 			const anchor = await resolveAgentScope({
-				agentId,
-				meta: registry.getMeta(agentId),
-				attached: registry.getAttached(agentId),
+				agentId: attached.meta.id,
+				meta: attached.meta,
+				attached,
 			});
 			return await resolveListenProvenance({
 				agentId: anchor.agentId,
@@ -359,7 +419,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			});
 		} catch (err) {
 			logger.warn("listen provenance unresolved; recording stays unattributed", {
-				agentId,
+				agentId: attached.meta.id,
 				error: err instanceof Error ? err.message : String(err),
 			});
 			return {};
@@ -437,7 +497,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "list_projects": {
 					try {
 						// 会话归属只看**已 attach** 的会话（不 lazy attach）：查一次项目列表不应把 agent 拉起来。
-						const attached = registry.getAttached(command.sessionId ?? ctx.activeAgentId);
+						const attached = attachmentOf(ctx, command.sessionId);
 						done(await readProjectContext(attached?.session.sessionManager.getCwd()));
 					} catch (err) {
 						// 存储存在但读不出来 → ok:false（不当成「没有 Project」）
@@ -476,7 +536,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "list_agent_todos":
 				case "set_agent_todo":
 				case "delete_agent_todo": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -495,6 +555,13 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "attach": {
+					// `sessionId` 可能是 Agent 名（attach 它自己根上的那个附件），也可能是**附件地址**
+					// （已经在了的那个）—— 两种都幂等：已经在的会话直接回它，不然会把另一个附件拉起来。
+					const existing = attachmentFor(registry, command.sessionId);
+					if (existing) {
+						done({ sessionId: command.sessionId, sessionFile: existing.session.sessionFile });
+						return;
+					}
 					if (!registry.getMeta(command.sessionId)) {
 						fail(`unknown agent: ${command.sessionId}`);
 						return;
@@ -505,31 +572,48 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "detach": {
-					if (command.sessionId === "default") {
+					// 点名可以给 Agent 名，也可以给附件地址（见 `attachmentFor`）。
+					const target = attachmentFor(registry, command.sessionId);
+					const detachAgentId = target?.meta.id ?? command.sessionId;
+					if (detachAgentId === "default") {
 						fail("cannot detach default agent");
 						return;
 					}
-					for (const target of targets) {
-						if (target.getActiveAgentId() === command.sessionId) {
-							fail(`agent is active on a connection: ${command.sessionId} (switch_session first)`);
+					// 焦点也在那个附件上的连接不能把它拆掉（对比的是**地址**：一个 Agent 两个附件时
+					// 拆掉一个不等于「这个 Agent 没人在看」）。
+					const detachAddress = target?.address ?? command.sessionId;
+					for (const connection of targets) {
+						if (connection.getActiveAgentId() === detachAddress) {
+							fail(`agent is active on a connection: ${detachAgentId} (switch_session first)`);
 							return;
 						}
 					}
-					await registry.detach(command.sessionId);
+					await registry.detach(detachAgentId, target?.projectId);
 					done();
 					return;
 				}
 				case "switch_session": {
+					// 点名一个 Agent（今天）或一个**附件地址**（绑了 Project 的会话只能这样指认）。
+					const existing = attachmentFor(registry, command.sessionId);
+					if (existing) {
+						ctx.setActiveAgentId(existing.address);
+						// 新焦点的快照立即推给本连接（快照权威，客户端零恢复逻辑）
+						ctx.sendSessionSnapshot();
+						ctx.broadcastServerSnapshot();
+						done({ sessionId: existing.address });
+						return;
+					}
 					if (!registry.getMeta(command.sessionId)) {
 						fail(`unknown agent: ${command.sessionId}`);
 						return;
 					}
-					await registry.attach(command.sessionId);
-					ctx.setActiveAgentId(command.sessionId);
+					const attached = await registry.attach(command.sessionId);
+					// 焦点 = 那个附件的**地址**（未绑定的地址就是 Agent 名，与今天同值）
+					ctx.setActiveAgentId(attached.address);
 					// 新焦点的快照立即推给本连接（快照权威，客户端零恢复逻辑）
 					ctx.sendSessionSnapshot();
 					ctx.broadcastServerSnapshot();
-					done({ sessionId: command.sessionId });
+					done({ sessionId: attached.address });
 					return;
 				}
 				case "subscribe":
@@ -649,7 +733,10 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "fs_list": {
 					const fsCmd = command as { type: "fs_list"; sessionId?: string; path?: string };
-					const agentId = fsCmd.sessionId ?? ctx.activeAgentId;
+					// `sessionId` 可能是 Agent 名，也可能是附件地址（客户端把快照里那个值原样回传）；
+					// 缺省 = 本连接焦点附件。
+					const attached = attachmentOf(ctx, fsCmd.sessionId);
+					const agentId = agentOf(ctx, fsCmd.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -659,7 +746,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// 未 attach 时没有会话可问，resolver 手上只有 agentDir 这一个事实 —— 与今天一致。
 					const target = await resolveFsTarget({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attached?.session,
 						path: fsCmd.path ?? "",
 					});
 					if (!target.ok) {
@@ -676,7 +763,8 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "fs_read": {
 					const fsCmd = command as { type: "fs_read"; sessionId?: string; path?: string };
-					const agentId = fsCmd.sessionId ?? ctx.activeAgentId;
+					const attached = attachmentOf(ctx, fsCmd.sessionId);
+					const agentId = agentOf(ctx, fsCmd.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -684,7 +772,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					const target = await resolveFsTarget({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attached?.session,
 						path: fsCmd.path ?? "",
 					});
 					if (!target.ok) {
@@ -701,8 +789,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "fs_read_image": {
 					// R-IMG-SERVE（备用卡）：二进制图片读取——FileExplorer 预览数据源。
-					// 返回 dataUrl（上限 2MB，超出截断标记），MIME 按扩展名。路径约束与 fs_read 同（resolveFsPath）。
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					// 返回 dataUrl（上限 2MB，超出截断标记），MIME 按扩展名。路径约束与 fs_read 同（同一条 roots 边界）。
+					const attached = attachmentOf(ctx, command.sessionId);
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -710,7 +799,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					const target = await resolveFsTarget({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attached?.session,
 						path: (command as { path: string }).path ?? "",
 					});
 					if (!target.ok) {
@@ -731,7 +820,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					const cmd = command as { sessionId?: string; sessionFile?: string };
 					if (cmd.sessionFile) {
 						// 定向会话：边界 = 那个会话的工作面（与 fs_read 同一处判定）。
-						const agentId = cmd.sessionId ?? ctx.activeAgentId;
+						const agentId = agentOf(ctx, cmd.sessionId);
 						const meta = registry.getMeta(agentId);
 						if (!meta) {
 							fail(`unknown agent: ${agentId}`);
@@ -739,7 +828,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						}
 						const anchor = await workspaceAnchorOf({
 							agentDir: meta.agentDir,
-							session: registry.getAttached(agentId)?.session,
+							session: attachmentOf(ctx, cmd.sessionId)?.session,
 						});
 						if (!anchor.ok) {
 							fail(anchor.error);
@@ -762,7 +851,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						done({ artifacts });
 						return;
 					}
-					const agentId = cmd.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, cmd.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -770,7 +859,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					const anchor = await workspaceAnchorOf({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attachmentOf(ctx, cmd.sessionId)?.session,
 					});
 					if (!anchor.ok) {
 						fail(anchor.error);
@@ -820,7 +909,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 							text,
 							desc,
 							tmpPath,
-							await listenProvenance(ctx.activeAgentId),
+							await listenProvenance(attachmentOf(ctx, undefined)),
 						);
 						done({ ok: true, text, path: savedPath, model });
 					} catch (err) {
@@ -876,7 +965,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 							text,
 							finished.desc,
 							finished.path,
-							await listenProvenance(ctx.activeAgentId),
+							await listenProvenance(attachmentOf(ctx, undefined)),
 						);
 						done({ ok: true, text, path: savedPath, model });
 					} catch (err) {
@@ -930,7 +1019,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// W3 D3 + T10B：只读记忆投影，按 Agent/Project/Session/User scope 分区。
 					// sessionId（= agent id）缺省 = 本连接焦点 agent；未 attach 的 agent 只按 agentDir 推算。
 					// T10B：sessionId（= agent id）缺省 = 本连接焦点 agent；pi-wire 的 get_memory 命令已带 sessionId。
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					// 未注册的 agent 不能回退到「default 的目录 + 别人的名字」：那会把一个不存在的
 					// Agent 的记忆显示成它自己的。注册表说了算（与 fs_read / list_projects 同一判决）。
 					if (!registry.getMeta(agentId)) {
@@ -941,7 +1030,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						const anchor = await resolveAgentScope({
 							agentId,
 							meta: registry.getMeta(agentId),
-							attached: registry.getAttached(agentId),
+							attached: attachmentOf(ctx, command.sessionId),
 						});
 						done(
 							await buildMemoryScopeProjection({
@@ -962,7 +1051,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "get_evolved_skills": {
 					// 演化技能只读投影（T13）：与 get_memory 同一个库、同一条 scope 解析规则，两页读同一份事实。
 					// 与 get_skills（会话级、需要 attach）不同：这是全局库的读面，不 lazy attach 任何 agent。
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -972,7 +1061,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						const anchor = await resolveAgentScope({
 							agentId,
 							meta,
-							attached: registry.getAttached(agentId),
+							attached: attachmentOf(ctx, command.sessionId),
 						});
 						done(await readEvolvedSkills(anchor.sessionCwd));
 					} catch (err) {
@@ -992,7 +1081,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						group: "系统命令" as const,
 					}));
 					const virtual = TUI_VIRTUAL_COMMANDS.map(c => ({ ...c, group: "会话控制" as const }));
-					const attached = registry.getAttached(ctx.activeAgentId);
+					const attached = attachmentOf(ctx, undefined);
 					const extra: { name: string; description: string; group: string }[] = [];
 					if (attached) {
 						const s = attached.session;
@@ -1089,7 +1178,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── git 最小集（票 02）──
 				case "git_status": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1099,7 +1188,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// 未绑定 = agentDir，与今天同一个目录。
 					const work = await resolveWorkRoot({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attachmentOf(ctx, command.sessionId)?.session,
 					});
 					if (!work.ok) {
 						fail(work.error);
@@ -1124,7 +1213,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "git_changes": {
 					// `git_status` 的逐条版本（T13）：同一个仓库（目标 agent 的工作目录）——
 					// 「几条」与「哪几条」必须说的是同一份事实，所以这里与上面三个 git 命令同一处取目录。
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1132,7 +1221,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					const work = await resolveWorkRoot({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attachmentOf(ctx, command.sessionId)?.session,
 					});
 					if (!work.ok) {
 						fail(work.error);
@@ -1148,7 +1237,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_diff": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1157,7 +1246,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					const cmd = command as { cached?: boolean; path?: string };
 					const work = await resolveWorkRoot({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attachmentOf(ctx, command.sessionId)?.session,
 					});
 					if (!work.ok) {
 						fail(work.error);
@@ -1179,7 +1268,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_log": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1188,7 +1277,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					const count = Math.min(100, Math.max(1, Math.trunc((command as { count?: number }).count ?? 20)));
 					const work = await resolveWorkRoot({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attachmentOf(ctx, command.sessionId)?.session,
 					});
 					if (!work.ok) {
 						fail(work.error);
@@ -1208,7 +1297,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_show": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1217,7 +1306,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					const revision = (command as { revision: string }).revision;
 					const work = await resolveWorkRoot({
 						agentDir: meta.agentDir,
-						session: registry.getAttached(agentId)?.session,
+						session: attachmentOf(ctx, command.sessionId)?.session,
 					});
 					if (!work.ok) {
 						fail(work.error);
@@ -1236,7 +1325,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "git_branches": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1245,7 +1334,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					try {
 						const work = await resolveWorkRoot({
 							agentDir: meta.agentDir,
-							session: registry.getAttached(agentId)?.session,
+							session: attachmentOf(ctx, command.sessionId)?.session,
 						});
 						if (!work.ok) {
 							fail(work.error);
@@ -1281,7 +1370,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				// registry agent 的配置根 <agentDir>/config.yml（与 serve sessionFactory 的
 				// Settings.create({ agentDir }) 同源）。
 				case "get_config": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1298,7 +1387,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "set_config": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1326,7 +1415,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				// ── 配置作用域（#05）：与 get_config/set_config 同源 per-agent 文件读解 ──
 				case "get_config_scope": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1365,7 +1454,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "restore_config_inheritance": {
-					const agentId = command.sessionId ?? ctx.activeAgentId;
+					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
 					if (!meta) {
 						fail(`unknown agent: ${agentId}`);
@@ -1483,40 +1572,31 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "new_session": {
 					/**
-					 * 归属解析（终态，与 T25 无关）：调用方给了 `projectId` 就必须能解出根 —— 解析走 T24 的唯一
-					 * resolver（`./session-workspace`），这里不写第二份判定。
-					 *
-					 * 解不出来（注册表没声明这个 id / 注册表读坏 / agentDir 的声明读不出）→ `ok:false`，
-					 * 且**一个会话都不建**：静默落回启动根会造出一个「声称在 Project 里、实际不在」的会话，
-					 * 正是这一波要修的东西。
-					 *
-					 * 传的是「要装配的那个 Project」而不是现有会话的位置（不带 session）：新建会话没有已记录的
-					 * 归属，调用方这次点的是哪个 Project 就是哪个 —— 否则「切到另一个 Project 再建会话」会被
-					 * resolver 的 project-conflict 当成一次非法重绑。
+					 * 带 `projectId` = 在**那个 Project 的工作根**上开一个会话：归属解析与装配都在 registry 里
+					 * （`registry.attach(agentId, projectId)` 问 resolver 取根）。解析失败（未声明的 id /
+					 * Project 注册表读不出来 / agentDir 声明坏）在那里抛，**一个会话都不建** ——
+					 * 这里不自己解析一遍，也不许落回启动根：那会造出一个「声称在 Project 里、实际不在」的会话。
 					 */
 					if (command.projectId !== undefined) {
-						const agentDir = registry.getMeta(agentId)?.agentDir ?? session.sessionManager.getCwd();
-						const anchor = await workspaceAnchorOf({
-							agentDir,
-							session: undefined,
-							projectId: command.projectId,
-						});
-						if (!anchor.ok) {
-							fail(anchor.error);
+						if (command.parentSession !== undefined) {
+							// 新附件由工厂装配，没地方安放 parentSession；静默丢掉一条父链就是一句假话。
+							fail("new_session 暂不支持同时指定 projectId 与 parentSession");
 							break;
 						}
-						const root = anchor.workspace.projectRoot;
-						if (root === undefined) {
-							// resolver 的契约是「有归属就有根」。缺了就是不变量被破坏 —— 不猜一个根，如实报出来。
-							fail(`Project 绑定解析不出根：projectId "${command.projectId}" 有归属却没有 root。`);
+						let bound: AttachedSession;
+						try {
+							bound = await registry.attach(agentId, command.projectId);
+						} catch (err) {
+							// 原话给前端（resolver 的报错说清了是哪个 id / 哪个文件）。
+							fail(err instanceof Error ? err.message : String(err));
 							break;
 						}
-						// ── 待替换点（T25）：拿 `root` 交给按 (agentId, root) 装配的工厂。
-						//    在它落地前**不许**退回旧根建会话（那正是这一波存在的理由），所以这里响亮地失败。──
-						fail(
-							`Project 绑定尚未接通：projectId "${command.projectId}" 已解析到根 "${root}"，` +
-								"但「按 (agentId, root) 装配会话」的工厂还没落地（T25）；本次不建会话。",
-						);
+						// 焦点跟到那个附件的**地址**（读它的，不拼）：调用方要的就是这个 Project 上的会话。
+						ctx.setActiveAgentId(bound.address);
+						// 刚装配的附件里的会话就是这次新开出来的那个；本来就在这个附件上（同一个对象）则按今天
+						// 的语义再开一个新会话文件 —— 否则回一个「建好了」而盘上什么都没多。
+						const created = bound === attached ? await bound.session.newSession() : true;
+						sessionDone({ cancelled: !created });
 						break;
 					}
 					const opts = command.parentSession ? { parentSession: command.parentSession } : undefined;
@@ -2387,11 +2467,14 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 	 * 工作面；没有会话时手上只有 agentDir 这一个事实（与今天一致）。
 	 */
 	const servePreviewTarget = async (agentId: string, rel: string): Promise<Response> => {
-		const meta = registry.getMeta(agentId);
+		// URL 里那一段既可以是 Agent 名（今天的形状），也可以是**附件地址**（客户端手上就有）。
+		// 给了地址时边界 = 那个附件的工作面 —— 绑了 Project 的产物因此点得开，而不是拿 agentDir 拒掉。
+		const attached = attachmentFor(registry, agentId);
+		const meta = attached?.meta ?? registry.getMeta(agentId);
 		if (!meta) return new Response("unknown agent", { status: 404 });
 		const target = await resolveFsTarget({
 			agentDir: meta.agentDir,
-			session: registry.getAttached(agentId)?.session,
+			session: attached?.session,
 			path: rel,
 		});
 		if (!target.ok) return new Response(target.error, { status: 400 });
@@ -2410,6 +2493,7 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				});
 			}
 			// R-ARTIFACTS 静态预览：/preview/<agentId>/<relpath>（会话工作面当 docroot，只读）。
+			// 第一段也可以是**附件地址**（客户端手上就有，绑了 Project 的产物因此点得开）。
 			// 路径逐段 URL 编码；token 校验同 /ws（空 token 本地免鉴权）。
 			if (url.pathname.startsWith("/preview/")) {
 				if (token !== "" && url.searchParams.get("token") !== token)
@@ -2600,15 +2684,11 @@ async function contentVersionOfFile(file: string): Promise<string> {
 async function resolveWorkspaceAnchor(input: {
 	agentDir: string;
 	session: AgentSession | undefined;
-	/**
-	 * 调用方为这次装配解析出的 Project（`new_session.projectId`）。给了就必须能被注册表解出来，
-	 * 解不出来由 resolver 抛，调用方回 ok:false。
-	 */
-	projectId?: ProjectId;
 }): Promise<ResolvedSessionWorkspace> {
 	const manager = input.session?.sessionManager;
-	const base = manager ? { agentDir: input.agentDir, session: manager } : { agentDir: input.agentDir };
-	return resolveSessionWorkspace(input.projectId === undefined ? base : { ...base, projectId: input.projectId });
+	return resolveSessionWorkspace(
+		manager ? { agentDir: input.agentDir, session: manager } : { agentDir: input.agentDir },
+	);
 }
 
 /**
@@ -2727,7 +2807,6 @@ async function resolveFsTarget(input: {
 async function workspaceAnchorOf(input: {
 	agentDir: string;
 	session: AgentSession | undefined;
-	projectId?: ProjectId;
 }): Promise<{ ok: true; workspace: ResolvedSessionWorkspace } | { ok: false; error: string }> {
 	try {
 		return { ok: true, workspace: await resolveWorkspaceAnchor(input) };

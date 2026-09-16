@@ -213,10 +213,11 @@ async function withClient<T>(fn: (client: PiClient) => Promise<T>): Promise<T> {
 	}
 }
 
-/** /preview 的 HTTP 根（与 WS 同端口）。 */
+/** /preview 的 HTTP 根（与 WS 同端口）。两段都要逐段编码：附件地址里含 NUL，原样放进 URL 会坏掉。 */
 function previewUrl(agentId: string, rel: string): string {
 	const base = serveInfo.url.replace(/^ws:/, "http:").replace(/\/ws$/, "");
-	return `${base}/preview/${agentId}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+	const path = rel.split("/").map(encodeURIComponent).join("/");
+	return `${base}/preview/${encodeURIComponent(agentId)}/${path}`;
 }
 
 type FsListResult = { path: string; entries: { name: string; type: string }[] };
@@ -409,39 +410,131 @@ describe("D session-index：projectId 只从会话头读，不拿 cwd 反推", (
 	}, 30_000);
 });
 
-/** 一个目录下现有的 jsonl 名单 —— 「一个会话都不建」的落盘证据（新建会话会立即落一个文件）。 */
-async function jsonlUnder(root: string): Promise<string[]> {
-	const out: string[] = [];
-	for await (const rel of new Bun.Glob("**/*.jsonl").scan({ cwd: root, onlyFiles: true })) out.push(rel);
-	return out.sort();
-}
+describe("E new_session.projectId：解析、失败语义与焦点（第 4 条接线）", () => {
+	/** 收到的快照推送的 sessionId（= 附件地址）。每开一个连接就有一份。 */
+	const snapshotAddresses = (client: PiClient): string[] => {
+		const seen: string[] = [];
+		client.subscribe(event => {
+			if (event.type !== "push" || event.event.type !== "session_snapshot") return;
+			const sessionId = event.event.sessionId;
+			if (!seen.includes(sessionId)) seen.push(sessionId);
+		});
+		return seen;
+	};
 
-describe("E new_session.projectId：解析与失败语义（工厂接线尚未落地）", () => {
-	/** 会话目录里现有的 jsonl 名单 —— 「一个会话都不建」的落盘证据（新建会话会立刻落一个文件）。 */
-	const hrSessionFiles = (): Promise<string[]> => jsonlUnder(path.join(agentDir, "sessions"));
-	test("未声明的 projectId → ok:false，且一个会话都不建", async () => {
+	/** hello 之后 serve 会立刻推一次焦点快照（它晚于 hello_ack 到达）——先等它落地再记基线。 */
+	const waitForInitialSnapshots = async (addresses: string[]): Promise<void> => {
+		for (let attempt = 0; attempt < 40 && addresses.length === 0; attempt += 1) await Bun.sleep(25);
+	};
+
+	/**
+	 * 命令之后**新出现**的那个快照地址 = 现在的焦点附件（hello 那次推的是连接初始焦点，要先排除）。
+	 */
+	const focusAddressAfter = async (addresses: string[], before: ReadonlySet<string>): Promise<string | undefined> => {
+		for (let attempt = 0; attempt < 20; attempt += 1) {
+			const fresh = addresses.find(address => !before.has(address));
+			if (fresh !== undefined) return fresh;
+			await Bun.sleep(50);
+		}
+		return undefined;
+	};
+
+	test("未声明的 projectId → ok:false、原话，且一个会话都不建", async () => {
 		await withClient(async client => {
-			const before = await hrSessionFiles();
+			// 「一个会话都不建」的可观察证据是**焦点没多出一个附件**（建成功会立刻推一个新地址），
+			// 不是会话目录里的文件数：fresh 会话的 JSONL 是懒落盘的，数文件会把「建了但还没写」读成「没建」。
+			const addresses = snapshotAddresses(client);
+			await waitForInitialSnapshots(addresses);
+			const initial = new Set(addresses);
+
 			const refusal = await refusalOf(() =>
 				client.request({ type: "new_session", sessionId: "hr", projectId: "proj-nope" } as never),
 			);
 			expect(refusal).toContain("proj-nope");
-			expect(await hrSessionFiles()).toEqual(before);
+			await Bun.sleep(200);
+			expect(addresses.filter(address => !initial.has(address))).toEqual([]);
 		});
 	}, 30_000);
 
-	test("已声明的 projectId → 解析通过后被「尚未接通」拦下（不退回旧根建会话）", async () => {
+	test("已声明的 projectId → 真的在 Project 根上建了会话，焦点跟到它的地址，读面跟着走", async () => {
 		await withClient(async client => {
-			const before = await hrSessionFiles();
-			const refusal = await refusalOf(() =>
-				client.request({ type: "new_session", sessionId: "hr", projectId: "proj-work" } as never),
-			);
-			expect(refusal).toContain("Project 绑定尚未接通");
-			// 报的是**解出来的那个根**：声明的 Project root，不是 agentDir
-			expect(refusal).toContain(projectRoot);
-			expect(await hrSessionFiles()).toEqual(before);
+			const addresses = snapshotAddresses(client);
+			await waitForInitialSnapshots(addresses);
+			const initial = new Set(addresses);
+
+			const res = await client.request<{ cancelled: boolean }>({
+				type: "new_session",
+				sessionId: "hr",
+				projectId: "proj-work",
+			} as never);
+			expect(res.cancelled).toBe(false);
+
+			// 焦点 = 那个附件的**地址**（不是 Agent 名）：一个 Agent 两个附件时要分得出是哪一个。
+			const focused = await focusAddressAfter(addresses, initial);
+			expect(focused).toBeDefined();
+			expect(focused).not.toBe("hr");
+			expect(focused).toContain(projectRoot);
+
+			// 会话文件归**身份根**：向这个附件的地址 attach 一次，serve 回的 sessionFile 在
+			// <agentDir>/sessions 下（工作根 = Project root，会话目录仍归 agentDir，不跟着走）。
+			// 不数会话目录里的文件：fresh 会话的 JSONL 是懒落盘的，数文件会把「建了但还没写」读成「没建」。
+			const bound = await client.request<{ sessionFile?: string }>({ type: "attach", sessionId: focused } as never);
+			expect(bound.sessionFile?.startsWith(path.join(agentDir, "sessions"))).toBe(true);
+
+			// 不带 sessionId 的读面 = 打给焦点那个附件 → 边界 = Project root（agentDir 之外的文件读得到）。
+			const read = await client.request<{ text: string }>({ type: "fs_read", path: SHARED_FILE } as never);
+			expect(read.text).toBe("shared\n");
+			// 写面同理：落在 Project root，agentDir 里没有它。
+			await client.request({ type: "fs_write", path: "focused-write.txt", content: "focus\n" } as never);
+			expect(await Bun.file(path.join(projectRoot, "focused-write.txt")).text()).toBe("focus\n");
+			expect(await Bun.file(path.join(agentDir, "focused-write.txt")).exists()).toBe(false);
+
+			// 只读站点也认这个地址：绑定附件里的产物点得开（不给地址则只认 agentDir，见上一组）。
+			const preview = await fetch(previewUrl(focused ?? "", "focused-write.txt"));
+			expect(preview.status).toBe(200);
+			expect(await preview.text()).toBe("focus\n");
 		});
-	}, 30_000);
+	}, 60_000);
+
+	test("一个 Agent 两个附件：事件按**地址**路由，不串台；agent 列表的 active 跟着焦点的 Agent", async () => {
+		await withClient(async client => {
+			const addresses = snapshotAddresses(client);
+			await waitForInitialSnapshots(addresses);
+			const initial = new Set(addresses);
+			await client.request({ type: "new_session", sessionId: "hr", projectId: "proj-work" } as never);
+			const focused = (await focusAddressAfter(addresses, initial)) ?? "";
+			expect(focused).not.toBe("hr");
+			expect(focused).toContain(projectRoot);
+
+			// 焦点在那个附件上的连接：agent 列表把 hr 标成 active（焦点是地址，不是 Agent 名）。
+			const agents = await client.request<{ agents: { id: string; active: boolean }[] }>({
+				type: "list_agents",
+			} as never);
+			expect(agents.agents.find(a => a.id === "hr")?.active).toBe(true);
+
+			// 明确点名 Agent 名 = **另一个**（未绑定的）附件：它的快照不能推给本连接。
+			addresses.length = 0;
+			await client.request({
+				type: "set_todos",
+				sessionId: "hr",
+				phases: [{ name: "routing", tasks: [] }],
+			} as never);
+			await Bun.sleep(200);
+			expect(addresses).not.toContain("hr");
+			expect(addresses.length).toBeGreaterThan(0);
+			expect(addresses.every(address => address === focused)).toBe(true);
+
+			// 点名自己的地址 = 焦点那个附件：同样只推它的快照。
+			addresses.length = 0;
+			await client.request({
+				type: "set_todos",
+				sessionId: focused,
+				phases: [{ name: "routing", tasks: [] }],
+			} as never);
+			await Bun.sleep(200);
+			expect(addresses).toEqual([focused]);
+		});
+	}, 60_000);
 
 	test("不带 projectId → 走今天的路（ok:true，不落进归属分支）", async () => {
 		await withClient(async client => {
