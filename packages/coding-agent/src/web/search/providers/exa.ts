@@ -195,14 +195,16 @@ async function callExaSearch(apiKey: string, params: ExaSearchParams): Promise<E
 }
 
 async function callExaMcpSearch(params: ExaSearchParams): Promise<ExaSearchResponse> {
-	// Note: the MCP path does not propagate the abort signal (transport-level
-	// limitation); the direct API path above does. Transport-only fields never
-	// belong in the tool arguments, so they are dropped here.
+	// The keyless public MCP endpoint carries no data of its own, so
+	// transport-only fields never belong in the tool arguments.
 	const toolArgs: Record<string, unknown> = { ...params };
 	delete toolArgs.signal;
 	delete toolArgs.timeoutMs;
 
-	const response = await callExaTool("web_search_exa", toolArgs, findApiKey());
+	const response = await callExaTool("web_search_exa", toolArgs, findApiKey(), {
+		signal: params.signal,
+		timeoutMs: params.timeoutMs,
+	});
 	if (isSearchResponse(response)) {
 		return response as ExaSearchResponse;
 	}

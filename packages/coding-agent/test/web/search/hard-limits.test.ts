@@ -190,10 +190,10 @@ describe("the configured ceiling", () => {
 		_resetSettingsForTest();
 	});
 
-	it("takes the per-provider ceiling from settings", async () => {
+	it("gives an index-backed provider the short ceiling", async () => {
 		process.env.TAVILY_API_KEY = "test-key";
 		_resetSettingsForTest();
-		await Settings.init({ inMemory: true, overrides: { "providers.webSearchTimeoutSeconds": 1 } });
+		await Settings.init({ inMemory: true, overrides: { "providers.webSearchIndexTimeoutSeconds": 1 } });
 		let captured: AbortSignal | undefined;
 		using _hook = hookFetch((_input, init) => {
 			captured = init?.signal ?? undefined;
@@ -210,10 +210,28 @@ describe("the configured ceiling", () => {
 		expect(captured?.aborted).toBe(true);
 	});
 
+	it("gives a synthesizing provider the long ceiling instead of the index one", async () => {
+		process.env.MOONSHOT_SEARCH_API_KEY = "test-key";
+		_resetSettingsForTest();
+		await Settings.init({ inMemory: true, overrides: { "providers.webSearchIndexTimeoutSeconds": 1 } });
+		let captured: AbortSignal | undefined;
+		using _hook = hookFetch((_input, init) => {
+			captured = init?.signal ?? undefined;
+			return new Response(JSON.stringify({ data: { results: [] } }), { status: 200 });
+		});
+
+		await runSearchQuery({ query: "q", provider: "kimi" });
+
+		// The index override is 1s; a synthesizing provider must not pick it up.
+		expect(captured?.aborted).toBe(false);
+		await Bun.sleep(1200);
+		expect(captured?.aborted).toBe(false);
+	});
+
 	it("ignores a ceiling of zero and keeps the built-in default", async () => {
 		process.env.TAVILY_API_KEY = "test-key";
 		_resetSettingsForTest();
-		await Settings.init({ inMemory: true, overrides: { "providers.webSearchTimeoutSeconds": 0 } });
+		await Settings.init({ inMemory: true, overrides: { "providers.webSearchIndexTimeoutSeconds": 0 } });
 		let captured: AbortSignal | undefined;
 		using _hook = hookFetch((_input, init) => {
 			captured = init?.signal ?? undefined;
@@ -233,6 +251,36 @@ describe("provider chain failure reporting", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		delete process.env.TAVILY_API_KEY;
+		delete process.env.MOONSHOT_SEARCH_API_KEY;
+	});
+
+	it("names the providers that failed before one answered", async () => {
+		process.env.TAVILY_API_KEY = "test-key";
+		const exaOk = JSON.stringify({
+			jsonrpc: "2.0",
+			id: "1",
+			result: {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ results: [{ title: "t", url: "https://example.com/a", summary: "s" }] }),
+					},
+				],
+			},
+		});
+		using _hook = hookFetch(input => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			return url.includes("mcp.exa.ai")
+				? new Response(exaOk, { status: 200 })
+				: new Response("nope", { status: 503 });
+		});
+
+		const result = await runSearchQuery({ query: "q" });
+
+		// The first provider in the order fails and exa answers; the failure must
+		// not be swallowed, or a dead provider hides for months.
+		expect(result.details?.error).toBeUndefined();
+		expect(result.content[0]?.text).toContain("tavily did not answer");
 	});
 
 	it("reports a 200 with no usable content as a failure, not an empty success", async () => {

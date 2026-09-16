@@ -13,6 +13,16 @@ import { dateToAgeSeconds } from "../utils";
  */
 export const SEARCH_HARD_TIMEOUT_MS = 60_000;
 
+/**
+ * Default ceiling for a provider that answers from a search index, in
+ * milliseconds.
+ *
+ * A healthy index answers in seconds, so this class needs far less than the
+ * synthesis budget. Without the split, one unreachable index-backed host spent
+ * the synthesis-sized budget on every search before the next provider ran.
+ */
+export const SEARCH_INDEX_TIMEOUT_MS = 20_000;
+
 /** Largest hard ceiling a user may configure, in milliseconds. */
 export const MAX_SEARCH_HARD_TIMEOUT_MS = 300_000;
 

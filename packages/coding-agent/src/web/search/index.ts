@@ -17,7 +17,7 @@ import webSearchDescription from "../../prompts/tools/web-search.md" with { type
 import type { ToolSession } from "../../tools";
 import { formatAge } from "../../tools/render-utils";
 import { getSearchProvider, resolveProviderChain, type SearchProvider } from "./provider";
-import { MAX_SEARCH_HARD_TIMEOUT_MS, SEARCH_HARD_TIMEOUT_MS } from "./providers/utils";
+import { MAX_SEARCH_HARD_TIMEOUT_MS, SEARCH_HARD_TIMEOUT_MS, SEARCH_INDEX_TIMEOUT_MS } from "./providers/utils";
 import { renderSearchCall, renderSearchResult, type SearchRenderDetails } from "./render";
 import type { SearchProviderId, SearchResponse } from "./types";
 import { SearchProviderError } from "./types";
@@ -79,6 +79,27 @@ interface SearchFailure {
 const MAX_FAILURE_CHARS = 300;
 
 /**
+ * Providers that answer from a search index, so a healthy request settles in
+ * seconds.
+ *
+ * They get a shorter ceiling than the providers that synthesize an answer: a
+ * single blocked host otherwise spends a synthesis-sized budget before the
+ * next provider runs — measured at ~75s on every seventh search when one such
+ * host was unreachable.
+ */
+const INDEX_BACKED_PROVIDERS = new Set<SearchProviderId>([
+	"brave",
+	"exa",
+	"jina",
+	"kagi",
+	"parallel",
+	"searxng",
+	"synthetic",
+	"tavily",
+	"zai",
+]);
+
+/**
  * True when a response carries anything the model can use.
  *
  * A 200 with no answer, sources, citations, or queries is indistinguishable
@@ -101,16 +122,28 @@ function hasRenderableContent(response: SearchResponse): boolean {
  * one-shot `q` CLI path and unit tests), so the chain never aborts before any
  * provider has run.
  */
-function resolveHardTimeoutMs(): number {
+function resolveHardTimeoutMs(providerId: SearchProviderId): number {
+	const setting = INDEX_BACKED_PROVIDERS.has(providerId)
+		? "providers.webSearchIndexTimeoutSeconds"
+		: "providers.webSearchTimeoutSeconds";
+	const fallback = INDEX_BACKED_PROVIDERS.has(providerId) ? SEARCH_INDEX_TIMEOUT_MS : SEARCH_HARD_TIMEOUT_MS;
 	try {
-		const configuredSeconds = settings.get("providers.webSearchTimeoutSeconds");
+		const configuredSeconds = settings.get(setting);
 		if (Number.isFinite(configuredSeconds) && configuredSeconds > 0) {
 			return Math.min(configuredSeconds, MAX_SEARCH_HARD_TIMEOUT_MS / 1000) * 1000;
 		}
 	} catch {
 		// Settings unavailable; keep the built-in ceiling.
 	}
-	return SEARCH_HARD_TIMEOUT_MS;
+	return fallback;
+}
+
+/** Note lines describing the providers that failed before this one answered. */
+function formatSkippedNotes(failures: readonly SearchFailure[]): string[] {
+	return failures.map(
+		failure =>
+			`${failure.provider.id} did not answer: ${truncateText(formatProviderError(failure.error, failure.provider), MAX_FAILURE_CHARS)}`,
+	);
 }
 
 /** Report every provider failure, not only the last one. */
@@ -136,9 +169,12 @@ function formatCount(label: string, count: number): string {
 	return `${count} ${label}${count === 1 ? "" : "s"}`;
 }
 
-/** Format response for LLM consumption */
-function formatForLLM(response: SearchResponse): string {
+/** Format response for LLM consumption. `notes` lead the output (e.g. a provider that did not answer). */
+function formatForLLM(response: SearchResponse, notes: readonly string[] = []): string {
 	const parts: string[] = [];
+	for (const note of notes) {
+		parts.push(`Note: ${note}`);
+	}
 
 	if (response.answer) {
 		parts.push(response.answer);
@@ -207,7 +243,6 @@ async function executeSearch(
 		};
 	}
 
-	const timeoutMs = resolveHardTimeoutMs();
 	const failures: SearchFailure[] = [];
 
 	for (const provider of providers) {
@@ -221,7 +256,7 @@ async function executeSearch(
 				numSearchResults: params.num_search_results,
 				temperature: params.temperature,
 				signal,
-				timeoutMs,
+				timeoutMs: resolveHardTimeoutMs(provider.id),
 			});
 
 			// A 200 with nothing in it is not a result. Treat it as a provider
@@ -231,7 +266,7 @@ async function executeSearch(
 				throw new SearchProviderError(provider.id, `${provider.label} returned no usable results`, 204);
 			}
 
-			const text = formatForLLM(response);
+			const text = formatForLLM(response, formatSkippedNotes(failures));
 
 			return {
 				content: [{ type: "text" as const, text }],
