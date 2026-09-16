@@ -19,6 +19,42 @@
 /** 捕获缓冲保留的行数：够覆盖启动日志 + 崩溃栈，又不会把内存拖到无界。 */
 const CAPTURE_LINES = 200;
 
+/**
+ * serve 就绪等待的默认预算。
+ *
+ * 为什么不是 60s：子进程要跑完整个 CLI 启动（原生 addon + 扩展/技能/MCP/agent attach）。
+ * 本机实测空载 2–4s、负载下 10–25s（2026-09-16：4 路并发时曾经把 60s 拖爆），CI 2 核 runner 更慢。
+ * 只读/只看的集成测试断言的是协议语义而不是启动延迟，所以预算取在实测之上。
+ */
+export const SERVE_READY_TIMEOUT_MS = 90_000;
+
+/**
+ * beforeAll 的默认预算：单次就绪等待 + 收尾余量。
+ *
+ * 必须**高于**就绪等待，否则失败时 bun 会先掐断 beforeAll，只剩 bun 的预算文案、丢掉真实原因
+ * （2026-09-16 修 permission / cron-proxy 时就是这个毛病：预算 60–70s < 等待 60s）。
+ * 一个 beforeAll 里顺序起多个 serve 的用例自行叠加（用 `SERVE_BOOT_BUDGET_MS * n`）。
+ */
+export const SERVE_BOOT_BUDGET_MS = 150_000;
+
+/** 就绪等待超时：带上子进程是否活着与它最后的输出，让调用方能区分「慢」与「真没起来」。 */
+export class ServeReadyTimeoutError extends Error {
+	readonly childAlive: boolean;
+	readonly output: string;
+
+	constructor(port: number, timeoutMs: number, childAlive: boolean, output: string) {
+		super(`serve not ready on port ${port} after ${timeoutMs}ms; child alive=${childAlive}; last output:\n${output}`);
+		this.name = "ServeReadyTimeoutError";
+		this.childAlive = childAlive;
+		this.output = output;
+	}
+
+	/** 静默停摆：子进程活着、不监听、且启动阶段一个字都没输出（卡在任何 CLI 代码执行之前）。 */
+	isSilentStall(): boolean {
+		return this.childAlive && this.output.trim().length === 0;
+	}
+}
+
 export type ServeProc = ReturnType<typeof Bun.spawn>;
 
 /**
@@ -53,7 +89,11 @@ export interface ServeHandle {
 	token: string;
 }
 
-export async function waitForServe(proc: ServeProc, port: number, timeoutMs = 60_000): Promise<ServeHandle> {
+export async function waitForServe(
+	proc: ServeProc,
+	port: number,
+	timeoutMs = SERVE_READY_TIMEOUT_MS,
+): Promise<ServeHandle> {
 	const capture = captureServeOutput(proc);
 	const tail = (): string => capture.read().slice(-2000) || "(子进程没有输出)";
 	const deadline = Date.now() + timeoutMs;
@@ -72,7 +112,5 @@ export async function waitForServe(proc: ServeProc, port: number, timeoutMs = 60
 		}
 		await Bun.sleep(200);
 	}
-	throw new Error(
-		`serve not ready on port ${port} after ${timeoutMs}ms; child alive=${proc.exitCode === null}; last output:\n${tail()}`,
-	);
+	throw new ServeReadyTimeoutError(port, timeoutMs, proc.exitCode === null, tail());
 }
