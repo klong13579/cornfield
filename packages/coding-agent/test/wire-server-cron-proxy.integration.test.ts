@@ -8,24 +8,24 @@
  * - 转发成功：canned 形状原样穿透（TaskRowDto / CronLogEntryDto / GatewayStatusDto），
  *   且收到 gateway 的请求携带正确参数（taskId/days/limit）。
  * - gateway 端点不可用：返回明确错误（gateway unreachable）。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
+ * 本文件的 sessionDir 与 mock gateway 端口不属于夹具职责，仍在用例内自建。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { pickPort, SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
 let sessionDir: string;
-let isolatedHome: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let url = "";
-/** gateway 不可用场景：指向从不绑定的死端口。 */
-let downProc: ReturnType<typeof Bun.spawn> | undefined;
-let downUrl = "";
+/** 主实例：mock gateway 可达 → 转发穿透用例。 */
+let main: ServeFixture | undefined;
+/** down 实例：CORNFIELD_GATEWAY_WIRE_PORT 指向从不绑定的死端口 → gateway unreachable 用例。 */
+let down: ServeFixture | undefined;
 let wirePort = 0;
 let deadPort = 0;
 let mockWire: ReturnType<typeof Bun.serve> | undefined;
@@ -176,89 +176,39 @@ function startMockWire(): void {
 	wirePort = mockWire.port ?? 0;
 }
 
-/** 起一个 serve（CORNFIELD_GATEWAY_WIRE_PORT 定向到给定端口）。 */
-async function spawnServe(
-	wirePortOverride: number,
-	servePortBase: number,
-	servePortRange = 1500,
-): Promise<{ proc: ReturnType<typeof Bun.spawn>; url: string }> {
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const servePort = servePortBase + Math.floor(Math.random() * servePortRange);
-	const proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(servePort),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-			"--session-dir",
-			sessionDir,
-		],
-		{
-			stdout: "pipe",
-			stderr: "pipe",
-			// 名称必须与产品侧一致（wire-server.ts 的 GATEWAY_WIRE_PORT 只认 CORNFIELD_
-			// 前缀；gateway.ts #startWireEndpoint 同）。写成别的名字不会被报错，只会静默
-			// 回退 7892——2026-09-16 修本文件前，这里的 `OMP_GATEWAY_WIRE_PORT` 就是这种
-			// 情形：mock 一次都没被命中，三条转发用例恒 ok:false。
-			// 隔离 HOME：否则 serve 会去加载运行者机器上已配置的 MCP servers / agents /
-			// LSP，启动耗时随机器状态浮动（本机实测 10–24s，大半耗在那些无关加载上）。
-			env: {
-				...process.env,
-				HOME: isolatedHome,
-				PI_NO_TITLE: "1",
-				CORNFIELD_GATEWAY_WIRE_PORT: String(wirePortOverride),
-			},
-		},
-	);
-	// 显式预算：本机空载实测 serve 启动 10–24s（整个 CLI 启动：原生 addon + MCP/LSP/
-	// agent attach），负载下更久。用 waitForServe 的 60s 默认值时，beforeAll 预算会
-	// 先于它触发，失败只剩 bun 的预算文案、丢掉真实原因。
-	const url = await waitForServe(proc, servePort, 90_000);
-	return { proc: proc as ReturnType<typeof Bun.spawn>, url: url.url };
-}
-
 beforeAll(async () => {
 	startMockWire();
-	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-home-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
 	sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-"));
-	// 主实例：mock gateway 可达 → 转发穿透用例
-	const main = await spawnServe(wirePort, 48500, 1500);
-	proc = main.proc;
-	url = main.url;
-	// down 实例：定向到从不绑定的死端口 → gateway unreachable 用例；
-	// serve port 用独立段（48500+1500 已被主实例占用范围，避免随机撞端口）。
-	deadPort = 53000 + Math.floor(Math.random() * 1000);
-	const down = await spawnServe(deadPort, 51000, 1000);
-	downProc = down.proc;
-	downUrl = down.url;
-}, 240_000);
+	// 环境变量名必须与产品侧一致（wire-server.ts 的 GATEWAY_WIRE_PORT 只认 CORNFIELD_
+	// 前缀；gateway.ts #startWireEndpoint 同）。写成别的名字不会被报错，只会静默回退
+	// 7892——2026-09-16 修本文件前，这里的 `OMP_GATEWAY_WIRE_PORT` 就是这种情形：
+	// mock 一次都没被命中，三条转发用例恒 ok:false。
+	main = await spawnServeFixture({
+		homePrefix: "omp-serve-cron-proxy-",
+		extraArgs: ["--session-dir", sessionDir],
+		env: { CORNFIELD_GATEWAY_WIRE_PORT: String(wirePort) },
+	});
+	// 探测一个端口后立即释放、谁都不监听它 → 连接被拒（gateway unreachable 分支）。
+	deadPort = await pickPort();
+	down = await spawnServeFixture({
+		homePrefix: "omp-serve-cron-proxy-down-",
+		extraArgs: ["--session-dir", sessionDir],
+		env: { CORNFIELD_GATEWAY_WIRE_PORT: String(deadPort) },
+	});
+}, SERVE_BOOT_BUDGET_MS * 2);
 
 afterAll(async () => {
 	if (mockWire) mockWire.stop();
-	if (downProc) {
-		downProc.kill();
-		await downProc.exited;
-	}
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
+	await down?.dispose();
+	await main?.dispose();
 	await fs.rm(sessionDir, { recursive: true, force: true });
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	await fs.rm(isolatedHome, { recursive: true, force: true });
 });
 
 describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 	// 每条用例显式预算：bun 默认 5s 低于本文件自己的等待（hello_ack 10s / 响应 30s），
 	// 负载下握手稍慢就会先被 bun 掉断，丢掉真实原因。断言未改。
 	test("get_cron_tasks：canned 任务形状原样穿透", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(main!.url);
 		try {
 			const res = await requestRaw(ws, frames, { type: "get_cron_tasks" });
 			expect(res.ok).toBe(true);
@@ -272,7 +222,7 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 	}, 30_000);
 
 	test("get_cron_logs：taskId/days/limit 参数原样转发 + canned 日志穿透", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(main!.url);
 		try {
 			const res = await requestRaw(ws, frames, { type: "get_cron_logs", taskId: "t1", days: 3, limit: 50 });
 			expect(res.ok).toBe(true);
@@ -292,7 +242,7 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 	}, 30_000);
 
 	test("gateway_status：pid/stale/accounts 形状穿透", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(main!.url);
 		try {
 			const res = await requestRaw(ws, frames, { type: "gateway_status" });
 			expect(res.ok).toBe(true);
@@ -308,7 +258,7 @@ describe("P2-4 — cron/gateway 命令经 serve 转发 gateway 端点", () => {
 	}, 30_000);
 
 	test("gateway 端点不可用：返回明确 gateway 错误", async () => {
-		const { ws, frames } = await connect(downUrl);
+		const { ws, frames } = await connect(down!.url);
 		try {
 			const res = await requestRaw(ws, frames, { type: "get_cron_tasks" });
 			expect(res.ok).toBe(false);

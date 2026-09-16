@@ -1,16 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@cornfield/client";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 /**
  * 票 02 e2e — serve git 最小集（git_status/git_diff/git_log/git_show/git_branches）。
  * 三个场景：有改动 + 多分支仓库、空仓库。真实 serve 子进程 + pi-client。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）；
+ * 临时 git 仓库是本文件自己的用例数据，仍用 `runGit` 原地搭，并以 `cwd` 交给夹具。
  */
-const REPO_ROOT = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
 
 async function runGit(cwd: string, args: string[]): Promise<string> {
 	const child = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
@@ -23,49 +24,12 @@ async function runGit(cwd: string, args: string[]): Promise<string> {
 	return stdout;
 }
 
-async function pickPort(): Promise<number> {
-	return new Promise(resolve => {
-		const srv = net.createServer();
-		srv.listen(0, "127.0.0.1", () => {
-			const p = (srv.address() as net.AddressInfo).port;
-			srv.close(() => resolve(p));
-		});
-	});
-}
-
-async function spawnServe(
-	cwd: string,
-	isolatedHome: string,
-): Promise<{ proc: ReturnType<typeof Bun.spawn>; info: { url: string; token: string } }> {
-	const port = await pickPort();
-	const proc = Bun.spawn(
-		[
-			"bun",
-			`${REPO_ROOT}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		// 隔离 HOME：不隔离时子进程会加载运行者的真实配置与会话，默认会话的 cwd 落回
-		// 那个旧会话所在的目录→ git 命令报 “not a git repository”（2026-09-16 本地复现；
-		// CI 只是碰巧 runner 的 HOME 干净）。同目录其余 6 个兄弟文件本就隔离 HOME。
-		{ cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" } },
-	);
-	const info = await waitForServe(proc, port, 60_000);
-	return { proc, info };
-}
-
 describe("git 最小集 — 有改动 + 多分支仓库", () => {
-	let proc: ReturnType<typeof Bun.spawn> | undefined;
-	let info = { url: "", token: "" };
-	let isolatedHome: string;
+	let fixture: ServeFixture | undefined;
+	let repo: string;
 
 	beforeAll(async () => {
-		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-rich-home-"));
-		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-rich-"));
+		repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-rich-"));
 		await runGit(repo, ["init", "-b", "main"]);
 		await runGit(repo, ["config", "user.email", "test@example.com"]);
 		await runGit(repo, ["config", "user.name", "Test"]);
@@ -81,21 +45,16 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 		await Bun.write(path.join(repo, "a.txt"), "alpha\nbeta\ngamma\n");
 		await Bun.write(path.join(repo, "b.txt"), "untracked\n");
 
-		const spawned = await spawnServe(repo, isolatedHome);
-		proc = spawned.proc;
-		info = spawned.info;
-	}, 70_000);
+		fixture = await spawnServeFixture({ homePrefix: "omp-git-rich-home-", cwd: repo });
+	}, SERVE_BOOT_BUDGET_MS);
 
 	afterAll(async () => {
-		if (proc) {
-			proc.kill();
-			await proc.exited;
-		}
-		await fs.rm(isolatedHome, { recursive: true, force: true });
+		await fixture?.dispose();
+		await fs.rm(repo, { recursive: true, force: true });
 	});
 
 	test("git_status：当前分支 + staged/unstaged/untracked 列表", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{
@@ -116,7 +75,7 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 	});
 
 	test("git_diff：working tree diff 包含改动文件", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{ diff: string }>({ type: "git_diff" });
@@ -128,7 +87,7 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 	});
 
 	test("git_log：hash/author/message 结构正确", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{ commits: { hash: string; author: string; message: string }[] }>({
@@ -145,7 +104,7 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 	});
 
 	test("git_show：单 commit 详情包含提交信息", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{ revision: string; detail: string }>({ type: "git_show", revision: "HEAD" });
@@ -157,7 +116,7 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 	});
 
 	test("git_branches：local + current（多分支）", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{ current: string | null; local: string[]; remote: string[] }>({
@@ -173,31 +132,24 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 });
 
 describe("git 最小集 — 空仓库（无 commit）", () => {
-	let proc: ReturnType<typeof Bun.spawn> | undefined;
-	let info = { url: "", token: "" };
-	let isolatedHome: string;
+	let fixture: ServeFixture | undefined;
+	let repo: string;
 
 	beforeAll(async () => {
-		isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-home-"));
-		const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-"));
+		repo = await fs.mkdtemp(path.join(os.tmpdir(), "omp-git-empty-"));
 		await runGit(repo, ["init", "-b", "main"]);
 		await Bun.write(path.join(repo, "seed.txt"), "seed\n");
 
-		const spawned = await spawnServe(repo, isolatedHome);
-		proc = spawned.proc;
-		info = spawned.info;
-	}, 70_000);
+		fixture = await spawnServeFixture({ homePrefix: "omp-git-empty-home-", cwd: repo });
+	}, SERVE_BOOT_BUDGET_MS);
 
 	afterAll(async () => {
-		if (proc) {
-			proc.kill();
-			await proc.exited;
-		}
-		await fs.rm(isolatedHome, { recursive: true, force: true });
+		await fixture?.dispose();
+		await fs.rm(repo, { recursive: true, force: true });
 	});
 
 	test("git_log：空仓库返回空 commits（不报错）", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{ commits: unknown[] }>({ type: "git_log" });
@@ -208,7 +160,7 @@ describe("git 最小集 — 空仓库（无 commit）", () => {
 	});
 
 	test("git_branches：空仓库 local 为空、current 为非 null", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			const res = await client.request<{ current: string | null; local: string[]; remote: string[] }>({

@@ -4,9 +4,10 @@
  * 覆盖命令：`fs_read_image`（二进制图片读取）、`fs_write`（整段写）、`fs_edit`（replace 精确编辑）、
  * `fs_diff`（before/after 与 path+content 统一 diff）。
  *
- * 夹具布局（单个隔离 HOME → projectCwd 为 serve 的 cwd，不污染仓库）：
+ * 夹具布局（隔离 HOME 由 `wire-serve-fixture` 提供；projectCwd 是独立 mkdtemp 项目目录，
+ * 作为 serve 的 cwd → 不污染仓库）：
  * ```
- * <isolatedHome>/project/
+ * <projectCwd>/
  *   shot.png   1x1 透明 PNG（PNG_1PX 的原始字节）
  *   big.bin    2 * 1024 * 1024 + 7 字节，未知扩展（MIME 兜底 application/octet-stream）
  *   hello.txt  "hello world\n"（fs_edit replace 的输入，测试内自行复位）
@@ -14,23 +15,22 @@
  * ```
  * 所有用例只读或只改自身临时目录内的文件；文件写入用例在开始时复位其依赖的初始内容，
  * 因此每个 test 单独运行（`bun test -t <name>`）同样成立。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@cornfield/client";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
-let isolatedHome: string;
-let projectCwd: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let serveInfo: { url: string; token: string } = { url: "", token: "" };
+let fixture: ServeFixture | undefined;
+/** serve 的 cwd（也是用例读写的项目目录）—— fixture 的隔离 HOME 之外的独立临时目录。 */
+let projectCwd = "";
 
 /** 1x1 透明 PNG（已知最小合法字节序列）。 */
 const PNG_1PX = Buffer.from(
@@ -114,7 +114,7 @@ async function rawRequest(ws: WebSocket, frames: FrameSource, command: Record<st
 }
 
 async function withClient<T>(fn: (client: PiClient) => Promise<T>): Promise<T> {
-	const client = new PiClient({ url: serveInfo.url, token: serveInfo.token, autoReconnect: false });
+	const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 	await client.connect();
 	try {
 		return await fn(client);
@@ -132,7 +132,7 @@ interface FsImageResult {
 
 describe("R-IMG-SERVE — fs_read_image 二进制图片读取", () => {
 	test("PNG：dataUrl + image/png MIME（按扩展名）+ 完整大小", async () => {
-		const { ws, frames } = await connect(serveInfo.url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			const resp = (await rawRequest(ws, frames, { type: "fs_read_image", path: "shot.png" })) as Frame;
 			expect(resp.ok).toBe(true);
@@ -148,7 +148,7 @@ describe("R-IMG-SERVE — fs_read_image 二进制图片读取", () => {
 	});
 
 	test(">2MB 文件：截断 + truncated 标记 + octet-stream 兜底扩展", async () => {
-		const { ws, frames } = await connect(serveInfo.url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			// 未知扩展（.bin 不在 MIME 表）→ application/octet-stream
 			const big = (await rawRequest(ws, frames, { type: "fs_read_image", path: "big.bin" })) as Frame;
@@ -166,7 +166,7 @@ describe("R-IMG-SERVE — fs_read_image 二进制图片读取", () => {
 	});
 
 	test("路径越界拒绝 + 不存在文件错误", async () => {
-		const { ws, frames } = await connect(serveInfo.url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			const resp = (await rawRequest(ws, frames, { type: "fs_read_image", path: "../../etc/passwd" })) as Frame;
 			expect(resp.ok).toBe(false);
@@ -259,11 +259,7 @@ describe("fs 写命令面（fs_write / fs_edit / fs_diff）", () => {
 });
 
 beforeAll(async () => {
-	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-fs-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
-	projectCwd = path.join(isolatedHome, "project");
-	await fs.mkdir(projectCwd, { recursive: true });
+	projectCwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-fs-project-"));
 
 	// 种子文件：1x1 PNG + 2MB+7 字节大文件 + fs_edit / fs_diff 的初始内容
 	await Bun.write(path.join(projectCwd, "shot.png"), PNG_1PX);
@@ -271,42 +267,11 @@ beforeAll(async () => {
 	await Bun.write(path.join(projectCwd, "hello.txt"), HELLO_INITIAL);
 	await Bun.write(path.join(projectCwd, "out.txt"), OUT_INITIAL);
 
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = await ((): Promise<number> => {
-		return new Promise(resolve => {
-			const srv = net.createServer();
-			srv.listen(0, "127.0.0.1", () => {
-				const p = (srv.address() as net.AddressInfo).port;
-				srv.close(() => resolve(p));
-			});
-		});
-	})();
-	proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		{
-			cwd: projectCwd,
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
-		},
-	);
-	serveInfo = await waitForServe(proc, port, 60_000);
-}, 90_000);
+	// projectCwd 必须在 spawn 前存在（它是子进程的 cwd），HOME / 端口 / 预算由夹具负责。
+	fixture = await spawnServeFixture({ homePrefix: "omp-serve-fs-", cwd: projectCwd });
+}, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	await fs.rm(isolatedHome, { recursive: true, force: true });
+	await fixture?.dispose();
+	await fs.rm(projectCwd, { recursive: true, force: true });
 });

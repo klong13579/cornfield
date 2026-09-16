@@ -17,28 +17,26 @@
  *
  * 另含 B1/B8 回归：get_state env 环境摘要 + branch 命令（预置历史会话文件
  * --resume，branch 面向真实 user entry，不打 LLM）。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
+ * registry/workspace 预置走夹具的 `seed` 钩子（serve 启动即读，必须在 spawn 前落盘）；
+ * `--resume` 的 seed 会话文件因路径要先于 spawn 定下，自建一个临时目录（见第三个 describe）。
  */
 
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
-
-const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
-test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async () => {
-	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-p3-"));
-	const savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
-
-	// ── 预置 2 个 agent 的 agentDir + workspace.json + registry.json ──
+/** 预置 2 个 agent 的 agentDir + workspace.json + registry.json（serve 启动即读）。 */
+async function seedAgentRegistry(home: string): Promise<void> {
 	for (const name of ["hr", "ops"]) {
-		const agentDir = path.join(isolatedHome, "agents", name);
+		const agentDir = path.join(home, "agents", name);
 		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
 		await fs.mkdir(path.join(agentDir, "sessions"), { recursive: true });
 		await Bun.write(
@@ -55,7 +53,7 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 			}),
 		);
 	}
-	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
+	const registryDir = path.join(home, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),
@@ -63,32 +61,34 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 			version: 2,
 			agents: {
 				hr: {
-					path: path.join(isolatedHome, "agents", "hr"),
+					path: path.join(home, "agents", "hr"),
 					registeredAt: new Date().toISOString(),
 					template: "default",
 				},
 				ops: {
-					path: path.join(isolatedHome, "agents", "ops"),
+					path: path.join(home, "agents", "ops"),
 					registeredAt: new Date().toISOString(),
 					template: "default",
 				},
 			},
 		}),
 	);
+}
 
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
-	const port = 56000 + Math.floor(Math.random() * 8000);
-	const proc = Bun.spawn(["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
-		stdout: "pipe",
-		stderr: "pipe",
-		env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
+describe("多 Agent 注册表与推送隔离", () => {
+	let fixture: ServeFixture | undefined;
+
+	beforeAll(async () => {
+		fixture = await spawnServeFixture({ homePrefix: "omp-serve-p3-", seed: seedAgentRegistry });
+	}, SERVE_BOOT_BUDGET_MS);
+
+	afterAll(async () => {
+		await fixture?.dispose();
 	});
 
-	try {
-		// ── 等 serve:listening ──
-		const url = (await waitForServe(proc, port)).url;
-		const token = url.match(TOKEN_RE)?.[2] ?? "";
+	test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async () => {
+		const url = fixture!.url;
+		const token = fixture!.token;
 
 		// ── 连接 A：默认 focus=default ──
 		const connA = await WireConn.connect(url, token);
@@ -181,33 +181,28 @@ test("serve 多 Agent：注册表 + attach + switch + 隔离 + 心跳", async ()
 
 		connA.close();
 		connB.close();
-	} finally {
-		proc.kill();
-		await proc.exited;
-		process.env.HOME = savedHome;
-		await fs.rm(isolatedHome, { recursive: true, force: true });
-	}
-}, 60_000);
+	}, 60_000);
+});
 
-test("serve default agent 根 = git 仓库根（从包目录启动也归位）", async () => {
-	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-root-"));
-	const savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
+describe("default agent 根归位（从包目录启动）", () => {
+	let fixture: ServeFixture | undefined;
+	let repoRoot: string;
 
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
-	const port = 56000 + Math.floor(Math.random() * 8000);
-	// 在仓库子目录（包目录）里启动 serve——default agent 根应提升到 git 仓库根
-	const proc = Bun.spawn(["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
-		cwd: path.join(repoRoot, "packages", "coding-agent"),
-		stdout: "pipe",
-		stderr: "pipe",
-		env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
+	beforeAll(async () => {
+		repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
+		// 在仓库子目录（包目录）里启动 serve——default agent 根应提升到 git 仓库根
+		fixture = await spawnServeFixture({
+			homePrefix: "omp-serve-root-",
+			cwd: path.join(repoRoot, "packages", "coding-agent"),
+		});
+	}, SERVE_BOOT_BUDGET_MS);
+
+	afterAll(async () => {
+		await fixture?.dispose();
 	});
 
-	try {
-		const url = (await waitForServe(proc, port)).url;
-		const conn = await WireConn.connect(url, "");
+	test("serve default agent 根 = git 仓库根（从包目录启动也归位）", async () => {
+		const conn = await WireConn.connect(fixture!.url, fixture!.token);
 		const helloPush = await conn.nextPush("server_snapshot");
 		const sessions = (
 			helloPush.event as unknown as {
@@ -225,64 +220,58 @@ test("serve default agent 根 = git 仓库根（从包目录启动也归位）",
 		expect(names).toContain("packages");
 		expect(names).not.toContain("src");
 		conn.close();
-	} finally {
-		proc.kill();
-		await proc.exited;
-		process.env.HOME = savedHome;
-		await fs.rm(isolatedHome, { recursive: true, force: true });
-	}
-}, 60_000);
+	}, 60_000);
+});
 
-test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）", async () => {
-	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-b1b8-"));
-	const savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
+describe("B1/B8 回归（get_state env + branch）", () => {
+	let fixture: ServeFixture | undefined;
+	let seedDir: string;
 
-	// 预置含 user message 的历史会话文件——branch 需要真实 user entry，不打 LLM
-	const now = new Date().toISOString();
-	const seedFile = path.join(isolatedHome, "seed-session.jsonl");
-	await Bun.write(
-		seedFile,
-		`${[
-			JSON.stringify({ type: "session", version: 3, id: randomUUID(), timestamp: now, cwd: isolatedHome }),
-			JSON.stringify({
-				type: "model_change",
-				id: "seedmodel",
-				parentId: null,
-				timestamp: now,
-				model: "narwal-plan/deepseek-v4-flash",
-			}),
-			JSON.stringify({
-				type: "message",
-				id: "seed-user-1",
-				parentId: "seedmodel",
-				timestamp: now,
-				message: {
-					role: "user",
-					content: [{ type: "text", text: "branch e2e seed message" }],
-					attribution: "user",
-					timestamp: Date.now(),
-				},
-			}),
-		].join("\n")}\n`,
-	);
+	beforeAll(async () => {
+		// 预置含 user message 的历史会话文件——branch 需要真实 user entry，不打 LLM。
+		// `--resume` 的路径必须在 spawn 时就已存在，所以 seed 文件放在自己的临时目录里，
+		// 会话内的 cwd 与该目录一致（与迁移前「seed 文件就放在它自己的 cwd 下」同形）。
+		seedDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-b1b8-seed-"));
+		const now = new Date().toISOString();
+		await Bun.write(
+			path.join(seedDir, "seed-session.jsonl"),
+			`${[
+				JSON.stringify({ type: "session", version: 3, id: randomUUID(), timestamp: now, cwd: seedDir }),
+				JSON.stringify({
+					type: "model_change",
+					id: "seedmodel",
+					parentId: null,
+					timestamp: now,
+					model: "narwal-plan/deepseek-v4-flash",
+				}),
+				JSON.stringify({
+					type: "message",
+					id: "seed-user-1",
+					parentId: "seedmodel",
+					timestamp: now,
+					message: {
+						role: "user",
+						content: [{ type: "text", text: "branch e2e seed message" }],
+						attribution: "user",
+						timestamp: Date.now(),
+					},
+				}),
+			].join("\n")}\n`,
+		);
 
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
-	const port = 56000 + Math.floor(Math.random() * 8000);
-	const proc = Bun.spawn(
-		["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions", "--resume", seedFile],
-		{
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
-		},
-	);
+		fixture = await spawnServeFixture({
+			homePrefix: "omp-serve-b1b8-",
+			extraArgs: ["--resume", path.join(seedDir, "seed-session.jsonl")],
+		});
+	}, SERVE_BOOT_BUDGET_MS);
 
-	try {
-		const url = (await waitForServe(proc, port)).url;
-		const token = url.match(TOKEN_RE)?.[2] ?? "";
-		const conn = await WireConn.connect(url, token);
+	afterAll(async () => {
+		await fixture?.dispose();
+		await fs.rm(seedDir, { recursive: true, force: true });
+	});
+
+	test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）", async () => {
+		const conn = await WireConn.connect(fixture!.url, fixture!.token);
 		// hello 自动推送先消费掉（server_snapshot + session_snapshot）
 		await conn.nextPush("server_snapshot");
 		await conn.nextPush("session_snapshot");
@@ -317,13 +306,8 @@ test("serve B1/B8：get_state env 环境摘要 + branch 命令（快照推送）
 		const snap = await conn.nextPush("session_snapshot");
 		expect(snap.event.sessionId).toBe("default");
 		conn.close();
-	} finally {
-		proc.kill();
-		await proc.exited;
-		process.env.HOME = savedHome;
-		await fs.rm(isolatedHome, { recursive: true, force: true });
-	}
-}, 60_000);
+	}, 60_000);
+});
 
 class WireConn {
 	static async connect(url: string, token: string): Promise<WireConn> {

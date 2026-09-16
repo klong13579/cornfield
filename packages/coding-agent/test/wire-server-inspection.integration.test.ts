@@ -17,13 +17,16 @@
  *
  * 产物 fixture 刻意挂在独立 agent 上：indexSessions 与 listAgentArtifacts 都递归扫
  * <agentDir>/sessions，产物会话若与历史会话同处 hr，list_sessions 的精确条目断言（6 条 + 标题序列）会失真。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）；
+ * 下面的 `seedHome` 在 spawn 前把 fixture 落进那个 HOME —— registry 是 serve 启动期快照，
+ * 启动后写就读不到了。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
@@ -145,28 +148,38 @@ function nextFrame(ws: WebSocket, pred: (f: Frame) => boolean, timeoutMs: number
 	});
 }
 
-// ── 隔离 HOME / 共享 serve ──
+// ── 隔离 HOME（fixture 提供）+ 共享 serve ──
 
-/** 产物 fixture 的 HTML 内容（beforeAll 写入，测试体断言同源）。 */
+/** 产物 fixture 的 HTML 内容（seedHome 写入，测试体断言同源）。 */
 const DASHBOARD_HTML = "<!doctype html><html><body><h1>Dashboard</h1></body></html>";
 
-let isolatedHome: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let url = "";
+let fixture: ServeFixture | undefined;
 let repoRoot = "";
 /** 产物 fixture 的会话目录（sessionFile 维度断言用）。 */
 let artSessions = "";
 
 beforeAll(async () => {
-	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-inspection-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
-
 	repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
 
+	fixture = await spawnServeFixture({
+		homePrefix: "omp-serve-inspection-",
+		// serve 的 cwd = packages/coding-agent → 归一为 repo 根（project 区记忆锚点，与 fixture 编码一致）
+		cwd: path.join(repoRoot, "packages", "coding-agent"),
+		seed: seedHome,
+	});
+}, SERVE_BOOT_BUDGET_MS);
+
+afterAll(async () => {
+	await fixture?.dispose();
+});
+
+/**
+ * 把全部 fixture 写进夹具的隔离 HOME。由 `spawnServeFixture` 在 `Bun.spawn` **之前** await
+ * —— registry 是 serve 启动期的快照，启动后写就读不到了。
+ */
+async function seedHome(home: string): Promise<void> {
 	// ── agent hr：6 条历史会话 JSONL（list_sessions）──
-	const hrDir = path.join(isolatedHome, "agents", "hr");
+	const hrDir = path.join(home, "agents", "hr");
 	const hrSessions = path.join(hrDir, "sessions", "by-date", "2026-08-18");
 	await fs.mkdir(hrSessions, { recursive: true });
 	await fs.mkdir(path.join(hrDir, ".cornfield"), { recursive: true });
@@ -216,7 +229,7 @@ beforeAll(async () => {
 	);
 
 	// ── agent art：真实产物文件 + 2 条会话（list_artifacts / /preview）──
-	const artDir = path.join(isolatedHome, "agents", "art");
+	const artDir = path.join(home, "agents", "art");
 	artSessions = path.join(artDir, "sessions", "by-date", "2026-08-27");
 	await fs.mkdir(artSessions, { recursive: true });
 	await fs.mkdir(path.join(artDir, ".cornfield"), { recursive: true });
@@ -253,7 +266,7 @@ beforeAll(async () => {
 	);
 
 	// ── registry：hr（历史会话）+ art（产物）──
-	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
+	const registryDir = path.join(home, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),
@@ -267,51 +280,20 @@ beforeAll(async () => {
 	);
 
 	// ── get_memory：user 区 ~/.cornfield/user.md + project 区 canonical evolution 目录 ──
-	await fs.mkdir(path.join(isolatedHome, ".cornfield"), { recursive: true });
+	await fs.mkdir(path.join(home, ".cornfield"), { recursive: true });
 	await Bun.write(
-		path.join(isolatedHome, ".cornfield", "user.md"),
+		path.join(home, ".cornfield", "user.md"),
 		"# 测试用户画像\n\n- name: 测试用户\n- note: seed content for wire e2e\n",
 	);
-	const memoryRoot = path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot));
+	const memoryRoot = path.join(home, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot));
 	await fs.mkdir(memoryRoot, { recursive: true });
 	await Bun.write(path.join(memoryRoot, "MEMORY.md"), "# Memory Report\n\n## project\n\n- 项目记忆 seed\n");
 	await Bun.write(path.join(memoryRoot, "memory_summary.md"), "# Memory Summary\n\n- summary seed\n");
-
-	// serve 的 cwd = packages/coding-agent → 归一为 repo 根（project 区记忆锚点，与 fixture 编码一致）
-	const port = 57000 + Math.floor(Math.random() * 8000);
-	proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		{
-			cwd: `${repoRoot}/packages/coding-agent`,
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
-		},
-	);
-	url = (await waitForServe(proc, port, 60_000)).url;
-}, 90_000);
-
-afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	await fs.rm(isolatedHome, { recursive: true, force: true });
-});
+}
 
 test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () => {
 	const html = DASHBOARD_HTML;
-	const ws = await connect(url);
+	const ws = await connect(fixture!.url);
 	try {
 		// ── list_artifacts：art 定向 ──
 		const result = (await request(ws, { type: "list_artifacts", sessionId: "art" })) as { artifacts: ArtifactRow[] };
@@ -358,7 +340,7 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 		expect(missing.artifacts).toEqual([]);
 
 		// ── /preview 静态服务：html ──
-		const previewUrl = url.replace(/^ws:/, "http:").replace(/\/ws$/, "");
+		const previewUrl = fixture!.url.replace(/^ws:/, "http:").replace(/\/ws$/, "");
 		const htmlRes = await fetch(`${previewUrl}/preview/art/dashboard.html`);
 		expect(htmlRes.status).toBe(200);
 		expect(htmlRes.headers.get("content-type")).toContain("text/html");
@@ -389,7 +371,7 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 }, 60_000);
 
 test("list_sessions：索引/状态推断/排序/过滤", async () => {
-	const ws = await connect(url);
+	const ws = await connect(fixture!.url);
 	try {
 		// 全量：至少 3 条预置 hr 会话（default 的当前会话 JSONL 可能尚未 flush，不断言它）
 		const all = (await request(ws, { type: "list_sessions" })) as { sessions: IndexEntry[] };
@@ -456,7 +438,7 @@ test("list_sessions：索引/状态推断/排序/过滤", async () => {
 
 describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 	test("get_memory: 三分区结构 + user/project 内容 + memory 区形状", async () => {
-		const ws = await connect(url);
+		const ws = await connect(fixture!.url);
 		try {
 			const result = (await request(ws, { type: "get_memory" })) as MemoryResult;
 
@@ -473,7 +455,7 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 			// project 区：canonical evolution 目录（self-evolution/memory）优先；
 			// 有效 cwd 经 resolveServeProjectRoot 归一到 repo 根。memoryRoot 应指向 seed 的 canonical 目录。
 			expect(result.project?.memoryRoot).toBe(
-				path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot)),
+				path.join(fixture!.home, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot)),
 			);
 			expect(result.project?.memoryMd?.content).toContain("项目记忆 seed");
 			expect(result.project?.summaryMd?.content).toContain("summary seed");
@@ -490,7 +472,7 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 	});
 
 	test("get_memory: 不依赖 attached session（registry 级命令可直接调，幂等）", async () => {
-		const ws = await connect(url);
+		const ws = await connect(fixture!.url);
 		try {
 			const again = (await request(ws, { type: "get_memory" })) as MemoryResult;
 			expect(again.user?.content).toContain("测试用户画像");

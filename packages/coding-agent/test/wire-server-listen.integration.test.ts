@@ -8,28 +8,24 @@
  *
  * E2E=1 时追加：真实 WAV（packages/web-app/public/test-voice.wav，say 中文语音）→
  * record_transcribe → 本地 whisper 转写文本 + 落盘一致（require 真实模型；默认 skip）。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）；
+ * 本文件只多一件：预置配置根（CORNFIELD_CONFIG_DIR = 夹具的隔离 HOME）。
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
-
-interface E2eContext {
-	proc: ReturnType<typeof Bun.spawn>;
-	url: string;
-	token: string;
-}
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..");
 
 // ── helpers（与 wire-server-p2-commands.integration.test.ts 同构） ──
 
 async function sendCommand(command: object, timeoutMs = 15_000): Promise<Frame> {
-	const ws = new WebSocket(ctx.url);
+	const ws = new WebSocket(fixture!.url);
 	const { promise: opened, resolve: resolveOpened, reject: rejectOpened } = Promise.withResolvers<void>();
 	ws.onopen = () => resolveOpened();
 	ws.onerror = ev => rejectOpened(new Error(`ws error: ${String(ev)}`));
@@ -55,7 +51,7 @@ async function sendCommand(command: object, timeoutMs = 15_000): Promise<Frame> 
 		}
 	};
 
-	ws.send(JSON.stringify({ type: "hello", version: MULTIDEVICE_PROTOCOL_VERSION, token: ctx.token }));
+	ws.send(JSON.stringify({ type: "hello", version: MULTIDEVICE_PROTOCOL_VERSION, token: fixture!.token }));
 	await ackDone;
 	ws.send(JSON.stringify({ type: "request", id: "e2e", command: { id: "e2e", ...command } }));
 	try {
@@ -66,45 +62,30 @@ async function sendCommand(command: object, timeoutMs = 15_000): Promise<Frame> 
 }
 
 // ── orchestration（真实 serve 子进程，隔离配置根） ──
-// 注意：serve 启动在模块顶层 await 完成（hook 超时固定 5s 不可调，beforeAll 起 serve 会
-// 在本地慢机器超时——模块加载期不受 hook 超时约束）。afterAll 负责杀进程。
+// 预置必须在 spawn 之前：serve 启动即 Settings.init() 读 config.yml/agent 配置，
+// 晚于 spawn 写只剩竞态。就绪与预算由夹具负责。
 
-const isoHome = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-listen-wire-test-"));
-// 默认 record.model 是 API 模型（qwen-audio）——隔离环境预置本地 whisper，否则真实转写
-// case 会因 provider base URL 缺失而 ok:false。
-await fsp.mkdir(path.join(isoHome, "agent"), { recursive: true });
-await fsp.writeFile(
-	path.join(isoHome, "agent", "config.yml"),
-	`record:\n  model: mlx-community/whisper-large-v3-turbo\nstt:\n  language: zh\n`,
-	"utf-8",
-);
-const port = 19000 + Math.floor(Math.random() * 500);
-const proc = Bun.spawn(
-	[
-		"bun",
-		path.join(repoRoot, "packages/coding-agent/src/cli.ts"),
-		"serve",
-		"--port",
-		String(port),
-		"--no-extensions",
-		"--host",
-		"127.0.0.1",
-	],
-	{
-		env: { ...process.env, CORNFIELD_CONFIG_DIR: isoHome, PI_NO_TITLE: "1" },
-		stdout: "pipe",
-		stderr: "pipe",
-	},
-);
-const ready = await waitForServe(proc, port);
-const ctx: E2eContext = { proc, ...ready };
+let fixture: ServeFixture | undefined;
 
-afterAll(() => {
-	try {
-		ctx?.proc.kill("SIGTERM");
-	} catch {
-		/* already gone */
-	}
+beforeAll(async () => {
+	fixture = await spawnServeFixture({
+		homePrefix: "omp-listen-wire-test-",
+		env: home => ({ CORNFIELD_CONFIG_DIR: home }),
+		seed: async home => {
+			// 默认 record.model 是 API 模型（qwen-audio）——隔离环境预置本地 whisper，否则真实转写
+			// case 会因 provider base URL 缺失而 ok:false。
+			await fsp.mkdir(path.join(home, "agent"), { recursive: true });
+			await fsp.writeFile(
+				path.join(home, "agent", "config.yml"),
+				`record:\n  model: mlx-community/whisper-large-v3-turbo\nstt:\n  language: zh\n`,
+				"utf-8",
+			);
+		},
+	});
+}, SERVE_BOOT_BUDGET_MS);
+
+afterAll(async () => {
+	await fixture?.dispose();
 });
 
 // ── tests ──
@@ -146,7 +127,7 @@ describe("listen_list（隔离根）", () => {
 	});
 
 	test("preseeded json is listed with name/recordedAt/text", async () => {
-		const listenDir = path.join(isoHome, "listen");
+		const listenDir = path.join(fixture!.home, "listen");
 		await fsp.mkdir(listenDir, { recursive: true });
 		await fsp.writeFile(
 			path.join(listenDir, "2026-08-20-集成测试.json"),

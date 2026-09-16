@@ -9,20 +9,19 @@
  * 单一 serve 子进程 + 隔离 HOME（不触发 LLM 计费）：HOME 预置 default CLI 会话 + hr registry
  * agent 会话（list_sessions source 断言依赖 registry 启动时加载，必须 spawn 前 seed）。
  * 帧收集器：push 与 response 统一队列/等待者——杜绝「等 response 期间 push 被丢」。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）；
+ * 预置内容走它的 `seed` 钩子，在 spawn **之前**落盘。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
-let isolatedHome: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let url = "";
+let fixture: ServeFixture | undefined;
 
 interface FrameSource {
 	/** 按谓词取下一帧（先查队列，再注册等待者）；超时返回 undefined。 */
@@ -115,7 +114,7 @@ async function rawRequest(
 
 /** 单次命令往返（每条命令一条新连接，保证测试隔离）。 */
 async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> {
-	const { ws, frames } = await connect(url);
+	const { ws, frames } = await connect(fixture!.url);
 	try {
 		return await rawRequest(ws, frames, command as Record<string, unknown>, timeoutMs);
 	} finally {
@@ -141,7 +140,7 @@ async function waitPushEvent(
 
 describe("协议批 B-1 — steer 事件回显", () => {
 	test("steer 命令后 serve 推 progress 帧（steer 标记 + 文本），且命令成功", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			await request(ws, frames, { type: "steer", message: "转向测试：换个角度回答" });
 
@@ -164,7 +163,7 @@ describe("协议批 B-1 — steer 事件回显", () => {
 
 describe("协议批 B-2 — queue 完整态", () => {
 	test("get_state 带排队文本；cancel_queued 取消并清空（LIFO）", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			// 排空此前测试残留的排队（B-1 steer 未消费会留在队列里），直到 cancelled:false
 			for (;;) {
@@ -202,7 +201,7 @@ describe("协议批 B-2 — queue 完整态", () => {
 
 describe("协议批 B-3 — list_commands 命令表", () => {
 	test("返回 TUI 命令表：≥ W1 硬编码 6 个 + name/description 字段", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			const result = (await request(ws, frames, { type: "list_commands" })) as {
 				commands: { name: string; description: string }[];
@@ -228,7 +227,7 @@ describe("协议批 B-3 — list_commands 命令表", () => {
 
 describe("协议批 B-4 — 错误码枚举", () => {
 	test("未知命令：response error 升级为 { code, message }（not_implemented）", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			const resp = (await rawRequest(ws, frames, { type: "no_such_command_xyz" })) as Frame;
 			expect(resp.ok).toBe(false);
@@ -242,7 +241,7 @@ describe("协议批 B-4 — 错误码枚举", () => {
 	});
 
 	test("旧调用方兼容：已知命令的 string error 仍可用（如未知 agent 定向）", async () => {
-		const { ws, frames } = await connect(url);
+		const { ws, frames } = await connect(fixture!.url);
 		try {
 			const resp = (await rawRequest(ws, frames, { type: "get_skills", sessionId: "no-such-agent" })) as Frame;
 			expect(resp.ok).toBe(false);
@@ -318,7 +317,7 @@ describe("W3 D1 — serve get_stats 只读命令", () => {
 	});
 
 	test("list_sessions: 每条带 source 字段（cli=default 根 / agent=registry agent）", async () => {
-		// 预置会话在 beforeAll 里 seed（registry 启动时加载，不能中途写）
+		// 预置会话在 spawn 前 seed（registry 启动时加载，不能中途写）
 		const res = await sendCommand({ type: "list_sessions" }, 90_000);
 		expect(res.ok).toBe(true);
 		const sessions = ((res.result ?? {}) as { sessions?: { agentId: string; source: string }[] }).sessions ?? [];
@@ -330,12 +329,19 @@ describe("W3 D1 — serve get_stats 只读命令", () => {
 });
 
 beforeAll(async () => {
-	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-proto-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
+	fixture = await spawnServeFixture({ homePrefix: "omp-serve-proto-", seed: seedHome });
+}, SERVE_BOOT_BUDGET_MS);
 
+afterAll(async () => {
+	await fixture?.dispose();
+});
+
+/**
+ * 把预置会话 / registry 写进夹具的隔离 HOME。由 `spawnServeFixture` 在 `Bun.spawn` **之前** await
+ * —— serve 启动即读 registry，晚于 spawn 写只剩竞态。
+ */
+async function seedHome(home: string): Promise<void> {
 	// W3 D2：预置 default 根 CLI 会话 + hr registry agent 会话（serve 启动时加载 registry，必须在此 seed）
-	const home = isolatedHome;
 	const cliDir = path.join(home, ".cornfield", "agent", "sessions", "--work--demo--", "by-date", "2026-08-18");
 	await fs.mkdir(cliDir, { recursive: true });
 	await Bun.write(
@@ -375,30 +381,4 @@ beforeAll(async () => {
 			title: "hr session",
 		})}\n`,
 	);
-
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = 57000 + Math.floor(Math.random() * 8000);
-	proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" } },
-	);
-	url = (await waitForServe(proc, port, 60_000)).url;
-}, 90_000);
-
-afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	await fs.rm(isolatedHome, { recursive: true, force: true });
-});
+}
