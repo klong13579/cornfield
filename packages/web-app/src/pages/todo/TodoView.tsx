@@ -1,20 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentTodoDto, AgentTodoStatusDto } from "../../lib/pi-client-api";
+import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
+	type AgentTodoEditDraft,
+	type AgentTodoEditPatch,
 	type AgentTodoFilter,
 	ALL_TODOS,
+	applyTodoPatch,
 	bindableProjects,
 	bindingLabelOf,
+	canDefer,
+	canTransition,
 	countsOf,
+	DEFER_PRESETS,
+	deferredPatch,
+	dueBadgeOf,
+	dueLabel,
+	editDraftOf,
 	filterAgentTodos,
 	filterOptionsOf,
-	isTerminal,
+	PRIORITY_LABELS,
+	PRIORITY_VALUES,
 	type ProjectRegistryView,
+	patchOfDraft,
 	projectRegistryOf,
 	sameFilter,
+	serveVerdictOf,
 	sortAgentTodos,
+	statusActionsOf,
 } from "./agent-todo-logic";
 
 /** Agent-owned Todo 工作台；Project 仅作为筛选维度，不读取独立项目台账。 */
@@ -82,19 +96,52 @@ const STATUS_LABEL: Record<AgentTodoStatusDto, string> = {
 	cancelled: "已取消",
 };
 
+/** 状态按钮文案。按钮集合由 {@link statusActionsOf} 决定，这里只说每个目标叫什么。 */
+const STATUS_ACTION_LABELS: Record<AgentTodoStatusDto, string> = {
+	open: "退回",
+	in_progress: "开始",
+	completed: "完成",
+	cancelled: "取消",
+};
+
+const STATUS_ACTION_TITLES: Record<AgentTodoStatusDto, string> = {
+	open: "退回未开始",
+	in_progress: "标为进行中",
+	completed: "标为已完成",
+	cancelled: "取消这条任务（终态，不可重开）",
+};
+
+/** 同一时刻只开一个面板：行上展开的东西归那一行所有，不跨行共存。 */
+type TodoPanel = { kind: "edit"; id: string; draft: AgentTodoEditDraft } | { kind: "defer"; id: string };
+
+/**
+ * 一次写入失败。
+ *
+ * 带 `todoId` = 属于那一条（就地显示）；没有 = 与具体某条无关（横幅）。
+ * 两种位置，同一份事实 —— 不分成两套状态，否则「哪条错了」会有两个答案。
+ */
+interface WriteFailure {
+	message: string;
+	code?: string;
+	todoId?: string;
+}
+
 export function AgentTodoBoard(): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const [title, setTitle] = useState("");
 	const [projectId, setProjectId] = useState("");
 	const [filter, setFilter] = useState<AgentTodoFilter>(ALL_TODOS);
-	const [error, setError] = useState<string | null>(null);
+	const [panel, setPanel] = useState<TodoPanel | null>(null);
+	const [failure, setFailure] = useState<WriteFailure | null>(null);
 	const [busy, setBusy] = useState(false);
 
 	const todos = view.agentTodos;
 	// registry 三态（读到 / 还没读到 / 读不出来）—— 绑定标签与选择器都靠它区分「没有」与「不知道」。
 	const registry = projectRegistryOf(view);
 	const owner = view.activeAgentId ?? "default";
+	// 相对文案（「已过期 3 天」）按渲染时刻取一次即可：它精确到分钟，没有谁需要它逐秒跳。
+	const now = Date.now();
 
 	const options = useMemo(() => filterOptionsOf(registry, todos ?? []), [registry, todos]);
 	const visible = useMemo(() => sortAgentTodos(filterAgentTodos(todos ?? [], filter)), [todos, filter]);
@@ -106,16 +153,38 @@ export function AgentTodoBoard(): React.JSX.Element {
 		if (!options.some(option => sameFilter(option.filter, filter))) setFilter(ALL_TODOS);
 	}, [options, filter]);
 
-	const run = async (action: () => Promise<unknown>): Promise<void> => {
+	// 换 Agent = 换了一块板子：上一个 Agent 的写失败不属于新板子，留着会让新板子背一条与它无关的错。
+	useEffect(() => {
+		setFailure(null);
+	}, [owner]);
+
+	// 面板属于板上某一条。它从板上消失（换 Agent 作废 / 别处删掉 / 读回来就没有）时收起，
+	// 不留一条已经不属于任何行的草稿在后台等着被下一次点击唤醒。
+	useEffect(() => {
+		if (panel === null) return;
+		if (todos === undefined || !todos.some(todo => todo.id === panel.id)) setPanel(null);
+	}, [todos, panel]);
+
+	/** 一次写入。失败**不吞**：serve 的原话留在这条 Todo 上，板子不动。 */
+	const run = async (todoId: string | undefined, action: () => Promise<unknown>): Promise<void> => {
 		setBusy(true);
-		setError(null);
+		setFailure(null);
 		try {
 			await action();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
+			const verdict = serveVerdictOf(err);
+			setFailure({ ...verdict, ...(todoId === undefined ? {} : { todoId }) });
 		} finally {
 			setBusy(false);
 		}
+	};
+
+	/** 存一条补丁。**成功才收起面板**：失败时草稿必须留着，否则用户得把改过的内容重敲一遍。 */
+	const savePatch = (todo: AgentTodoDto, patch: AgentTodoEditPatch): void => {
+		void run(todo.id, async () => {
+			await store.saveAgentTodo(applyTodoPatch(todo, patch));
+			setPanel(null);
+		});
 	};
 
 	const add = (): void => {
@@ -133,14 +202,14 @@ export function AgentTodoBoard(): React.JSX.Element {
 			updatedAt: 0,
 			...(projectId === "" ? {} : { projectId }),
 		};
-		void run(async () => {
+		void run(undefined, async () => {
 			await store.saveAgentTodo(todo);
 			setTitle("");
 		});
 	};
 
 	const setStatus = (todo: AgentTodoDto, status: AgentTodoStatusDto): void => {
-		void run(() => store.saveAgentTodo({ ...todo, status }));
+		void run(todo.id, () => store.saveAgentTodo({ ...todo, status }));
 	};
 
 	if (!view.connected) {
@@ -159,6 +228,10 @@ export function AgentTodoBoard(): React.JSX.Element {
 	if (todos === undefined) {
 		return <Empty text="读取 Todo 板…" />;
 	}
+
+	// 贴在某条上的失败，只有在**那条真的渲染出来**时才贴得住。它被筛掉 / 已被删除时退回横幅，
+	// 否则一次真实的写入失败会凭空消失。
+	const bannerFailure = failure && !visible.some(todo => todo.id === failure.todoId) ? failure : null;
 
 	return (
 		<div>
@@ -211,82 +284,264 @@ export function AgentTodoBoard(): React.JSX.Element {
 				</button>
 			</div>
 
-			{error && (
-				<div className="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
-					{error}
-				</div>
-			)}
+			{bannerFailure && <FailureBox failure={bannerFailure} onDismiss={() => setFailure(null)} />}
 
 			{todos.length === 0 && <Empty text={`${owner} 还没有长期任务。上面加一条。`} />}
 			{todos.length > 0 && visible.length === 0 && <Empty text="这个筛选下没有任务。" />}
 
 			{visible.map(todo => {
 				const binding = bindingLabelOf(todo, registry);
-				const done = todo.status === "completed";
+				const due = dueLabel(todo);
+				const badge = dueBadgeOf(todo, now);
+				const panelFor = panel?.id === todo.id ? panel : null;
+				const pinned = failure?.todoId === todo.id ? failure : null;
+				// 「完成」由左侧复选框承担（列表里最顺手的位置），操作组只渲染其余合法转移 ——
+				// 同一个动作不给两个按钮，否则用户会以为它们不一样。
+				const actions = statusActionsOf(todo.status).filter(target => target !== "completed");
 				return (
-					<div
-						key={todo.id}
-						className="group flex items-start gap-2.5 border-b border-hairline px-1 py-2.5 first:border-t hover:bg-surface"
-					>
-						<input
-							type="checkbox"
-							checked={done}
-							// completed / cancelled 是终态，不可重开（§37）：能点但永远失败的选择不是选择。
-							disabled={busy || isTerminal(todo.status)}
-							onChange={() => setStatus(todo, "completed")}
-							className="mt-[4px] size-4 shrink-0 accent-[var(--color-accent)]"
-							aria-label={`完成 ${todo.title}`}
-						/>
-						<div className="min-w-0 flex-1">
-							<div
-								className={`text-[14px] ${todo.status === "completed" ? "text-ink-faint line-through" : todo.status === "cancelled" ? "text-ink-faint" : "text-ink"}`}
-							>
-								{todo.title}
+					<div key={todo.id} className="border-b border-hairline first:border-t">
+						<div className="group flex items-start gap-2.5 px-1 py-2.5 hover:bg-surface">
+							<input
+								type="checkbox"
+								checked={todo.status === "completed"}
+								// 终态不可重开（§37）：勾不上就是勾不上，不做「点了才被 serve 拒绝」的控件。
+								disabled={busy || !canTransition(todo.status, "completed")}
+								onChange={() => setStatus(todo, "completed")}
+								className="mt-[4px] size-4 shrink-0 accent-[var(--color-accent)]"
+								aria-label={`完成 ${todo.title}`}
+							/>
+							<div className="min-w-0 flex-1">
+								<div
+									className={`text-[14px] ${todo.status === "completed" ? "text-ink-faint line-through" : todo.status === "cancelled" ? "text-ink-faint" : "text-ink"}`}
+								>
+									{todo.title}
+								</div>
+								{todo.notes && (
+									<div className="mt-0.5 whitespace-pre-wrap text-[12px] text-ink-muted">{todo.notes}</div>
+								)}
+								<div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[11.5px] text-ink-faint">
+									<span>{STATUS_LABEL[todo.status]}</span>
+									<span title={`优先级 ${PRIORITY_LABELS[todo.priority]}`}>
+										{PRIORITY_LABELS[todo.priority]}
+									</span>
+									<span className={binding.warning ? "text-danger" : ""} title={binding.title}>
+										{binding.label}
+									</span>
+									{due && (
+										<span className={badge ? "text-danger" : ""} title={badge?.title}>
+											{due}
+											{badge ? ` · ${badge.label}` : ""}
+										</span>
+									)}
+									<span title={`来源 ${todo.source}`}>来源 {todo.source}</span>
+									{todo.sessionRefs.length > 0 && <span>{todo.sessionRefs.length} 个会话推进过</span>}
+								</div>
 							</div>
-							{todo.notes && <div className="mt-0.5 text-[12px] text-ink-muted">{todo.notes}</div>}
-							<div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[11.5px] text-ink-faint">
-								<span>{STATUS_LABEL[todo.status]}</span>
-								<span className={binding.warning ? "text-danger" : ""} title={binding.title}>
-									{binding.label}
-								</span>
-								<span title={`来源 ${todo.source}`}>来源 {todo.source}</span>
-								{todo.sessionRefs.length > 0 && <span>{todo.sessionRefs.length} 个会话推进过</span>}
-							</div>
-						</div>
-						<div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-							{todo.status === "open" && (
+							<div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
 								<button
 									type="button"
 									className="cbtn"
 									disabled={busy}
-									onClick={() => setStatus(todo, "in_progress")}
+									title="编辑标题 / 备注 / 优先级 / 截止时间"
+									onClick={() =>
+										setPanel(
+											panelFor?.kind === "edit"
+												? null
+												: { kind: "edit", id: todo.id, draft: editDraftOf(todo) },
+										)
+									}
 								>
-									开始
+									编辑
 								</button>
-							)}
-							{!isTerminal(todo.status) && (
+								{canDefer(todo) && (
+									<button
+										type="button"
+										className="cbtn"
+										disabled={busy}
+										title="延期：只改截止时间，不动其余字段"
+										onClick={() =>
+											setPanel(panelFor?.kind === "defer" ? null : { kind: "defer", id: todo.id })
+										}
+									>
+										延期
+									</button>
+								)}
+								{actions.map(target => (
+									<button
+										key={target}
+										type="button"
+										className="cbtn"
+										disabled={busy}
+										title={STATUS_ACTION_TITLES[target]}
+										onClick={() => setStatus(todo, target)}
+									>
+										{STATUS_ACTION_LABELS[target]}
+									</button>
+								))}
 								<button
 									type="button"
-									className="cbtn"
+									className="cbtn text-danger"
 									disabled={busy}
-									onClick={() => setStatus(todo, "cancelled")}
+									onClick={() => void run(todo.id, () => store.deleteAgentTodo(todo.id))}
+									aria-label={`删除 ${todo.title}`}
 								>
-									取消
+									删除
 								</button>
-							)}
-							<button
-								type="button"
-								className="cbtn text-danger"
-								disabled={busy}
-								onClick={() => void run(() => store.deleteAgentTodo(todo.id))}
-								aria-label={`删除 ${todo.title}`}
-							>
-								删除
-							</button>
+							</div>
 						</div>
+
+						{panelFor?.kind === "edit" && (
+							<TodoEditor
+								draft={panelFor.draft}
+								busy={busy}
+								onDraft={draft => setPanel({ kind: "edit", id: todo.id, draft })}
+								onSave={patch => savePatch(todo, patch)}
+								onCancel={() => setPanel(null)}
+							/>
+						)}
+
+						{panelFor?.kind === "defer" && (
+							<div className="mb-1 flex flex-wrap items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[12px] text-ink-faint">
+								<span>延期到</span>
+								{DEFER_PRESETS.map(preset => (
+									<button
+										key={preset.key}
+										type="button"
+										className="cbtn"
+										disabled={busy}
+										onClick={() => savePatch(todo, deferredPatch(todo, Date.now(), preset.days))}
+									>
+										{preset.label}
+									</button>
+								))}
+								<span>只改截止时间，其余字段照原样送回</span>
+								<span className="flex-1" />
+								<button type="button" className="cbtn" disabled={busy} onClick={() => setPanel(null)}>
+									收起
+								</button>
+							</div>
+						)}
+
+						{pinned && <FailureBox failure={pinned} onDismiss={() => setFailure(null)} />}
 					</div>
 				);
 			})}
+		</div>
+	);
+}
+
+/**
+ * 一条 Todo 的编辑面。
+ *
+ * 校验在**这里**做（{@link patchOfDraft}），因为它只依赖草稿：放到保存回调和保存按钮上的
+ * 「问题提示」会变成两份状态，其中一份迟早过期。本地能判的只有空标题与解析不出的时间，
+ * 其余留给 serve —— 它的判决由父级原样显示。
+ */
+function TodoEditor({
+	draft,
+	busy,
+	onDraft,
+	onSave,
+	onCancel,
+}: {
+	draft: AgentTodoEditDraft;
+	busy: boolean;
+	onDraft: (draft: AgentTodoEditDraft) => void;
+	onSave: (patch: AgentTodoEditPatch) => void;
+	onCancel: () => void;
+}): React.JSX.Element {
+	const checked = patchOfDraft(draft);
+	const patch = checked.kind === "ok" ? checked.patch : undefined;
+	return (
+		<div className="mb-1 rounded-md border border-hairline bg-surface px-3 py-2.5">
+			<div className="flex flex-col gap-2">
+				<label className="flex items-center gap-2 text-[12px] text-ink-faint">
+					<span className="w-12 shrink-0">标题</span>
+					<input
+						value={draft.title}
+						onChange={e => onDraft({ ...draft, title: e.target.value })}
+						className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2 py-1 text-[13px] text-ink outline-none"
+					/>
+				</label>
+				<label className="flex items-start gap-2 text-[12px] text-ink-faint">
+					<span className="w-12 shrink-0 pt-1">备注</span>
+					<textarea
+						value={draft.notes}
+						rows={2}
+						onChange={e => onDraft({ ...draft, notes: e.target.value })}
+						placeholder="留空 = 没有备注"
+						className="min-w-0 flex-1 resize-y rounded-md border border-hairline bg-surface px-2 py-1 text-[12.5px] text-ink outline-none placeholder:text-ink-faint"
+					/>
+				</label>
+				<label className="flex items-center gap-2 text-[12px] text-ink-faint">
+					<span className="w-12 shrink-0">优先级</span>
+					<select
+						value={draft.priority}
+						onChange={e => onDraft({ ...draft, priority: e.target.value as AgentTodoPriorityDto })}
+						className="rounded-md border border-hairline bg-surface px-2 py-1 text-[12.5px] text-ink"
+					>
+						{PRIORITY_VALUES.map(value => (
+							<option key={value} value={value}>
+								{PRIORITY_LABELS[value]}
+							</option>
+						))}
+					</select>
+				</label>
+				<div className="flex items-center gap-2 text-[12px] text-ink-faint">
+					<span className="w-12 shrink-0">截止</span>
+					<input
+						type="datetime-local"
+						value={draft.dueText}
+						onChange={e => onDraft({ ...draft, dueText: e.target.value })}
+						className="rounded-md border border-hairline bg-surface px-2 py-1 text-[12.5px] text-ink outline-none"
+					/>
+					{draft.dueText !== "" && (
+						<button type="button" className="cbtn" onClick={() => onDraft({ ...draft, dueText: "" })}>
+							清除
+						</button>
+					)}
+					<span>按本地时间</span>
+				</div>
+			</div>
+
+			<div className="mt-2 flex items-center gap-2">
+				<button
+					type="button"
+					className="cbtn"
+					disabled={busy || patch === undefined}
+					onClick={() => patch && onSave(patch)}
+				>
+					保存
+				</button>
+				<button type="button" className="cbtn" disabled={busy} onClick={onCancel}>
+					取消
+				</button>
+				{patch === undefined && (
+					<span className="text-[11.5px] text-danger">{checked.kind === "invalid" ? checked.problem : ""}</span>
+				)}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * 写入失败的展示 —— serve 的**原话**。
+ *
+ * 不做「翻译成友好文案」：它拒这条写入的理由（owner 不对、Project 没声明过、状态非法）
+ * 是用户唯一能据以修的东西，改写成一句「保存失败」就把它丢了。
+ */
+function FailureBox({ failure, onDismiss }: { failure: WriteFailure; onDismiss: () => void }): React.JSX.Element {
+	return (
+		<div className="mb-2 mt-1 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+			<div className="flex items-start gap-2">
+				<div className="min-w-0 flex-1">
+					<span className="break-all">{failure.message}</span>
+					{failure.code && <span className="ml-2 font-mono text-[11px] text-ink-muted">{failure.code}</span>}
+				</div>
+				<button type="button" className="cbtn shrink-0" onClick={onDismiss}>
+					知道了
+				</button>
+			</div>
 		</div>
 	);
 }
