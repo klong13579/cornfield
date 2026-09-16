@@ -22,10 +22,10 @@ const CAPTURE_LINES = 200;
 export type ServeProc = ReturnType<typeof Bun.spawn>;
 
 /**
- * 排空子进程的 stdout/stderr，返回读取当前捕获内容的函数。
+ * 排空子进程的 stdout/stderr，返回读取当前捕获内容的函数 + 排空结束的信号。
  * 调用方在超时/退出路径上用它报出真实原因。
  */
-function captureServeOutput(proc: ServeProc): () => string {
+function captureServeOutput(proc: ServeProc): { read: () => string; settled: Promise<void> } {
 	const lines: string[] = [];
 	const pump = async (stream: unknown): Promise<void> => {
 		if (!stream || typeof (stream as ReadableStream<Uint8Array>)[Symbol.asyncIterator] !== "function") return;
@@ -42,9 +42,8 @@ function captureServeOutput(proc: ServeProc): () => string {
 			/* 流已关闭 */
 		}
 	};
-	void pump(proc.stdout);
-	void pump(proc.stderr);
-	return () => lines.join("\n");
+	const settled = Promise.allSettled([pump(proc.stdout), pump(proc.stderr)]).then(() => undefined);
+	return { read: () => lines.join("\n"), settled };
 }
 
 export interface ServeHandle {
@@ -55,11 +54,14 @@ export interface ServeHandle {
 }
 
 export async function waitForServe(proc: ServeProc, port: number, timeoutMs = 60_000): Promise<ServeHandle> {
-	const output = captureServeOutput(proc);
-	const tail = (): string => output().slice(-2000) || "(子进程没有输出)";
+	const capture = captureServeOutput(proc);
+	const tail = (): string => capture.read().slice(-2000) || "(子进程没有输出)";
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		if (proc.exitCode !== null) {
+			// 退出时管道里可能还有没被读走的行：给排空一点时间再取，否则会把真实死因报成
+			// 「没有输出」（2026-09-16 实测：exit code=1 却带不出任何原因）。
+			await Promise.race([capture.settled, Bun.sleep(300)]);
 			throw new Error(`serve exited code=${proc.exitCode}; output:\n${tail()}`);
 		}
 		try {
