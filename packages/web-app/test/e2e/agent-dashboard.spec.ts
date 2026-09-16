@@ -216,12 +216,46 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 				.click();
 			await page.waitForTimeout(800);
 			const providerOptions = await page.locator("select").first().locator("option").allTextContents();
+			// Provider 下拉的初始态：React state 写死 "anthropic"，与真实 provider 列表是否对得上
+			const providerSelected = await page.evaluate(() => {
+				const sels = Array.from(document.querySelectorAll("select"));
+				return sels.map(s => ({
+					value: (s as HTMLSelectElement).value,
+					selectedIndex: (s as HTMLSelectElement).selectedIndex,
+					optionCount: s.options.length,
+				}));
+			});
 			const modelScopeProbe = {
 				providerOptions,
 				narwalPlanVisible: providerOptions.includes("narwal-plan"),
+				selects: providerSelected,
 				detailAgentConfig: await fsp.readFile(perAgentConfig, "utf8"),
 				defaultAgentConfig: await fsp.readFile(defaultAgentConfig, "utf8"),
 			};
+
+			// ── 4a-2. 模型配置写作用域（只记录）：选一个真实 provider+model，看哪个文件变了；
+			//         再改 Thinking，看有没有落盘（set_thinking_level 是否 persist）──
+			const projectConfig = path.join(agentDir, ".cornfield", "config.yml");
+			const readBoth = async (): Promise<{ detail: string; project: string }> => ({
+				detail: await fsp.readFile(perAgentConfig, "utf8"),
+				project: await fsp.readFile(projectConfig, "utf8"),
+			});
+			const beforeWrite = await readBoth();
+			// Provider 初始 state 是 "anthropic"（AgentDetailView.tsx:49），但列表里没有它 ——
+			// 所以这里探 DOM 里真正选中的那一项（index 0）来触发 onChange，避开名字写死的脆断。
+			await page.locator("select").first().selectOption({ index: 0 }, { timeout: 15_000 });
+			await page.waitForTimeout(600);
+			const modelOptions = await page.locator("select").nth(1).locator("option").allTextContents();
+			if (modelOptions.length > 0) {
+				await page.locator("select").nth(1).selectOption({ index: 0 }, { timeout: 15_000 });
+			}
+			await page.waitForTimeout(2500);
+			const afterModelWrite = await readBoth();
+			await page.locator("select").nth(2).selectOption("high", { timeout: 15_000 });
+			await page.waitForTimeout(2500);
+			const afterThinkingWrite = await readBoth();
+			const modelWriteProbe = { modelOptions, beforeWrite, afterModelWrite, afterThinkingWrite };
+			await page.screenshot({ path: path.join(SHOT_DIR, "模型配置-after-write.png"), fullPage: true });
 
 			// ── 4b. Prompts tab 实际打开几个源（只记录）：.omp/SYSTEM.md 预期不存在（skeleton 写的是 .cornfield/SYSTEM.md）──
 			await page
@@ -269,6 +303,7 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 						initOut: initOut.trim(),
 						perAgentConfigAfter: await fsp.readFile(perAgentConfig, "utf8"),
 						modelScopeProbe,
+						modelWriteProbe,
 						promptProbe,
 						observations,
 						allConsoleErrors: errors,
