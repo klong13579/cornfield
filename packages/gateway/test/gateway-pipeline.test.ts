@@ -224,6 +224,36 @@ function installFetchSpy() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// HOME isolation
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * A started Gateway registers every account's agentDir in
+ * `$HOME/.cornfield/agent/registry.json` (Gateway#registerDingTalkChannels →
+ * registerAgent). The accounts in this file live under `os.tmpdir()`, so
+ * without pinning HOME the run rewrites the developer's real registry with temp
+ * paths and wipes the cached `displayName` / `workspaceVersion` of every
+ * account it touches.
+ *
+ * Pins HOME at a throwaway dir for the duration of one test; `restore()` puts
+ * the real HOME back (see AGENTS.md > "Test isolation patterns").
+ */
+async function isolateHome(): Promise<{ restore: () => Promise<void> }> {
+	const savedHome = process.env.HOME;
+	const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gw-home-"));
+	process.env.HOME = homeDir;
+	return {
+		restore: async () => {
+			// Restore HOME before removing the dir so nothing can write into a
+			// half-deleted home if a stray async task outlives the test.
+			if (savedHome === undefined) delete process.env.HOME;
+			else process.env.HOME = savedHome;
+			await fs.rm(homeDir, { recursive: true, force: true });
+		},
+	};
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Tests: message pipeline
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -231,8 +261,10 @@ describe("Gateway message pipeline", () => {
 	let rootDir: string;
 	let rpcPath: string;
 	let fakeChannels: Map<string, FakeDingTalkChannel>;
+	let home: { restore: () => Promise<void> } | undefined;
 
 	beforeEach(async () => {
+		home = await isolateHome();
 		rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gw-pipeline-"));
 		rpcPath = path.join(rootDir, "fake-rpc");
 		await Bun.write(rpcPath, FAKE_RPC_SCRIPT);
@@ -241,6 +273,7 @@ describe("Gateway message pipeline", () => {
 	});
 
 	afterEach(async () => {
+		await home?.restore();
 		await fs.rm(rootDir, { recursive: true, force: true }).catch(() => {});
 	});
 
@@ -356,8 +389,10 @@ describe("Gateway slash command pipeline", () => {
 	let rpcPath: string;
 	let fakeChannels: Map<string, FakeDingTalkChannel>;
 	let fetchSpy: ReturnType<typeof spyOn> | undefined;
+	let home: { restore: () => Promise<void> } | undefined;
 
 	beforeEach(async () => {
+		home = await isolateHome();
 		rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-gw-slash-"));
 		rpcPath = path.join(rootDir, "fake-rpc");
 		await Bun.write(rpcPath, FAKE_SLASH_RPC_SCRIPT);
@@ -368,6 +403,7 @@ describe("Gateway slash command pipeline", () => {
 
 	afterEach(async () => {
 		fetchSpy?.mockRestore();
+		await home?.restore();
 		await fs.rm(rootDir, { recursive: true, force: true }).catch(() => {});
 	});
 

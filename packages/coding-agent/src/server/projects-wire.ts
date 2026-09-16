@@ -11,10 +11,22 @@
  *   - 文件不存在 → 空数组（「没声明过」是明确的事实）；
  *   - 文件在但损坏 / 版本不符 / 条目形状不对 → **抛**，由命令回 ok:false。
  * 把后者降级成空列表，会把「声明过但读坏了」显示成「没声明过」—— 用户会以为自己的项目消失了。
+ *
+ * 写面（`set_project` / `delete_project`）同样只搬存储的判决：谁占用 root、版本、读写失败都由
+ * 存储说了算，这里只补上「调用方给进来的形状本身不成立」这一层（见 `projectInputError`），
+ * 并把「删一个本来就不在的 Project」当成错误、而不是一次成功的空删除。
  */
 
-import type { ProjectListDto, ProjectRecordDto } from "@cornfield/wire";
-import { loadProjects, matchProjectForPath } from "../agent-domain/project-store";
+import * as path from "node:path";
+
+import type { ProjectDeleteDto, ProjectListDto, ProjectRecordDto, ProjectUpsertDto } from "@cornfield/wire";
+import {
+	loadProjects,
+	matchProjectForPath,
+	projectsFilePath,
+	removeProject,
+	upsertProject,
+} from "../agent-domain/project-store";
 import type { ProjectRecord } from "../agent-domain/types";
 
 /**
@@ -34,6 +46,78 @@ export async function readProjectContext(sessionCwd?: string): Promise<ProjectLi
 		if (match) result.currentProjectId = match.projectId;
 	}
 	return result;
+}
+
+/**
+ * 声明或更新一个 Project（`set_project`）：写入存储后回**存储里现在那一份**（root 已归一）。
+ *
+ * 不把发出去的输入原样当答复回：`root` 落盘时由存储做 `path.resolve`，回发送的那份就是在
+ * 告诉调用方一个盘上并不存在的路径。回读一次多读一遍文件，但答复与磁盘一致 —— 命令的
+ * 承诺是「现在存储里是这个」，不是「我发出去的是这个」。
+ *
+ * 不做任何静默改写：调用方给的名字就按原样落盘、原样回（要不要 trim 是调用方的事）。
+ */
+export async function declareProject(input: {
+	projectId: string;
+	name: string;
+	root: string;
+	defaultAgentId?: string;
+}): Promise<ProjectUpsertDto> {
+	const invalid = projectInputError(input);
+	if (invalid) throw new Error(invalid);
+
+	const record: ProjectRecord = { projectId: input.projectId, name: input.name, root: input.root };
+	if (input.defaultAgentId !== undefined) record.defaultAgentId = input.defaultAgentId;
+	await upsertProject(record);
+
+	const stored = (await loadProjects()).find(project => project.projectId === record.projectId);
+	if (!stored) {
+		throw new Error(
+			`Project "${record.projectId}" was written but is not in the store at "${projectsFilePath()}"; ` +
+				"the write did not land.",
+		);
+	}
+	return { project: toProjectRecordDto(stored) };
+}
+
+/**
+ * 删掉一个已声明的 Project（`delete_project`）。
+ *
+ * 存储的 `removeProject` 用布尔回答「它本来在不在」；**这里把「本来就不在」升成错误**：一次删除
+ * 的真实结果是「它消失了」，而「它本来就不在」不是这次调用的结果 —— 回一个成功，会让调用方把
+ * 别人的删除（或一个写错的名字）记成自己的。
+ */
+export async function dropProject(projectId: string): Promise<ProjectDeleteDto> {
+	if (projectId.trim() === "") throw new Error("projectId must not be empty.");
+	const removed = await removeProject(projectId);
+	if (!removed) throw new Error(`no Project declared with projectId "${projectId}"; nothing was removed.`);
+	return { projectId };
+}
+
+/**
+ * 调用方输入不成立时的判决文本；输入成立时返回 undefined。
+ *
+ * 这几条不是存储的义务，而是「这个命令的入参形状」：存储会照单全收 —— 空的 projectId 是一个
+ * 永远匹配不上、也读不回来的键；空的 root 会被 `path.resolve` 解析成 serve 进程自己的 cwd，
+ * 凭空把一个目录声明成项目。所以宁可 ok:false，也不写一条谁也读不懂的声明。
+ * 空串的 `defaultAgentId` 同理：缺省表示「没有默认 Agent」，空串两不像，不能被当成缺省读掉。
+ */
+function projectInputError(input: {
+	projectId: string;
+	name: string;
+	root: string;
+	defaultAgentId?: string;
+}): string | undefined {
+	if (input.projectId.trim() === "") return "projectId must not be empty.";
+	if (input.name.trim() === "") return "name must not be empty.";
+	if (input.root.trim() === "") return "root must not be empty.";
+	if (!path.isAbsolute(input.root)) {
+		return `root must be an absolute path (got "${input.root}"); a relative root would resolve against the serve process cwd.`;
+	}
+	if (input.defaultAgentId !== undefined && input.defaultAgentId.trim() === "") {
+		return "defaultAgentId must be a non-empty agent id; omit the field to declare no default agent.";
+	}
+	return undefined;
 }
 
 /** `ProjectRecord` → wire 投影：字段一一对应，缺省不补（没有 defaultAgentId 就是没有）。 */

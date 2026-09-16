@@ -26,7 +26,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IntercomBroker } from "@cornfield/gateway/src/intercom/broker-server";
-import { isEnoent } from "@cornfield/utils";
+import { getAgentDir, isEnoent } from "@cornfield/utils";
 import { IntercomClient } from "../../src/intercom-extension/broker/client";
 import { createIntercomRegistrationProbe } from "../../src/intercom-extension/child-session-edge";
 import {
@@ -77,6 +77,19 @@ async function waitFor(what: string, predicate: () => Promise<boolean> | boolean
 async function liveChildPids(): Promise<number[]> {
 	const sessions = await parent.listSessions({ timeoutMs: 5_000 });
 	return sessions.filter(session => session.parentId === PARENT_SESSION).map(session => session.pid);
+}
+
+/**
+ * The Agent home *this* process runs as.
+ *
+ * Read at call time, not from `getAgentDir()` alone: that is a module-load-time
+ * cache, and this file points `CORNFIELD_AGENT_DIR` at a temp dir in `beforeAll`.
+ * Handing the child the cached value would launch it as the developer's real
+ * Agent — right settings, real intercom broker, and a `parentId` nobody in this
+ * test is watching, so the child registers somewhere else entirely.
+ */
+function ownAgentDir(): string {
+	return process.env.CORNFIELD_AGENT_DIR?.trim() || getAgentDir();
 }
 
 function makeSupervisor(): ChildSessionSupervisor {
@@ -191,6 +204,7 @@ describeE2E("Session tree end to end with a real broker and the real binary", ()
 
 		try {
 			const { record, child } = await manager.delegate({
+				agentDir: ownAgentDir(),
 				cwd: repoRoot,
 				command: { bin: binary!, args: ["--mode", "wire-stdio"] },
 				delegationRole: "e2e",
@@ -206,9 +220,15 @@ describeE2E("Session tree end to end with a real broker and the real binary", ()
 				60_000,
 			);
 
-			// 2. It is a real cornfield session, answering the wire protocol.
-			const state = await child.request<{ sessionId?: string }>({ type: "get_state" }, { timeoutMs: 60_000 });
+			// 2. It is a real cornfield session, answering the wire protocol — and it is
+			// running as the Agent home this delegation named, not the one this process
+			// happens to have started from.
+			const state = await child.request<{ sessionId?: string; sessionFile?: string | null }>(
+				{ type: "get_state" },
+				{ timeoutMs: 60_000 },
+			);
 			expect(typeof state.sessionId).toBe("string");
+			expect(state.sessionFile?.startsWith(path.join(ownAgentDir(), "sessions"))).toBe(true);
 
 			// 3. Its own `started` report came back over the broker and was accepted.
 			const runId = record.runId;
@@ -251,12 +271,14 @@ describeE2E("Session tree end to end with a real broker and the real binary", ()
 
 		const alive = await first.delegate({
 			sessionId: "e2e-alive",
+			agentDir: ownAgentDir(),
 			cwd: repoRoot,
 			command: { bin: binary!, args: ["--mode", "wire-stdio"] },
 			delegationRole: "e2e",
 		});
 		const doomed = await first.delegate({
 			sessionId: "e2e-doomed",
+			agentDir: ownAgentDir(),
 			cwd: repoRoot,
 			command: { bin: binary!, args: ["--mode", "wire-stdio"] },
 			delegationRole: "e2e",
@@ -328,6 +350,7 @@ describeE2E("Session tree end to end with a real broker and the real binary", ()
 		});
 		const { record, child } = await manager.delegate({
 			sessionId: "e2e-refusal",
+			agentDir: ownAgentDir(),
 			cwd: repoRoot,
 			command: { bin: binary!, args: ["--mode", "wire-stdio"] },
 			delegationRole: "e2e",

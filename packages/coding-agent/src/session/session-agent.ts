@@ -25,7 +25,11 @@
  * `unverified` capabilities are reported, never absorbed as valid (see `default-agent`).
  */
 
-import { logger } from "@cornfield/utils";
+import * as os from "node:os";
+import * as path from "node:path";
+
+import { isEnoent, logger, resolveConfigRootDir } from "@cornfield/utils";
+import { YAML } from "bun";
 import {
 	type AgentDirectoryEntry,
 	findAgentRecord,
@@ -34,17 +38,27 @@ import {
 	toCandidates,
 } from "../agent-domain/agent-directory";
 import {
+	AGENT_CONFIG_FILE_NAME,
 	type AgentCapability,
 	type AgentSelectionFailure,
 	type DefaultAgentDeclarations,
+	type DefaultAgentSource,
 	describeAgentSelectionFailure,
 	describeAgentSource,
+	firstDeclaredRung,
 	isDefaultAgentSource,
 	type ResolvedAgentRef,
 	resolveDefaultAgent,
 } from "../agent-domain/default-agent";
 import { loadProjects, matchProjectForPath } from "../agent-domain/project-store";
 import type { AgentId, AgentRecord, WorkspaceContext } from "../agent-domain/types";
+import { type SettingValue, USER_GLOBAL_DEFAULT_AGENT_KEY } from "../config/settings-schema";
+import {
+	readWorkspaceDeclaration,
+	type WorkspaceDeclaration,
+	type WorkspaceDeclarationRead,
+	workspaceFilePath,
+} from "../skeleton/workspace";
 import type { SessionHeader } from "./session-manager";
 
 /**
@@ -93,6 +107,17 @@ export type SessionAgentFailure =
 			source: ResolvedAgentRef["source"];
 			processAgentId: AgentId;
 			processAgentDir: string;
+	  }
+	| {
+			/**
+			 * A declaration exists but cannot be interpreted, so the Agent it declares is unknown.
+			 * Reading it as "nothing declared" would silently demote the resolution to a weaker rung.
+			 */
+			kind: "agent-declaration-unreadable";
+			source: Extract<DefaultAgentSource, "workspace" | "user">;
+			/** The file that could not be read. */
+			path: string;
+			reason: string;
 	  };
 
 /** Thrown when a session's Agent cannot be resolved. Carries the machine-readable reason. */
@@ -116,7 +141,6 @@ export class SessionAgentError extends Error {
 export async function resolveSessionAgent(input: ResolveSessionAgentInput): Promise<ResolvedSessionAgent> {
 	const directory = await loadAgentDirectory();
 	const agents = directory.map(entry => entry.agent);
-	const processAgent = resolveProcessAgent(directory, input);
 	const persisted = readPersistedRef(input.sessionHeader);
 
 	if (input.pinnedAgentId && persisted && input.pinnedAgentId !== persisted.agentId) {
@@ -133,15 +157,35 @@ export async function resolveSessionAgent(input: ResolveSessionAgentInput): Prom
 
 	const projects = await loadProjects();
 	const project = matchProjectForPath(projects, input.cwd);
+
+	// The declaration of the workspace this process runs in. It has two consumers — rung 3
+	// below, and the derived `WorkspaceContext` that mirrors it — so it is read once, here,
+	// carrying on the process's own entry the way the registry projection does for a
+	// registered agentDir (an unregistered one must yield the same context).
+	const processDirectory = resolveProcessAgent(directory, input);
+	const workspace = await readProcessWorkspaceDeclaration(processDirectory, input.processAgentDir);
+	const processAgent: AgentDirectoryEntry =
+		workspace.state === "declared" ? { ...processDirectory, declaration: workspace.declaration } : processDirectory;
+
 	const declarations: DefaultAgentDeclarations = {
 		sessionAgentId: input.pinnedAgentId ?? persisted?.agentId,
 		projectDefaultAgentId: project?.defaultAgentId,
-		// Workspace and user-global defaults have no authority yet; the rungs stay
-		// implemented and injected so wiring them needs no policy change.
-		workspaceDefaultAgentId: undefined,
-		userDefaultAgentId: undefined,
 		bootstrapAgentId: processAgent.agent.agentId,
 	};
+
+	// Rungs 3 and 4 each sit behind a file, and only the policy can say whether a file
+	// matters. The declaration is read for the context regardless of which rung wins (the
+	// context mirrors the declaration *in force*, exactly as a registered agentDir's does),
+	// but neither its value nor its unreadable file may decide anything before the policy
+	// reaches that rung: fill the rungs in order and stop at the first one that declares.
+	if (firstDeclaredRung(declarations) === undefined) {
+		if (workspace.state === "invalid") throw unreadableWorkspaceDeclaration(workspace.path, workspace.reason);
+		const declaredDefault = workspace.state === "declared" ? workspace.declaration.defaultAgentId : undefined;
+		if (declaredDefault !== undefined) declarations.workspaceDefaultAgentId = declaredDefault;
+	}
+	if (firstDeclaredRung(declarations) === undefined) {
+		declarations.userDefaultAgentId = await readUserGlobalDefaultAgentId();
+	}
 
 	const resolution = resolveDefaultAgent({
 		declarations,
@@ -230,6 +274,163 @@ function resolvedDeclaration(
 	if (candidateId === undefined) return undefined;
 	const entry = findAgentRecord(directory, candidateId) ?? processAgent;
 	return entry.agent.agentId === candidateId ? entry.declaration : undefined;
+}
+
+/**
+ * What the process's own agentDir declares, in the three states `readWorkspaceDeclaration`
+ * defines — with the uninterpretable one carrying the path it failed on. The read never
+ * throws: whether "this declaration cannot be read" is fatal depends on whether the
+ * precedence policy reaches rung 3, and only `resolveSessionAgent` knows that. A file
+ * behind a rung nobody consults must not veto a declaration that already won.
+ */
+type ProcessWorkspaceDeclaration =
+	| { state: "declared"; declaration: WorkspaceDeclaration }
+	| { state: "absent" }
+	| { state: "invalid"; path: string; reason: string };
+
+/**
+ * Read the declaration of the workspace this process runs in — its own agentDir.
+ *
+ * Rung 3 takes its `defaultAgentId` from here, and the derived `WorkspaceContext` mirrors
+ * the declaration itself (`WorkspaceContext.defaultAgentId`, `.memoryDir`, `.skillsDir`).
+ * The declaration is therefore returned whole, not reduced to the id: the context a bare
+ * process derives must be the one a registered agentDir derives, and the relations rules
+ * judge a declared default from that context.
+ *
+ * A registered agentDir's declaration comes from the directory projection, which already
+ * read the same file (tolerantly) for the candidate record. An unregistered one — and a
+ * registered one whose file only became unreadable since — is read here.
+ */
+async function readProcessWorkspaceDeclaration(
+	processAgent: AgentDirectoryEntry,
+	processAgentDir: string,
+): Promise<ProcessWorkspaceDeclaration> {
+	if (processAgent.declaration) return { state: "declared", declaration: processAgent.declaration };
+
+	const file = workspaceFilePath(processAgentDir);
+	let read: WorkspaceDeclarationRead;
+	try {
+		read = await readWorkspaceDeclaration(processAgentDir);
+	} catch (err) {
+		// "I could not look" is not "nothing declared" — but it is not fatal until the policy
+		// reaches this rung either (a permission error on a lower rung is not a broken intent).
+		return { state: "invalid", path: file, reason: err instanceof Error ? err.message : String(err) };
+	}
+	switch (read.state) {
+		case "declared":
+			return { state: "declared", declaration: read.declaration };
+		case "absent":
+			return { state: "absent" };
+		case "invalid":
+			return { state: "invalid", path: file, reason: read.reason };
+	}
+}
+
+/** Rung 3's loud failure: the declaration exists but cannot be interpreted. */
+function unreadableWorkspaceDeclaration(file: string, reason: string): SessionAgentError {
+	return new SessionAgentError(
+		{ kind: "agent-declaration-unreadable", source: "workspace", path: file, reason },
+		`The workspace declaration at "${file}" cannot be read (${reason}), so the Agent it declares as ` +
+			"default is unknown. Fix or remove that file: a session must not start as an Agent this workspace " +
+			"may not have asked for.",
+	);
+}
+
+/**
+ * The client-level settings file, `<config root>/agent/config.yml` — the global file
+ * `Settings` reads. The root comes from the directory authority (`resolveConfigRootDir`),
+ * because `CORNFIELD_CONFIG_DIR` may be an *absolute* path; joining that under HOME would
+ * name a file nobody writes and silently skip this rung.
+ *
+ * Resolved at call time (like `../skeleton/registry` and `../agent-domain/project-store`)
+ * so a process pointed at another HOME reads that client's declarations. Exported so
+ * callers and tests name the same file.
+ */
+export function userConfigFilePath(): string {
+	return path.join(resolveConfigRootDir(homeDir()), "agent", AGENT_CONFIG_FILE_NAME);
+}
+
+/** `process.env.HOME` first, as in `../skeleton/registry` and `../agent-domain/project-store`:
+ *  a caller (or a test) that points HOME at another client must read *that* client's files. */
+function homeDir(): string {
+	return process.env.HOME ?? os.homedir();
+}
+
+/**
+ * Rung 4: `USER_GLOBAL_DEFAULT_AGENT_KEY` from the user's own config.yml.
+ *
+ * Read from the file rather than through the `Settings` singleton: a resolution runs in
+ * processes that never initialize settings (a scheduled or gateway-driven session), and
+ * its answer must not depend on init order.
+ *
+ * States as in rung 3: no file = nothing declared; a file that cannot be interpreted = a
+ * hard failure; declared = its value, which must be an Agent id — a non-string is a
+ * declaration we cannot honour, not an absent one.
+ */
+async function readUserGlobalDefaultAgentId(): Promise<AgentId | undefined> {
+	const file = userConfigFilePath();
+	let text: string;
+	try {
+		text = await Bun.file(file).text();
+	} catch (err) {
+		if (isEnoent(err)) return undefined;
+		throw err;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = YAML.parse(text);
+	} catch (err) {
+		throw unreadableUserConfig(file, `not valid YAML: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	// A document that cannot hold keys declares nothing here (the same reading `Settings`
+	// gives a non-object config).
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+
+	const [group, key] = USER_GLOBAL_DEFAULT_AGENT_KEY.split(".") as [string, string];
+	const section = (parsed as Record<string, unknown>)[group];
+	if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
+
+	const declared = (section as Record<string, unknown>)[key];
+	// Only a *truly absent* key is "nothing declared". A key that is present but is not an
+	// Agent id — YAML `null`, a number, a list — is a declaration that cannot be honoured,
+	// and reading it as absent would silently demote the rung to the process's own Agent.
+	if (declared === undefined) return undefined;
+	if (typeof declared !== "string") {
+		throw unreadableUserConfig(
+			file,
+			`"${USER_GLOBAL_DEFAULT_AGENT_KEY}" must be an Agent id (a string), found ${describeDeclaredValue(declared)}`,
+		);
+	}
+	// The typed slot is the tie to the settings table: the constant must be a real
+	// `SettingPath`, so a schema rename cannot leave this reader reading a key nobody writes.
+	const value: SettingValue<typeof USER_GLOBAL_DEFAULT_AGENT_KEY> = declared;
+	return value;
+}
+
+function unreadableUserConfig(file: string, reason: string): SessionAgentError {
+	return new SessionAgentError(
+		{ kind: "agent-declaration-unreadable", source: "user", path: file, reason },
+		`The user settings file at "${file}" cannot be read (${reason}), so the default Agent it declares is ` +
+			`unknown. Fix that file (or drop "${USER_GLOBAL_DEFAULT_AGENT_KEY}") instead of letting the session ` +
+			"resolve to a different Agent.",
+	);
+}
+
+/** What a declared value turned out to be, for the "must be an Agent id" message. */
+function describeDeclaredValue(value: unknown): string {
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "an array";
+	switch (typeof value) {
+		case "object":
+			return "an object";
+		case "number":
+			return "a number";
+		case "boolean":
+			return "a boolean";
+		default:
+			return typeof value;
+	}
 }
 
 /** The Agent a session header recorded, if any. Absence is not an error (pre-agent sessions). */

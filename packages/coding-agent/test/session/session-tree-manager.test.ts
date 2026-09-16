@@ -90,6 +90,9 @@ function managerWith(
 
 function delegationFor(fixture: FakeChild, overrides: Partial<DelegationSpec> = {}): DelegationSpec {
 	return {
+		// The home the child must run as. Same directory as its cwd here because this
+		// harness delegates to the parent's own Agent; the two are different facts.
+		agentDir: path.dirname(fixture.path),
 		cwd: path.dirname(fixture.path),
 		command: { bin: fixture.path, args: [] },
 		env: fixture.env,
@@ -176,6 +179,21 @@ describe("SessionTreeManager.delegate", () => {
 		expect(child.spec.env?.[CHILD_SESSION_ENV.childAgent]).toBe("scout");
 		// The child's own env still wins where the caller set it.
 		expect(child.spec.env?.FAKE_CHILD_BEHAVIOR).toBe("ok");
+	});
+
+	test("tells the child which Agent home it must run as", async () => {
+		const fixture = await fakeChild();
+		const { manager } = managerWith();
+		const opsHome = await tempDir();
+
+		// The ledger records an Agent; the child's Agent is the config directory it
+		// loads. Both facts have to reach the process, or the node is a claim about a
+		// process that does not exist.
+		const { record, child } = await manager.delegate(delegationFor(fixture, { agentId: "ops", agentDir: opsHome }));
+
+		expect(record.node.agentId).toBe("ops");
+		expect(child.spec.env?.[CHILD_SESSION_ENV.agentDir]).toBe(opsHome);
+		expect(child.spec.agentId).toBe("ops");
 	});
 
 	test("refuses a session id that is already in the ledger", async () => {

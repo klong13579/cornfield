@@ -12,11 +12,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { loadProjects, projectsFilePath, upsertProject } from "@cornfield/coding-agent/agent-domain/project-store";
+import { validateWorkspaceContexts } from "@cornfield/coding-agent/agent-domain/relations";
 import {
 	readPersistedRef,
 	resolveSessionAgent,
 	SessionAgentError,
 	type SessionAgentFailure,
+	userConfigFilePath,
 } from "@cornfield/coding-agent/session/session-agent";
 import { type SessionHeader, SessionManager } from "@cornfield/coding-agent/session/session-manager";
 import { registerAgent } from "@cornfield/coding-agent/skeleton/registry";
@@ -42,24 +44,49 @@ afterEach(async () => {
 	await fs.rm(home, { recursive: true, force: true });
 });
 
-/** Create an agentDir on disk and register it, so it is a live Agent. */
-async function makeRegisteredAgent(agentId: string, displayName = agentId): Promise<string> {
-	const agentDir = path.join(home, "agents", agentId);
-	await fs.mkdir(agentDir, { recursive: true });
-	await registerAgent(agentId, agentDir);
+/** Write a schema-v2 workspace declaration into an agentDir (registered or not). */
+async function writeWorkspaceDeclaration(agentDir: string, declaration: Record<string, unknown> = {}): Promise<void> {
+	await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
 	await Bun.write(
 		path.join(agentDir, ".cornfield", "workspace.json"),
 		`${JSON.stringify({
 			schemaVersion: 2,
-			id: agentId,
-			name: displayName,
+			id: path.basename(agentDir),
+			name: path.basename(agentDir),
 			type: "agent",
 			root: ".",
 			projectRoot: ".",
 			skillsDir: ".cornfield/skills/",
+			...declaration,
 		})}\n`,
 	);
+}
+
+/** Create an agentDir on disk and register it, so it is a live Agent. */
+async function makeRegisteredAgent(
+	agentId: string,
+	displayName = agentId,
+	declaration: Record<string, unknown> = {},
+): Promise<string> {
+	const agentDir = path.join(home, "agents", agentId);
+	await fs.mkdir(agentDir, { recursive: true });
+	await registerAgent(agentId, agentDir);
+	await writeWorkspaceDeclaration(agentDir, { id: agentId, name: displayName, ...declaration });
 	return agentDir;
+}
+
+/** Declare the client-wide default Agent in the user's own config.yml (§10 rung 4). */
+async function setUserGlobalDefaultAgent(agentId: string): Promise<void> {
+	const file = userConfigFilePath();
+	await fs.mkdir(path.dirname(file), { recursive: true });
+	await Bun.write(file, `user:\n  globalDefaultAgentId: ${agentId}\n`);
+}
+
+/** Write arbitrary content into the user's own config.yml. */
+async function writeUserConfig(content: string): Promise<void> {
+	const file = userConfigFilePath();
+	await fs.mkdir(path.dirname(file), { recursive: true });
+	await Bun.write(file, content);
 }
 
 async function failureOf(promise: Promise<unknown>): Promise<SessionAgentFailure> {
@@ -184,6 +211,251 @@ describe("resolveSessionAgent Project defaults", () => {
 
 		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
 		expect(failure).toEqual({ kind: "agent-unknown", source: "project", agentId: "unregistered" });
+	});
+});
+
+describe("resolveSessionAgent workspace and user-global defaults", () => {
+	test("a workspace declaration wins over the user-global default", async () => {
+		const agentDir = await makeRegisteredAgent("hr", "HR", { defaultAgentId: "hr" });
+		await makeRegisteredAgent("sw");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		// A stronger-than-bootstrap answer exists on both new rungs; the workspace is rung 3.
+		await setUserGlobalDefaultAgent("sw");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "workspace" });
+		// The declaration is mirrored onto the context, which is what the relations rules read.
+		expect(resolved.workspaceContext.defaultAgentId).toBe("hr");
+	});
+
+	test("the user-global default is honored when the workspace declares none", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await setUserGlobalDefaultAgent("hr");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		// Not "bootstrap": the value came from the settings file, not from the process.
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "user" });
+		// The workspace declared nothing, so the context must not claim a workspace default.
+		expect(resolved.workspaceContext.defaultAgentId).toBeUndefined();
+	});
+
+	test("an explicit session pin outranks both new declarations", async () => {
+		// The workspace declares another Agent and so does the user config; the pin still wins.
+		const agentDir = await makeRegisteredAgent("hr", "HR", { defaultAgentId: "sw" });
+		await makeRegisteredAgent("sw");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await setUserGlobalDefaultAgent("sw");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir, pinnedAgentId: "hr" });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "session" });
+	});
+
+	test("a Project default still outranks the two new declarations", async () => {
+		const agentDir = await makeRegisteredAgent("hr", "HR", { defaultAgentId: "hr" });
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await setUserGlobalDefaultAgent("hr");
+		await upsertProject({ projectId: "hr-project", root: cwd, name: "HR", defaultAgentId: "hr" });
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "project" });
+	});
+
+	test("a workspace default naming an unregistered Agent does not fall through", async () => {
+		const agentDir = await makeRegisteredAgent("hr", "HR", { defaultAgentId: "unregistered" });
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		// A working weaker answer must not rescue a broken declaration (§10 rule 1).
+		await setUserGlobalDefaultAgent("hr");
+
+		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
+		expect(failure).toEqual({ kind: "agent-unknown", source: "workspace", agentId: "unregistered" });
+	});
+
+	test("a user-global default naming a disabled Agent does not fall through", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const goneDir = await makeRegisteredAgent("sw");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await setUserGlobalDefaultAgent("sw");
+		await fs.rm(goneDir, { recursive: true, force: true });
+
+		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
+		expect(failure).toEqual({ kind: "agent-disabled", source: "user", agentId: "sw" });
+	});
+
+	test("an unreadable workspace declaration is an error, not 'nothing declared'", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await setUserGlobalDefaultAgent("hr");
+		await Bun.write(path.join(agentDir, ".cornfield", "workspace.json"), "{ not json");
+
+		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
+		expect(failure).toMatchObject({ kind: "agent-declaration-unreadable", source: "workspace" });
+		expect(failure).toMatchObject({ path: path.join(agentDir, ".cornfield", "workspace.json") });
+		expect((failure as { reason: string }).reason).toContain("not valid JSON");
+	});
+
+	test("an unreadable user config is an error, not 'nothing declared'", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await writeUserConfig("user: {globalDefaultAgentId: 'hr'\n");
+
+		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
+		expect(failure).toMatchObject({
+			kind: "agent-declaration-unreadable",
+			source: "user",
+			path: userConfigFilePath(),
+		});
+		expect((failure as { reason: string }).reason).toContain("not valid YAML");
+	});
+
+	test("a declared non-string user default is rejected instead of ignored", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await writeUserConfig("user:\n  globalDefaultAgentId: 42\n");
+
+		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
+		expect(failure).toMatchObject({ kind: "agent-declaration-unreadable", source: "user" });
+		expect((failure as { reason: string }).reason).toContain("must be an Agent id");
+	});
+
+	test("a user config without the key declares nothing", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await writeUserConfig("theme:\n  dark: titanium\nuser: {}\n");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "bootstrap" });
+	});
+});
+
+describe("the user-global rung resolves the client's config root", () => {
+	test("an absolute CORNFIELD_CONFIG_DIR is the root, not a name under HOME", async () => {
+		const clientRoot = path.join(home, "client");
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		// The directory authority's reading: an absolute override *is* the config root, so the
+		// file `Settings` writes there is the file this rung reads.
+		process.env.CORNFIELD_CONFIG_DIR = clientRoot;
+		await setUserGlobalDefaultAgent("hr");
+
+		expect(userConfigFilePath()).toBe(path.join(clientRoot, "agent", "config.yml"));
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "user" });
+	});
+
+	test("an explicit null is a declaration that cannot be honoured, not an absent key", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await writeUserConfig("user:\n  globalDefaultAgentId: null\n");
+
+		const failure = await failureOf(resolveSessionAgent({ cwd, processAgentDir: agentDir }));
+		expect(failure).toMatchObject({
+			kind: "agent-declaration-unreadable",
+			source: "user",
+			path: userConfigFilePath(),
+		});
+		expect((failure as { reason: string }).reason).toContain("must be an Agent id");
+		expect((failure as { reason: string }).reason).toContain("null");
+	});
+});
+
+describe("a rung behind a file is read only when the policy consults it", () => {
+	test("a broken user rung does not veto a pinned session", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		// An unrelated client-level value that cannot be read as an Agent id.
+		await writeUserConfig("user:\n  globalDefaultAgentId: 42\n");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir, pinnedAgentId: "hr" });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "session" });
+	});
+
+	test("a broken user rung does not veto a workspace default", async () => {
+		const agentDir = await makeRegisteredAgent("hr", "HR", { defaultAgentId: "hr" });
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await writeUserConfig("user: {globalDefaultAgentId: 42}\n");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "workspace" });
+	});
+
+	test("an unreadable workspace declaration does not veto a pinned session", async () => {
+		const agentDir = await makeRegisteredAgent("hr");
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await Bun.write(path.join(agentDir, ".cornfield", "workspace.json"), "{ not json");
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir, pinnedAgentId: "hr" });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "session" });
+		// Nothing was declared that could be mirrored: an unreadable file is not a declaration.
+		expect(resolved.workspaceContext.defaultAgentId).toBeUndefined();
+	});
+});
+
+describe("an unregistered process directory keeps its declaration", () => {
+	/** The built-in `default` Agent's agentDir: a directory no registry knows about. */
+	function bareProcessAgentDir(): string {
+		return path.join(home, ".cornfield", "agent");
+	}
+
+	test("the derived context mirrors the declaration, not only the Agent id", async () => {
+		const processAgentDir = bareProcessAgentDir();
+		await writeWorkspaceDeclaration(processAgentDir, { id: "default", name: "Default", defaultAgentId: "default" });
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir });
+
+		expect(resolved.ref).toEqual({ agentId: "default", source: "workspace" });
+		expect(resolved.workspaceContext.defaultAgentId).toBe("default");
+	});
+
+	test("a broken declared default reaches the relations rules through the context", async () => {
+		const processAgentDir = bareProcessAgentDir();
+		// The workspace declares a default Agent that does not exist.
+		await writeWorkspaceDeclaration(processAgentDir, { id: "default", name: "Default", defaultAgentId: "ghost" });
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		// A Project default wins, so rung 3 never decides anything here — the declaration is
+		// still the one in force in this workspace, and the context is what a reader judges it by.
+		await upsertProject({ projectId: "work", root: cwd, name: "Work", defaultAgentId: "default" });
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir });
+		expect(resolved.ref).toEqual({ agentId: "default", source: "project" });
+		expect(resolved.workspaceContext.defaultAgentId).toBe("ghost");
+
+		const violations = validateWorkspaceContexts({
+			agents: [{ agentId: "default", agentDir: processAgentDir, displayName: "default", enabled: true }],
+			projects: [{ projectId: "work", root: cwd, name: "Work", defaultAgentId: "default" }],
+			sessions: [],
+			workspaceContexts: [resolved.workspaceContext],
+		});
+		expect(violations.map(violation => violation.rule)).toEqual(["workspace.default-agent-missing"]);
+	});
+
+	test("a registered directory reports the same broken declared default", async () => {
+		const agentDir = await makeRegisteredAgent("hr", "HR", { defaultAgentId: "ghost" });
+		const cwd = path.join(home, "work");
+		await fs.mkdir(cwd, { recursive: true });
+		await upsertProject({ projectId: "work", root: cwd, name: "Work", defaultAgentId: "hr" });
+
+		const resolved = await resolveSessionAgent({ cwd, processAgentDir: agentDir });
+		expect(resolved.ref).toEqual({ agentId: "hr", source: "project" });
+		expect(resolved.workspaceContext.defaultAgentId).toBe("ghost");
 	});
 });
 

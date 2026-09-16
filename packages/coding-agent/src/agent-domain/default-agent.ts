@@ -86,14 +86,18 @@ export interface ResolvedAgentRef {
  * that scope — the input type intentionally has no field a UI could fill with a
  * transient selection (§10).
  *
- * `userDefaultAgentId` has no authority yet (no settings key exists in this repo); the
- * rung is implemented and tested so the authority can be wired without touching the
- * policy. See `docs/proma-comparison/wp4-default-agent-context.md`.
+ * All five rungs have an authority: `sessionAgentId` (caller pin / session header),
+ * `projectDefaultAgentId` (`./project-store`), `workspaceDefaultAgentId` (the
+ * `WorkspaceDeclaration` of the workspace in force, see `../skeleton/workspace`),
+ * `userDefaultAgentId` (`USER_GLOBAL_DEFAULT_AGENT_KEY` in the user's `config.yml`, see
+ * `../config/settings-schema`) and `bootstrapAgentId` (the process's own identity).
  */
 export interface DefaultAgentDeclarations {
 	sessionAgentId?: AgentId;
 	projectDefaultAgentId?: AgentId;
+	/** §10 rung 3: the `defaultAgentId` declared by the workspace in force. */
 	workspaceDefaultAgentId?: AgentId;
+	/** §10 rung 4: the client-wide default Agent declared by the user's own settings. */
 	userDefaultAgentId?: AgentId;
 	/** The client's own Agent for a bare process. Used only when nothing else is declared. */
 	bootstrapAgentId?: AgentId;
@@ -153,7 +157,7 @@ export const AGENT_CONFIG_FILE_NAME = "config.yml";
  * See the module doc for why an unusable declaration does not fall through.
  */
 export function resolveDefaultAgent(input: DefaultAgentResolutionInput): DefaultAgentResolution {
-	const declared = firstDeclared(input.declarations);
+	const declared = firstDeclaredRung(input.declarations);
 	if (declared) {
 		return evaluate(declared.source, declared.agentId, input);
 	}
@@ -188,6 +192,10 @@ export function deriveWorkspaceContext(input: {
 	if (project) {
 		context.projectId = project.projectId;
 		context.projectRoot = project.root;
+	}
+	const declaredDefaultAgentId = workspaceDeclaration?.defaultAgentId;
+	if (declaredDefaultAgentId !== undefined) {
+		context.defaultAgentId = declaredDefaultAgentId;
 	}
 	const permissionMode = workspaceDeclaration?.permissions?.mode;
 	if (permissionMode) {
@@ -270,7 +278,15 @@ function declaredAgentId(declarations: DefaultAgentDeclarations, source: Default
 	}
 }
 
-function firstDeclared(
+/**
+ * The most specific rung that actually declares something, or `undefined` when nothing
+ * declared. Exported for callers whose declarations arrive one rung at a time: a rung
+ * backed by a file must not be read — nor its unreadable file raised — before the policy
+ * will consult it, and only the precedence order can say whether it will. Asking the
+ * policy is the point: a caller deciding that itself stops following the order above the
+ * moment the order changes.
+ */
+export function firstDeclaredRung(
 	declarations: DefaultAgentDeclarations,
 ): { source: DefaultAgentSource; agentId: AgentId } | undefined {
 	for (const source of DECLARED_AGENT_PRECEDENCE) {

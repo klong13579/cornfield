@@ -34,3 +34,23 @@ export interface ProjectListDto {
 	 */
 	currentProjectId?: string;
 }
+
+/**
+ * `set_project` 的答复：存储真正落盘的那一份。
+ *
+ * 调用方拿它替换手上那份 —— `root` 由存储归一（`path.resolve`），不是发出去的那个字符串。
+ * 声明失败（root 已被别的 Project 占用 / 存储写不进去）是 ok:false，不返回半份结果。
+ */
+export interface ProjectUpsertDto {
+	project: ProjectRecordDto;
+}
+
+/**
+ * `delete_project` 的答复：这次真的删掉了哪个 Project。
+ *
+ * 没有 `deleted` 标记位：「删一个不存在的 Project」是错误（ok:false），不是一次成功的空删除 ——
+ * 幂等的 `deleted:false` 会让一个已经不在的 Project 看起来像是刚被这次调用删掉的。
+ */
+export interface ProjectDeleteDto {
+	projectId: string;
+}

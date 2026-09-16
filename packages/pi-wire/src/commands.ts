@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent } from "@cornfield/ai";
 import type { AgentTodoDto } from "./results/agent-todos";
 import type { CronCreateInput, CronUpdateInput } from "./results/cron";
+import type { DelegateChildInput } from "./results/session-tree";
 
 /**
  * Wire 命令面 (multiplex 子集)。
@@ -219,6 +220,15 @@ export type MultiplexCommand =
 	 * 就是把同一次工作算两遍。读取失败（结果指针不可读）整条命令 ok:false，不返回半份内容。
 	 */
 	| { id?: string; type: "bring_back_child_result"; sessionId?: string; childSessionId: string }
+	/**
+	 * 从当前会话委派一个子会话（delegate_child）。
+	 *
+	 * 这是会话树唯一的**写入口**：serve 侧真的起一个独立 cornfield 子进程并把
+	 * 它记进父会话的账本，成功才返回 DelegatedChildDto。子会话必须先完成注册门（它真的以
+	 * 本会话为 parent 挂上 broker）才算启动成功 —— 起不来或没挂上边一律 ok:false 带真实原因，
+	 * 绝不返回一条没人在跑的 started 记录。入参形状见 `DelegateChildInput`。
+	 */
+	| ({ id?: string; type: "delegate_child"; sessionId?: string } & DelegateChildInput)
 	// Project（T8）：客户端级 Project registry 的只读面
 	/**
 	 * 列出已声明的 Project，并给出被查询会话落在哪个 Project 里（ProjectListDto）。
@@ -231,6 +241,24 @@ export type MultiplexCommand =
 	 * **不得**退化成空列表 —— 「没声明过」与「声明过但坏了」是两件事。
 	 */
 	| { id?: string; type: "list_projects"; sessionId?: string }
+	/**
+	 * 声明或更新一个 Project（ProjectUpsertDto）。
+	 *
+	 * Project registry 是客户端 scope，不挂会话，所以本命令没有 `sessionId`：写入不需要会话上下文，
+	 * 写完之后要看的会话归属由下一次 `list_projects` 算。
+	 *
+	 * 权威在存储：一个 root 只能被一个 Project 声明（root 按 symlink 归一比较），
+	 * root 已被别的 Project 占用 → ok:false，不是静默改写别人的声明。声明成功回存储真正落盘的
+	 * 那一份（root 是归一后的路径）。
+	 */
+	| { id?: string; type: "set_project"; projectId: string; name: string; root: string; defaultAgentId?: string }
+	/**
+	 * 删掉一个已声明的 Project（ProjectDeleteDto）。
+	 *
+	 * 删一个**没声明过**的 projectId 是 ok:false，不是一次成功的空删除：报「删掉了」而实际上
+	 * 早就不在，就是在拿一个不是这次调用的结果冒充这次调用的结果。
+	 */
+	| { id?: string; type: "delete_project"; projectId: string }
 	// Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）
 	/**
 	 * 列出一个 Agent 的整块 Todo 板（AgentTodoListDto）。

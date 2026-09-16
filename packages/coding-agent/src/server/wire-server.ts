@@ -84,7 +84,7 @@ import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./
 import { WireHostToolBridge } from "./host-tool-bridge";
 import { buildMemoryScopeProjection } from "./memory-scope";
 import { PERMISSION_TIMEOUT_OUTCOME, PermissionGate } from "./permission-gate";
-import { readProjectContext } from "./projects-wire";
+import { declareProject, dropProject, readProjectContext } from "./projects-wire";
 import { agentSessionsRoot, defaultSessionsRoot, indexSessions, type SessionIndexSource } from "./session-index";
 import {
 	type AgentMeta,
@@ -93,7 +93,7 @@ import {
 	type SessionFactory,
 	SessionRegistry,
 } from "./session-registry";
-import { bringBackChildResult, readSessionTree } from "./session-tree-wire";
+import { bringBackChildResult, delegateChildSession, readSessionTree } from "./session-tree-wire";
 import {
 	collectDisabledInputs,
 	projectDisabledSkills,
@@ -429,7 +429,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					done({ agents: registry.buildSessionList(activeAgentIds()) });
 					return;
 				}
-				// ── Project（T8）：客户端级 Project registry 的只读面 ──
+				// ── Project（T8）：客户端级 Project registry 的读面与写面 ──
 				case "list_projects": {
 					try {
 						// 会话归属只看**已 attach** 的会话（不 lazy attach）：查一次项目列表不应把 agent 拉起来。
@@ -438,6 +438,31 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					} catch (err) {
 						// 存储存在但读不出来 → ok:false（不当成「没有 Project」）
 						fail(`list_projects failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "set_project": {
+					try {
+						// 写面不挂会话、不 lazy attach：声明一个 Project 与哪个 agent 附着无关。
+						const input = {
+							projectId: command.projectId,
+							name: command.name,
+							root: command.root,
+							...(command.defaultAgentId === undefined ? {} : { defaultAgentId: command.defaultAgentId }),
+						};
+						done(await declareProject(input));
+					} catch (err) {
+						// root 已被别的 Project 占用 / 输入不成立 / 存储写不进去 → ok:false（不谎报已声明）
+						fail(`set_project failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "delete_project": {
+					try {
+						done(await dropProject(command.projectId));
+					} catch (err) {
+						// 没声明过就是没删掉 → ok:false（不当成一次成功的空删除）
+						fail(`delete_project failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;
 				}
@@ -1911,6 +1936,20 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						done(await readSessionTree(session, attached.meta));
 					} catch (err) {
 						fail(`get_session_tree failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
+				}
+				// 会话树唯一的写入口：真的起一个子会话。目标 Agent 只查注册表（不 lazy attach）——
+				// 委派出的是一个独立子进程，不是把对方 Agent 的会话在本进程里拉起来。
+				case "delegate_child": {
+					try {
+						done(
+							await delegateChildSession(session, attached.meta, command, {
+								resolveAgent: agentId => registry.getMeta(agentId),
+							}),
+						);
+					} catch (err) {
+						fail(`delegate_child failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					break;
 				}

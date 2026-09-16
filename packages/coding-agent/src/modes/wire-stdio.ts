@@ -553,6 +553,10 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			// State
 			case "get_state": {
 				const state = {
+					// 本会话解析到的 Agent（创建时写进 header 的那一个）。除 sessionId 外唯一一个
+					// 「这个进程是谁」的事实：父会话委派时要拿它比对账本里写的 Agent，否则一个跑在
+					// 别人配置下的子会话只能靠账本自证。
+					agentId: session.sessionManager.getHeader()?.agentId ?? null,
 					model: session.model,
 					thinkingLevel: session.thinkingLevel,
 					isStreaming: session.isStreaming,

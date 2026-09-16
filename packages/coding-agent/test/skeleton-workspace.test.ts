@@ -138,6 +138,66 @@ describe("ensureWorkspace", () => {
 	});
 });
 
+/**
+ * The workspace's optional `defaultAgentId` (§10 rung 3 of the default-Agent chain).
+ *
+ * The declaration field is data, not policy: it round-trips what the file says, and an
+ * absent field stays absent — `ensureWorkspace` never invents a default Agent. Whether a
+ * declared id actually names a usable Agent is decided where it is consumed (the session
+ * resolution), not here.
+ */
+describe("declaration defaultAgentId", () => {
+	async function writeDeclaration(declaration: Record<string, unknown>): Promise<void> {
+		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
+		await Bun.write(
+			workspaceFilePath(agentDir),
+			JSON.stringify({
+				schemaVersion: WORKSPACE_SCHEMA_VERSION,
+				id: "hr",
+				name: "hr",
+				type: "agent",
+				root: ".",
+				projectRoot: ".",
+				...declaration,
+			}),
+		);
+	}
+
+	test("absent when the workspace declares none — and not written in by default", async () => {
+		const decl = await ensureWorkspace(agentDir, { name: "hr" });
+		expect(decl.defaultAgentId).toBeUndefined();
+		expect((await loadWorkspace(agentDir))?.defaultAgentId).toBeUndefined();
+		// The file on disk carries no key either: absence is not silently backfilled.
+		expect(await Bun.file(workspaceFilePath(agentDir)).text()).not.toContain("defaultAgentId");
+	});
+
+	test("declared: the value round-trips from disk", async () => {
+		await writeDeclaration({ defaultAgentId: "hr" });
+
+		const read = await readWorkspaceDeclaration(agentDir);
+		expect(read.state).toBe("declared");
+		expect(read.state === "declared" ? read.declaration.defaultAgentId : undefined).toBe("hr");
+		expect((await loadWorkspace(agentDir))?.defaultAgentId).toBe("hr");
+	});
+
+	test("declared: the reader keeps the value verbatim, it does not coerce or drop it", async () => {
+		await writeDeclaration({ defaultAgentId: 42 });
+
+		const read = await readWorkspaceDeclaration(agentDir);
+		expect(read.state).toBe("declared");
+		const raw = read.state === "declared" ? (read.declaration as unknown as Record<string, unknown>) : {};
+		expect(raw.defaultAgentId).toBe(42);
+	});
+
+	test("invalid: the field does not rescue a declaration that is not schema-v2", async () => {
+		await writeDeclaration({ schemaVersion: 1, defaultAgentId: "hr" });
+
+		expect(await loadWorkspace(agentDir)).toBeNull();
+		const read = await readWorkspaceDeclaration(agentDir);
+		expect(read.state).toBe("invalid");
+	});
+});
+
 describe("registry v2", () => {
 	test("registerAgent fills cache fields from the declaration", async () => {
 		const decl = await ensureWorkspace(agentDir, { name: "hr" });

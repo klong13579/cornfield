@@ -8,7 +8,9 @@
  *      Process Supervisor (`./child-session-supervisor`, ticket 06). This module
  *      starts nothing itself and supervises nothing itself — it does not
  *      reimplement the supervisor, and it is not a second runtime for in-process
- *      work.
+ *      work. A launch that never became a usable child leaves a `failed` entry —
+ *      whether it died on the way up, or the parent could not hand it its work at
+ *      all (`fail()`, the one verdict only the parent can pronounce).
  *   2. **Status back.** `applyReport()` consumes the child's lifecycle reports
  *      (`./child-session-report`) and moves the ledger entry. A report that names
  *      a run this parent never launched, or that arrives from a process other than
@@ -81,6 +83,27 @@ export interface SessionTreeSelf {
 export interface DelegationSpec {
 	/** Tree identity of the child. Generated when omitted. */
 	sessionId?: SessionId;
+	/**
+	 * The Agent the child serves. Defaults to the delegating session's own agent.
+	 *
+	 * Set it when the child is launched for a *different* Agent than the parent
+	 * (a delegation from one Agent's session into another Agent's home): the
+	 * ledger node's `agentId` is what every reader — tree UI, reconcile, a later
+	 * bring-back — believes about which Agent this child is, so a default here
+	 * would silently attribute the child to the parent's agent.
+	 */
+	agentId?: AgentId;
+	/**
+	 * The target Agent's home — the directory the child process must run as.
+	 *
+	 * Required, and not derived from `agentId`: a child's Agent is decided by the
+	 * config directory it loads (`CORNFIELD_AGENT_DIR`), not by its cwd, so a
+	 * delegation that records an `agentId` without naming a home launches a process
+	 * that runs as someone else. The child's own report has to agree with the ledger
+	 * node this produces; see `../server/session-tree-wire`. Pass the delegating
+	 * session's own home when the child serves the same Agent.
+	 */
+	agentDir: string;
 	/** Working directory the child process runs in. */
 	cwd: string;
 	/** Program to spawn; the `cornfield` binary and its args. */
@@ -316,17 +339,23 @@ export class SessionTreeManager {
 		this.#delegationSeq += 1;
 		const env: Record<string, string> = {
 			...(spec.env ?? {}),
-			// The orchestrator edge is written LAST, and callers are refused if they try
-			// to set it themselves (`assertNoProtectedChildEnv`). The edge is how this
-			// child is identified to its parent: a `runId` the ledger does not know, or a
+			// The identity this delegation decided — the orchestrator edge and the Agent
+			// home — is written LAST, and callers are refused if they try to set either
+			// themselves (`assertNoProtectedChildEnv`). The edge is how this child is
+			// identified to its parent: a `runId` the ledger does not know, or a
 			// `parentId` pointing somewhere else, is a child whose reports are either
-			// dropped or attributed to another delegation.
+			// dropped or attributed to another delegation. The home is how it is
+			// identified to itself: without it the process loads someone else's config
+			// while the node below claims this Agent.
 			...childSessionEnv({
 				parentTarget: this.#self.intercomSessionId ?? this.#self.sessionId,
 				parentSessionId: this.#self.intercomSessionId ?? this.#self.sessionId,
 				runId,
 				agent: spec.delegationRole ?? "child-session",
 				index: String(this.#delegationSeq),
+				// The child's Agent is the config home it loads, so this is what makes the
+				// ledger node below a statement about the process that actually runs.
+				agentDir: spec.agentDir,
 			}),
 		};
 		const childSpec: ChildSessionSpec = {
@@ -336,7 +365,7 @@ export class SessionTreeManager {
 				rootSessionId: this.#self.rootSessionId ?? this.#self.sessionId,
 				depth: this.#self.depth ?? 0,
 			},
-			agentId: this.#self.agentId,
+			agentId: spec.agentId ?? this.#self.agentId,
 			...(this.#self.projectId ? { projectId: this.#self.projectId } : {}),
 			cwd: spec.cwd,
 			command: spec.command,
@@ -349,7 +378,7 @@ export class SessionTreeManager {
 		const record: ChildSessionRecord = {
 			node: buildChildSessionNode(this.#self, {
 				sessionId,
-				agentId: this.#self.agentId,
+				agentId: spec.agentId ?? this.#self.agentId,
 				...(this.#self.projectId ? { projectId: this.#self.projectId } : {}),
 				...(spec.delegationRole ? { delegationRole: spec.delegationRole } : {}),
 				...(spec.objective ? { objective: spec.objective } : {}),
@@ -574,6 +603,58 @@ export class SessionTreeManager {
 		});
 		if (!settled) throw new Error(`Session "${sessionId}" left the ledger while it was being stopped`);
 		return settled;
+	}
+
+	/**
+	 * Pronounce a delegation `failed` for a reason only the parent can observe.
+	 *
+	 * The case this exists for: the child is up and registered, but its work never
+	 * reached it (the parent's dispatch could not be delivered). That child will
+	 * never report anything about the task, so waiting for its own verdict means
+	 * telling the caller about a delegation that does not exist. The parent's
+	 * verdict is written instead.
+	 *
+	 * The verdict lands *before* the child is stopped, so the exit that follows
+	 * cannot relabel it: `#syncFromSupervisor` never reopens a terminal entry, and
+	 * the supervisor's own stop produces `cancelled` — a different story from "this
+	 * delegation never started working". An entry that a report already settled is
+	 * kept as it is and returned unchanged.
+	 *
+	 * Stopping is part of it: a child that was launched but never given its
+	 * assignment holds a concurrency slot for work that will never happen. A stop
+	 * that does not complete is a fact about the machine and not a change of
+	 * verdict, so it is appended to the detail — the next reader has to know the
+	 * process is still out there.
+	 */
+	async fail(sessionId: SessionId, detail: string): Promise<ChildSessionRecord> {
+		await this.#ensureLoaded();
+		const settled = await this.#withLedger(async () => {
+			const record = this.#records.get(sessionId);
+			if (!record) throw new Error(`Session "${sessionId}" is not in this session's ledger`);
+			return (await this.#settleFromParent(sessionId, "failed", detail)) ?? record;
+		});
+
+		const child = this.#supervisor
+			.list()
+			.find(candidate => candidate.sessionId === sessionId && !isTerminalSessionStatus(candidate.status()));
+		if (!child) return settled;
+
+		try {
+			await child.stop();
+			return settled;
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			return await this.#withLedger(async () => {
+				const current = this.#records.get(sessionId) ?? settled;
+				const next = this.#put({
+					...current,
+					statusDetail: `${current.statusDetail ?? detail}; ${reason}`,
+					updatedAt: this.#now(),
+				});
+				await this.#persist(next);
+				return next;
+			});
+		}
 	}
 
 	/**

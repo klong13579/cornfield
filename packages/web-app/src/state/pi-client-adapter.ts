@@ -9,6 +9,8 @@ import type {
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
+	DelegateChildInput,
+	DelegatedChildDto,
 	DingtalkAgentConfigDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -18,7 +20,10 @@ import type {
 	ModelSelectionDto,
 	ModelTestResultDto,
 	ProgressEventDto,
+	ProjectDeleteDto,
 	ProjectListDto,
+	ProjectRecordDto,
+	ProjectUpsertDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
 	ProviderOAuthStartDto,
@@ -566,6 +571,23 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	/**
+	 * 委派一个子会话（delegate_child）。
+	 *
+	 * 不捕获错误：serve 只有在子进程真的起来、且真的挂上父边之后才会 OK，其余情况都是
+	 * 真错误 —— 吞掉它并把回执造出来，就是让用户对着一棵不存在子会话的树。
+	 */
+	delegateChild(input: DelegateChildInput, sessionId?: string): Promise<DelegatedChildDto> {
+		return this.#req<DelegatedChildDto>({
+			type: "delegate_child",
+			...(sessionId ? { sessionId } : {}),
+			objective: input.objective,
+			...(input.label ? { label: input.label } : {}),
+			...(input.agentId ? { agentId: input.agentId } : {}),
+			...(input.cwd ? { cwd: input.cwd } : {}),
+		});
+	}
+
+	/**
 	 * 已声明的 Project（list_projects）。
 	 *
 	 * 不捕获错误：读不到（存储损坏）必须原样到 store 显示成错误态 —— 捕获后返回空数组
@@ -573,6 +595,28 @@ export class PiClientAdapter implements PiClient {
 	 */
 	listProjects(sessionId?: string): Promise<ProjectListDto> {
 		return this.#req<ProjectListDto>({ type: "list_projects", ...(sessionId ? { sessionId } : {}) });
+	}
+
+	/**
+	 * 声明或更新一个 Project（set_project），返回存储真正落盘的那一份（`root` 已由存储归一）。
+	 *
+	 * 不捕获错误：root 被别的 Project 占用 / 输入不成立 / 存储写不进去都必须原样到 UI 显示成错误 ——
+	 * 吞掉它就是在告诉用户「已经声明好了」，而盘上什么也没多。
+	 * `defaultAgentId` 只在真的给了值时才发字段：缺省与空串不是同一件事，不在这里替它二选一。
+	 */
+	setProject(project: ProjectRecordDto): Promise<ProjectUpsertDto> {
+		return this.#req<ProjectUpsertDto>({
+			type: "set_project",
+			projectId: project.projectId,
+			name: project.name,
+			root: project.root,
+			...(project.defaultAgentId === undefined ? {} : { defaultAgentId: project.defaultAgentId }),
+		});
+	}
+
+	/** 删掉一个已声明的 Project（delete_project）。没声明过会招错，不静默成功。 */
+	deleteProject(projectId: string): Promise<ProjectDeleteDto> {
+		return this.#req<ProjectDeleteDto>({ type: "delete_project", projectId });
 	}
 
 	/**

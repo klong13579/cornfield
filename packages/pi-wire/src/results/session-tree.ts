@@ -72,6 +72,53 @@ export interface SessionTreeDto {
 	children: ChildSessionNodeDto[];
 }
 
+/**
+ * `delegate_child` 的入参（命令里除 `id` / `type` / `sessionId` 之外的那部分）。
+ *
+ * 刻意没有「二进制路径」「环境变量」这类字段：子进程程序由 serve 决定。让客户端选要执行
+ * 哪个程序（或给子进程注入环境）就是把一条 IPC 请求变成任意代码执行。
+ */
+export interface DelegateChildInput {
+	/** 这次委派要完成什么（必填，且进入账本节点与 UI 标题）。 */
+	objective: string;
+	/** 用途标签（角色名、任务号……）；缺省 = 子会话按 `child-session` 记账。 */
+	label?: string;
+	/** 目标 Agent（注册名）；缺省 = 父会话自己的 Agent。 */
+	agentId?: string;
+	/**
+	 * 子进程工作目录覆盖（绝对路径）；缺省 = 目标 Agent 的 home。
+	 *
+	 * 只能在**服务端认可的位置**里选（目标 Agent 的 home、或本会话自己的工作目录）：工作
+	 * 目录决定子进程启动时导入并执行什么代码（项目级 extensions / 自定义工具），所以调用方
+	 * 不能拿它指到任意目录上。
+	 */
+	cwd?: string;
+}
+
+/**
+ * `delegate_child` 的答复 —— 一条**真实启动**的子会话记录。
+ *
+ * 不是乐观回执：serve 侧只有在子进程真的起来了、并且真的以本会话为 parent 挂上 broker
+ * （registration 门）之后才会返回它。返回的 `sessionId` 就是账本里的节点 id，拿它去
+ * `get_session_tree` 能查到同一条记录；起不来时整条命令 ok:false，不会有这个 DTO。
+ */
+export interface DelegatedChildDto {
+	/** 新子会话的账本节点 id（`get_session_tree` 里同一条记录）。 */
+	sessionId: string;
+	/** 这条委派的 launch id（写进子会话环境的那一个）。 */
+	runId: string;
+	/** 启动后的状态；正常是 running（子会话可以立刻上报 waiting/completed）。 */
+	status: ChildSessionStatusDto;
+	/** 子会话挂在哪个 Agent 上。 */
+	agentId: string;
+	/** 子会话进程 pid（父会话记下的唯一存活凭据；进程未报 pid 时缺省）。 */
+	pid?: number;
+	/** 这次委派要完成什么（原样回填）。 */
+	objective?: string;
+	/** 用途标签（原样回填）。 */
+	delegationRole?: string;
+}
+
 /** `bring_back_child_result` 的答复。 */
 export interface BroughtBackChildResultDto {
 	childSessionId: string;

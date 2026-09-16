@@ -68,6 +68,33 @@ function respondError(error: string): void {
 	lastCreated?.receive(JSON.stringify({ type: "response", id: reqs[reqs.length - 1]!.id, ok: false, error }));
 }
 
+/**
+ * 回给**指定命令类型**的最后一条请求。
+ *
+ * 委派 / 带回会插在同一条流里（切会话、同一条命令的两次刷新），「最后一条请求」不等于
+ * 「我要回的那一条」—— 拿错了响应，测试验的就不是要验的那条路径。
+ */
+function respondTo(type: string, result: unknown): void {
+	const req = sentRequests()
+		.filter(r => r.command.type === type)
+		.at(-1);
+	if (!req) throw new Error(`没有发过 ${type} 请求`);
+	lastCreated?.receive(JSON.stringify({ type: "response", id: req.id, ok: true, result }));
+}
+
+function respondErrorTo(type: string, error: string): void {
+	const req = sentRequests()
+		.filter(r => r.command.type === type)
+		.at(-1);
+	if (!req) throw new Error(`没有发过 ${type} 请求`);
+	lastCreated?.receive(JSON.stringify({ type: "response", id: req.id, ok: false, error }));
+}
+
+/** 已发过的请求里有没有这一类命令。 */
+function sentTypes(): string[] {
+	return sentRequests().map(r => String(r.command.type));
+}
+
 async function createConnectedStore(): Promise<{ store: SessionStore; adapter: PiClientAdapter }> {
 	lastCreated = undefined;
 	const adapter = new PiClientAdapter(config, fakeCtor);
@@ -189,6 +216,119 @@ describe("结果带回", () => {
 		const result = await pending;
 		expect(result.firstTime).toBe(false);
 		expect(result.injected).toBe(false);
+	});
+});
+
+/**
+ * review P2-1：委派失败也是一次**真发生过的写命令**。
+ *
+ * `SessionTreeManager.delegate` 在子会话起不来 / 没过注册门时，是先把账本节点写成 `failed`
+ * 再招错 —— 所以账本才是失败后的真相。不重读，面板就停在上一次读到的那棵树上，而它上面
+ * 没有这一行，用户会得出「什么都没发生」的反的结论。
+ */
+describe("委派失败：失败路径也要重读账本", () => {
+	/** 把一次委派的结局收成一句话：resolve 说 "resolved"，reject 给错误文本。 */
+	function outcomeOf(pending: Promise<unknown>): Promise<string> {
+		return pending.then(
+			() => "resolved",
+			(err: unknown) => (err instanceof Error ? err.message : String(err)),
+		);
+	}
+
+	it("失败后照样发 get_session_tree：账本里那一行 failed 看得见，原错误也没被吞掉", async () => {
+		const { store } = await createConnectedStore();
+		const settled = outcomeOf(store.delegateChild({ objective: "研究编辑器方案" }, "hr"));
+
+		// serve：子会话没起来 / 没过注册门，节点已写成 failed
+		respondErrorTo("delegate_child", "delegate_child: child did not pass the registration gate");
+		await Bun.sleep(0);
+
+		expect(sentTypes().at(-1)).toBe("get_session_tree");
+		respondTo("get_session_tree", {
+			sessionId: "sess-root",
+			agentId: "hr",
+			children: [{ ...CHILD, status: "failed", statusDetail: "启动后没有挂上 broker" }],
+		});
+
+		expect(await settled).toContain("registration gate");
+		const view = store.getSnapshot();
+		expect(view.sessionTree?.children[0]?.status).toBe("failed");
+		expect(view.sessionTree?.children[0]?.statusDetail).toBe("启动后没有挂上 broker");
+		expect(view.sessionTreeError).toBeUndefined();
+		expect(view.sessionTreeLoading).toBe(false);
+	});
+
+	it("账本也读不出来：两条错误都在（不拿空树顶替 failed 节点）", async () => {
+		const { store } = await createConnectedStore();
+		const settled = outcomeOf(store.delegateChild({ objective: "研究编辑器方案" }, "hr"));
+
+		respondErrorTo("delegate_child", "delegate_child: spawn failed");
+		await Bun.sleep(0);
+		respondErrorTo("get_session_tree", "session tree entry 1: unreadable");
+
+		expect(await settled).toContain("spawn failed");
+		const view = store.getSnapshot();
+		expect(view.sessionTree).toBeUndefined();
+		expect(view.sessionTreeError).toContain("unreadable");
+	});
+});
+
+/**
+ * review P2-2：写命令的回执与它引起的树刷新都属于**提交时那个会话**。
+ *
+ * 子会话在注册期间用户切了会话 / Agent，旧请求回来时：树不能刷（子会话会挂在错误的 root
+ * 下，带回也会打错目标），回执也不能显示（面板的判定同样按 `sessionIdentity()` 对表）。
+ */
+describe("写命令的回执不落进别的会话", () => {
+	it("委派途中换会话：不重读账本，回执也不再属于当前会话", async () => {
+		const { store } = await createConnectedStore();
+		const submitted = store.sessionIdentity();
+		const pending = store.delegateChild({ objective: "研究编辑器方案" }, "hr");
+
+		// 用户在子会话注册期间切走（面板就是拿这个值与提交时的值对表）
+		store.switchSession("sw");
+		expect(store.sessionIdentity()).not.toBe(submitted);
+
+		// 旧请求这时才回来
+		respondTo("delegate_child", { sessionId: "child-1", runId: "run-1", status: "running", agentId: "hr" });
+		const child = await pending;
+
+		// 回执本身还是有效的（子会话真起来了），只是不该再显示在这一屏上
+		expect(child.sessionId).toBe("child-1");
+		expect(sentTypes()).not.toContain("get_session_tree");
+		const view = store.getSnapshot();
+		expect(view.activeAgentId).toBe("sw");
+		expect(view.sessionTree).toBeUndefined();
+	});
+
+	it("换会话后，上一个会话的账本响应落不进新视图（读成功与读失败都落不进）", async () => {
+		const { store } = await createConnectedStore();
+		const pending = store.refreshSessionTree("hr");
+
+		store.switchSession("sw");
+
+		respondTo("get_session_tree", { sessionId: "sess-root", children: [CHILD] });
+		await pending;
+
+		const view = store.getSnapshot();
+		expect(view.activeAgentId).toBe("sw");
+		expect(view.sessionTree).toBeUndefined();
+		expect(view.sessionTreeError).toBeUndefined();
+	});
+
+	it("上一个会话的读失败也是上一个会话的判决（不挂在新会话身上）", async () => {
+		const { store } = await createConnectedStore();
+		const pending = store.refreshSessionTree("hr");
+
+		store.switchSession("sw");
+
+		respondErrorTo("get_session_tree", "session tree entry 3: snapshot version 99 is not readable");
+		await pending;
+
+		const view = store.getSnapshot();
+		expect(view.activeAgentId).toBe("sw");
+		expect(view.sessionTree).toBeUndefined();
+		expect(view.sessionTreeError).toBeUndefined();
 	});
 });
 

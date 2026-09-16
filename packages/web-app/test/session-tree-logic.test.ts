@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { resultStateOf, STATUS_LABEL, shortTime } from "../src/pages/workspace/session-tree-logic";
+import { delegateFailureNote, resultStateOf, STATUS_LABEL, shortTime } from "../src/pages/workspace/session-tree-logic";
 
 /**
  * T8：会话树面板的判定逻辑。
@@ -51,5 +51,33 @@ describe("shortTime", () => {
 describe("status", () => {
 	it("五种状态都有中文标签（不做静默兜底）", () => {
 		expect(Object.keys(STATUS_LABEL).sort()).toEqual(["cancelled", "completed", "failed", "running", "waiting_user"]);
+	});
+});
+
+/**
+ * 委派失败后的提示（review P2-1）。
+ *
+ * 客户端**不知道**子会话有没有起来：serve 会在账本里先把节点写成 `failed` 再招错，断线时
+ * 子进程甚至可能已经起来了。所以这句话只能指向刚重读过的账本 —— 任何「没有起子会话」的
+ * 说法都是客户端造出来的结论。
+ */
+describe("delegateFailureNote", () => {
+	it("账本读得到：只说以树上的记录为准", () => {
+		const note = delegateFailureNote(undefined);
+		expect(note).toContain("以树上的记录为准");
+	});
+
+	it("不声称「没有起子会话」（那是客户端无从知道的事）", () => {
+		for (const note of [delegateFailureNote(undefined), delegateFailureNote("read failed")]) {
+			for (const forbidden of ["没有起子会话", "不会多一行", "未创建", "没起子会话"]) {
+				expect(note).not.toContain(forbidden);
+			}
+		}
+	});
+
+	it("账本也读不到：得承认此刻无从判断，不能给结论", () => {
+		const note = delegateFailureNote("session tree entry 1: unreadable");
+		expect(note).toContain("无从判断");
+		expect(note).not.toContain("以树上的记录为准");
 	});
 });

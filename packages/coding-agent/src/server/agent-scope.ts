@@ -4,14 +4,14 @@
  * Skills / Memory 工作台要显示「这是谁的、在哪个 Project、按哪个会话根算」，这些事实必须来自
  * 既有解析器，一处推导 —— 两处推导不一致时，页面会读一个 Agent、显示另一个的路径：
  *
- *   agentDir            registry 元数据（default agent 例外：它的 meta.agentDir 是 serve 进程 cwd，
- *                       不是它的家 —— 用 getAgentDir()，与 sdk.ts 的记忆扩展同源）
+ *   agentDir            哪个目录是它的家 —— `resolveAgentRuntimeDir`（本文件唯一的推导；default agent
+ *                       的 meta.agentDir 是 serve 进程 cwd，不是它的家）
  *   会话根 sessionCwd    已 attach 会话的 cwd（= registry agent 的 agentDir；未 attach 时按 agentDir 推算）
  *   Project             WP4 `project-store` 的 `matchProjectForPath`（最深声明的祖先 root 获胜）
  *   声明的记忆目录        WP1 `deriveWorkspaceContext`（本模块不重新推导，只调用）
  *
  * 失败模型：Project 读坏了（存储损坏）不是「未归属」—— 记 `projectError`，让调用方少报一个
- * scope 而不是编一个。记忆目录声明读不到同理，退化为 undefined（WP1 语义：没声明就没有）。
+ * scope 而不是编一个。
  */
 
 import { getAgentDir, logger } from "@cornfield/utils";
@@ -19,7 +19,7 @@ import { findAgentRecord, loadAgentDirectory } from "../agent-domain/agent-direc
 import { deriveWorkspaceContext } from "../agent-domain/default-agent";
 import { loadProjects, matchProjectForPath } from "../agent-domain/project-store";
 import type { AgentRecord, ProjectRecord } from "../agent-domain/types";
-import { loadWorkspace } from "../skeleton/workspace";
+import { readWorkspaceDeclaration } from "../skeleton/workspace";
 import type { AgentMeta, AttachedSession } from "./session-registry";
 
 /** default agent 的注册 id（serve 启动时自建，P1 语义）。 */
@@ -43,6 +43,21 @@ export interface AgentScopeAnchor {
 	declaredMemoryDir?: string;
 }
 
+/**
+ * Agent 进程的运行目录（sdk 的 `agentDir`、`CORNFIELD_AGENT_DIR`）—— 「这个 Agent 是谁」的唯一决定者。
+ *
+ * 一处推导，两个调用方：本模块的 scope 锚点，以及委派子会话的服务端（`./session-tree-wire`，它必须把
+ * 子进程的家交给子进程）。规则只有一条 —— default agent 是 serve 自己，它的家是全局 agent 目录；
+ * 其余 Agent 的家是 registry 声明的那个目录（`AgentMeta.agentDir`）。
+ *
+ * `undefined` = 解析不出来，**不是**「那就用别人的家」：一个未说明家的非 default Agent 没有运行目录，
+ * 调用方要么自己给出缺省（本模块的锚点），要么如实报错（委派不能把子进程放进一个不是那个 Agent 的家里）。
+ */
+export function resolveAgentRuntimeDir(input: { agentId: string; agentDir?: string }): string | undefined {
+	if (input.agentId === DEFAULT_AGENT_ID) return getAgentDir();
+	return input.agentDir?.trim() || undefined;
+}
+
 export interface ResolveAgentScopeInput {
 	agentId: string;
 	/** registry 元数据（未知 agent = undefined）。 */
@@ -54,7 +69,7 @@ export interface ResolveAgentScopeInput {
 /** 解析焦点 Agent 的 scope 锚点。不抛：读不到的每一块都有明确的缺省与原因。 */
 export async function resolveAgentScope(input: ResolveAgentScopeInput): Promise<AgentScopeAnchor> {
 	const { agentId, meta, attached } = input;
-	const agentDir = agentId === DEFAULT_AGENT_ID ? getAgentDir() : (meta?.agentDir ?? getAgentDir());
+	const agentDir = resolveAgentRuntimeDir({ agentId, agentDir: meta?.agentDir }) ?? getAgentDir();
 	const sessionCwd = attached?.session.sessionManager.getCwd() ?? agentDir;
 	const anchor: AgentScopeAnchor = {
 		agentId,
@@ -72,8 +87,8 @@ export async function resolveAgentScope(input: ResolveAgentScopeInput): Promise<
 		if (match) anchor.project = match;
 	}
 
-	const declared = await resolveDeclaredMemoryDir(agentId, agentDir, sessionCwd, anchor.project);
-	if (declared !== undefined) anchor.declaredMemoryDir = declared;
+	const declared = await resolveDeclaredWorkspace(agentId, agentDir, sessionCwd, anchor.project);
+	if (declared.memoryDir !== undefined) anchor.declaredMemoryDir = declared.memoryDir;
 	return anchor;
 }
 
@@ -92,15 +107,17 @@ async function loadProjectRecords(anchor: AgentScopeAnchor): Promise<{ records?:
 }
 
 /**
- * WP1 的 `WorkspaceContext.memoryDir`。走 agent-directory 的读模型；agentId 不在注册表里
- * （default agent 常见）时用 registry 已知的 agentDir 构造同形记录，声明仍然只从磁盘读一次。
+ * 声明里读出来的记忆目录（来自 agentDir 的同一份声明，一次读盘）。
+ *
+ * 没有声明、声明读不出来、声明里没写 `knowledge.memoryDir`，三者都少报一个 memoryDir ——
+ * 调用方（memory scope）的既有语义就是「声明了才算，没声明就按 legacy 候选算」。
  */
-async function resolveDeclaredMemoryDir(
+async function resolveDeclaredWorkspace(
 	agentId: string,
 	agentDir: string,
 	sessionCwd: string,
 	project?: ProjectRecord,
-): Promise<string | undefined> {
+): Promise<{ memoryDir?: string }> {
 	try {
 		const entries = await loadAgentDirectory();
 		const entry = findAgentRecord(entries, agentId);
@@ -110,20 +127,26 @@ async function resolveDeclaredMemoryDir(
 			displayName: agentId,
 			enabled: true,
 		};
-		const declaration = entry?.declaration ?? (await loadWorkspace(agentDir)) ?? undefined;
+		// 读模型已经读过声明的 agent 直接用它的缓存；没有（default agent / 未注册目录）才读盘。
+		let declaration = entry?.declaration;
+		if (!declaration) {
+			const read = await readWorkspaceDeclaration(agentDir);
+			if (read.state === "declared") declaration = read.declaration;
+		}
+		// WP1 的派生：本模块只调用，不重新推导。
 		const context = deriveWorkspaceContext({
 			agent: record,
 			project,
 			cwd: sessionCwd,
 			workspaceDeclaration: declaration,
 		});
-		return context.memoryDir;
+		return context.memoryDir !== undefined ? { memoryDir: context.memoryDir } : {};
 	} catch (err) {
-		logger.debug("scope:memory-dir-unresolved", {
+		logger.debug("scope:declaration-unresolved", {
 			agentId,
 			agentDir,
 			error: err instanceof Error ? err.message : String(err),
 		});
-		return undefined;
+		return {};
 	}
 }

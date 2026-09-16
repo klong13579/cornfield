@@ -1,10 +1,18 @@
-import { AlertTriangle, ArrowDownToLine, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { BroughtBackChildResultDto } from "../../lib/pi-client-api";
+import type { BroughtBackChildResultDto, DelegatedChildDto } from "../../lib/pi-client-api";
 import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
-import { resultStateOf, STATUS_BADGE, STATUS_LABEL, shortTime } from "./session-tree-logic";
+import {
+	delegateAgentOptions,
+	delegateFailureNote,
+	delegateSubmitState,
+	resultStateOf,
+	STATUS_BADGE,
+	STATUS_LABEL,
+	shortTime,
+} from "./session-tree-logic";
 
 /**
  * 会话树（T8，FR-1/§8）—— 当前会话作为 Root，下面挂它直接委派出去的子会话。
@@ -14,6 +22,10 @@ import { resultStateOf, STATUS_BADGE, STATUS_LABEL, shortTime } from "./session-
  *   - 查不到（未连接 / 账本读失败）≠ 没有子会话（正常答案：空数组）
  *   - 结果就绪 ≠ 结果已带回（只有前者才能点「带回」）
  *   - 「这次才带回」≠「此前已带回」（重复带回不会二次注入，UI 也必须说清）
+ *
+ * 委派同理：不先画一行「启动中」再等回执 —— 子会话只从账本里长出来（成功就刷新同一条
+ * `get_session_tree`）。失败照样把 serve 的原话摆出来，**并且照样重读账本**：serve 在起不来 /
+ * 没过注册门时会把节点写成 `failed` 再报错，客户端无从知道那一次到底有没有起子会话。
  */
 
 export function SessionTree(): React.JSX.Element {
@@ -23,23 +35,61 @@ export function SessionTree(): React.JSX.Element {
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [actionError, setActionError] = useState<string | undefined>();
 	const [brought, setBrought] = useState<BroughtBackChildResultDto | undefined>();
+	const [objective, setObjective] = useState("");
+	const [targetAgentId, setTargetAgentId] = useState("");
+	const [delegating, setDelegating] = useState(false);
+	const [delegateError, setDelegateError] = useState<string | undefined>();
+	const [delegated, setDelegated] = useState<DelegatedChildDto | undefined>();
 
 	// 会话换人就重查：换了 Agent / 开了新会话后，上一个会话的子树与带回预览不得留在屏幕上。
 	const sessionKey = view.sessionFile ?? view.sessionId;
 	useEffect(() => {
 		setBrought(undefined);
 		setActionError(undefined);
+		setDelegateError(undefined);
+		setDelegated(undefined);
+		setTargetAgentId("");
 		if (!view.connected) return;
 		void store.refreshSessionTree(agentId);
 	}, [store, view.connected, agentId, sessionKey]);
 
 	const children = view.sessionTree?.children ?? [];
+	const submit = delegateSubmitState({ objective, busy: delegating });
+	const delegate = async (): Promise<void> => {
+		// 提交时的会话身份：这一次委派的回执只属于这个会话。
+		const submitted = store.sessionIdentity();
+		setDelegating(true);
+		setDelegateError(undefined);
+		try {
+			const child = await store.delegateChild(
+				{ objective: objective.trim(), ...(targetAgentId ? { agentId: targetAgentId } : {}) },
+				agentId,
+			);
+			// 迟到的回执：用户已经换了会话 / Agent —— 它属于上一个会话（store 那边同样没有把
+			// 上一个会话的账本刷进来），显示在这里就是把别人的结果挂在当前会话名下。
+			if (store.sessionIdentity() !== submitted) return;
+			setDelegated(child);
+			setObjective("");
+		} catch (err) {
+			// 失败也一样：换过会话就不拿它去报另一个会话的错 —— 那条委派（和它在账本里的
+			// 失败节点）属于上一个会话，回到那里才看得见。
+			if (store.sessionIdentity() !== submitted) return;
+			setDelegateError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setDelegating(false);
+		}
+	};
 	const bringBack = async (childSessionId: string): Promise<void> => {
+		// 同一条纪律：带回的内容也是一种回执，落不到别的会话里。
+		const submitted = store.sessionIdentity();
 		setBusyId(childSessionId);
 		setActionError(undefined);
 		try {
-			setBrought(await store.bringBackChild(childSessionId, agentId));
+			const result = await store.bringBackChild(childSessionId, agentId);
+			if (store.sessionIdentity() !== submitted) return;
+			setBrought(result);
 		} catch (err) {
+			if (store.sessionIdentity() !== submitted) return;
 			setActionError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setBusyId(null);
@@ -65,6 +115,64 @@ export function SessionTree(): React.JSX.Element {
 			<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
 				{!view.connected && (
 					<div className="px-2 py-10 text-center text-[12px] text-ink-faint">未连接——会话树不可用</div>
+				)}
+
+				{/* 委派：会话树唯一的写入口。目标 Agent 缺省 = 当前会话自己的 Agent。 */}
+				{view.connected && (
+					<form
+						className="mb-1.5 rounded-lg border border-hairline bg-surface-2 px-2.5 py-2"
+						onSubmit={event => {
+							event.preventDefault();
+							if (submit.canSubmit) void delegate();
+						}}
+					>
+						<input
+							value={objective}
+							onChange={e => setObjective(e.target.value)}
+							placeholder="这次委派要它做什么"
+							spellCheck={false}
+							className="w-full rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+						/>
+						<div className="mt-1.5 flex items-center gap-2">
+							<select
+								value={targetAgentId}
+								onChange={e => setTargetAgentId(e.target.value)}
+								aria-label="委派给哪个 Agent"
+								className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink outline-none focus:border-accent"
+							>
+								<option value="">{agentId ? `本 Agent（${agentId}）` : "本 Agent"}</option>
+								{delegateAgentOptions(view.agents, agentId).map(agent => (
+									<option key={agent.id} value={agent.id}>
+										{agent.name}（{agent.id}）
+									</option>
+								))}
+							</select>
+							<button type="submit" className="btn-secondary cbtn" disabled={!submit.canSubmit}>
+								<Plus size={12} strokeWidth={1.5} />
+								{delegating ? "委派中…" : "委派子会话"}
+							</button>
+						</div>
+						{submit.hint && !delegating && <div className="mt-1 text-[11px] text-ink-faint">{submit.hint}</div>}
+					</form>
+				)}
+
+				{delegateError && (
+					<div className="mx-1 mb-1 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+						<AlertTriangle size={13} strokeWidth={1.5} className="mt-0.5 shrink-0" />
+						<span className="min-w-0 flex-1 break-words">
+							委派失败：{delegateError}
+							<span className="mt-0.5 block text-[11px] text-ink-subtle">
+								{delegateFailureNote(view.sessionTreeError)}
+							</span>
+						</span>
+					</div>
+				)}
+
+				{delegated && (
+					<div className="mx-1 mb-1.5 rounded-lg border border-hairline bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-subtle">
+						<span className="font-mono text-[10px]">{delegated.sessionId.slice(0, 8)}</span>
+						<span className="ml-1">已委派并写入账本（pid {delegated.pid ?? "—"}）</span>
+					</div>
 				)}
 
 				{view.connected && view.sessionTreeError && (

@@ -206,11 +206,30 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 	},
 ];
 
+/**
+ * Settings key declaring the client-wide default Agent — §10 rung 4 of the default-Agent
+ * chain (`session.agentId > project.defaultAgentId > workspaceContext.defaultAgentId >
+ * user.globalDefaultAgentId > bootstrap`).
+ *
+ * One value for the whole client, so it lives in the user's own `<agentDir>/config.yml`
+ * (`Settings`' global file) under `user:` → `globalDefaultAgentId:`, and not in an Agent's
+ * profile. No default: an absent key declares nothing, and the resolution falls through
+ * to the process's own Agent. A declared value that names an unknown or disabled Agent
+ * fails the resolution loudly instead of quietly demoting to that fallback.
+ */
+export const USER_GLOBAL_DEFAULT_AGENT_KEY = "user.globalDefaultAgentId";
+
 export const SETTINGS_SCHEMA = {
 	// ────────────────────────────────────────────────────────────────────────
 	// General settings (no UI)
 	// ────────────────────────────────────────────────────────────────────────
 	lastChangelogVersion: { type: "string", default: undefined },
+
+	// §10 rung 4 — the key of USER_GLOBAL_DEFAULT_AGENT_KEY above (spelled as a literal so
+	// `SettingPath` stays a literal union; the constant is bound to it by its typed use in
+	// ../session/session-agent). No UI row: a default-Agent picker is a client-surface
+	// decision, not a settings-panel toggle.
+	"user.globalDefaultAgentId": { type: "string", default: undefined },
 	lastUpdateCheck: { type: "number", default: 0 },
 	latestVersion: { type: "string", default: undefined },
 

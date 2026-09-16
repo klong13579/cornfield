@@ -150,6 +150,30 @@ describe("validateProjects", () => {
 		const violations = validateProjects(makeSnapshot({ projects: [makeProject({ root: "cornfield" })] }));
 		expect(rules(violations)).toEqual(["project.root-not-absolute"]);
 	});
+
+	// The user-global declaration (§10 rung 4) is the other client-level declaration of a
+	// default Agent, so it is judged here with the same rule pair and its own source name.
+	test("accepts a user-global default that resolves", () => {
+		expect(validateProjects(makeSnapshot({ userDefaultAgentId: "hr" }))).toEqual([]);
+	});
+
+	test("reports nothing when no user-global default is declared", () => {
+		expect(validateProjects(makeSnapshot())).toEqual([]);
+	});
+
+	test("rejects a user-global default that does not exist, naming the declaration", () => {
+		const violations = validateProjects(makeSnapshot({ userDefaultAgentId: "ghost" }));
+		expect(rules(violations)).toEqual(["user.default-agent-missing"]);
+		expect(violations[0]?.subject).toBe("user.globalDefaultAgentId");
+	});
+
+	test("rejects a disabled user-global default", () => {
+		const violations = validateProjects(
+			makeSnapshot({ agents: [makeAgent({ enabled: false })], userDefaultAgentId: "hr" }),
+		);
+		expect(rules(violations)).toEqual(["user.default-agent-disabled"]);
+		expect(violations[0]?.subject).toBe("user.globalDefaultAgentId");
+	});
 });
 
 describe("validateSessionTree", () => {
@@ -332,6 +356,40 @@ describe("validateWorkspaceContexts", () => {
 	test("rejects a context bound to an unknown project", () => {
 		const snapshot = makeSnapshot({ projects: [], workspaceContexts: [base] });
 		expect(rules(validateWorkspaceContexts(snapshot))).toEqual(["workspace.project-missing"]);
+	});
+
+	// §10 rung 3: the default Agent the workspace declaration names, mirrored onto the
+	// context. Absent is not a violation — a workspace that declares nothing is a fact.
+	test("accepts a declared workspace default that resolves", () => {
+		expect(
+			validateWorkspaceContexts(makeSnapshot({ workspaceContexts: [{ ...base, defaultAgentId: "hr" }] })),
+		).toEqual([]);
+	});
+
+	test("reports nothing when the workspace declared no default agent", () => {
+		expect(validateWorkspaceContexts(makeSnapshot({ workspaceContexts: [base] }))).toEqual([]);
+	});
+
+	test("rejects a declared workspace default that does not exist, naming the workspace", () => {
+		const violations = validateWorkspaceContexts(
+			makeSnapshot({ workspaceContexts: [{ ...base, defaultAgentId: "ghost" }] }),
+		);
+		expect(rules(violations)).toEqual(["workspace.default-agent-missing"]);
+		expect(violations[0]?.subject).toBe("hr@cornfield");
+	});
+
+	test("rejects a declared workspace default that is disabled", () => {
+		const violations = validateWorkspaceContexts(
+			makeSnapshot({
+				agents: [
+					makeAgent(),
+					makeAgent({ agentId: "software", agentDir: "/home/me/.cornfield/agents/sw", enabled: false }),
+				],
+				workspaceContexts: [{ ...base, defaultAgentId: "software" }],
+			}),
+		);
+		expect(rules(violations)).toEqual(["workspace.default-agent-disabled"]);
+		expect(violations[0]?.subject).toBe("hr@cornfield");
 	});
 });
 
@@ -536,6 +594,31 @@ describe("validateDomain", () => {
 		expect(found).toContain("todo.project-missing");
 		expect(found).toContain("todo.session-ref-missing");
 		expect(found).toContain("schedule.agent-unresolved");
+	});
+
+	// The two declarations below the session rung are not interchangeable: each violation
+	// has to name the source that declared it, or a reader cannot tell which file to fix.
+	test("keeps the two default-Agent declaration sources apart", () => {
+		const violations = validateDomain(
+			makeSnapshot({
+				workspaceContexts: [
+					{
+						agentId: "hr",
+						agentDir: AGENT_DIR,
+						projectId: "cornfield",
+						projectRoot: PROJECT_ROOT,
+						cwd: PROJECT_ROOT,
+						modelConfigPath: `${AGENT_DIR}/.cornfield/config.yml`,
+						defaultAgentId: "ghost",
+					},
+				],
+				userDefaultAgentId: "ghost",
+			}),
+		);
+		expect(violations.map(violation => [violation.rule, violation.subject])).toEqual([
+			["user.default-agent-missing", "user.globalDefaultAgentId"],
+			["workspace.default-agent-missing", "hr@cornfield"],
+		]);
 	});
 });
 

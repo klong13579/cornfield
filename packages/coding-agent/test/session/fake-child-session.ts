@@ -27,6 +27,8 @@ export type FakeChildBehavior =
 	| "bad-version"
 	/** Exits before answering `hello`. */
 	| "exit-on-hello"
+	/** Answers every request with `ok: false` — a child that receives but refuses work. */
+	| "reject-requests"
 	/** Acks, then crashes after `crashAfterMs` — the restart path. */
 	| "crash-after-ready"
 	/**
@@ -50,6 +52,13 @@ export interface FakeChildOptions {
 	 * outlive the test run.
 	 */
 	selfExitMs?: number;
+	/**
+	 * The Agent id this child reports as its own resolved identity (its `get_state`
+	 * answer), standing in for the real child's session-header Agent. A parent that
+	 * verifies the child it launched reads this and nothing else — set it to
+	 * something else to make that child a liar and prove the parent refuses.
+	 */
+	reportsAgentId?: string;
 }
 
 export interface FakeChild {
@@ -101,6 +110,14 @@ const log = (entry) => {
 		appendFileSync(logPath, JSON.stringify(entry) + "\\n");
 	} catch {}
 };
+
+// The directory the child was actually spawned in — what the caller asked for, not
+// what the spec said. A test asserts against this, not against the spawn arguments.
+// The Agent home it was spawned *as* is the same kind of fact: the child's own view of
+// its environment, not the parent's account of what it passed (a child's Agent is the
+// config directory it loads, so a delegation that records one Agent while spawning the
+// child under another's home must be visible here).
+log({ event: "boot", cwd: process.cwd(), agentDir: process.env.CORNFIELD_AGENT_DIR ?? null });
 
 // Out-of-band control channel. The supervisor never force-kills, so a behaviour
 // that ignores stdin EOF and SIGTERM needs a way to leave that is not a signal:
@@ -178,13 +195,35 @@ function handleLine(line) {
 
 	if (frame.type === "request") {
 		const command = frame.command?.type ?? "unknown";
-		log({ event: "request", command });
+		// The payload is logged with the command: "it received a prompt" and "it received
+		// THIS prompt" are different claims, and only the second one proves a dispatch.
+		log({
+			event: "request",
+			command,
+			message: typeof frame.command?.message === "string" ? frame.command.message : undefined,
+		});
 		// A doomed incarnation answers nothing — it dies with the request in flight.
 		if (doomed || behavior === "eof-blind") return;
 		// Faithful to the real server: the response carries command.id, not the
 		// frame's own id. Answering with frame.id would hide a client that only
 		// stamps the frame and never the command.
 		const responseId = frame.command && frame.command.id ? frame.command.id : frame.id;
+		// A state read is not work: a child that refuses work (or has one more thing to
+		// say) still answers what it is, because that answer is what a parent checks
+		// before it hands out the task.
+		if (command === "get_state") {
+			emit({
+				type: "response",
+				id: responseId,
+				ok: true,
+				result: { command, pid: process.pid, agentId: process.env.FAKE_CHILD_AGENT_ID ?? null },
+			});
+			return;
+		}
+		if (behavior === "reject-requests") {
+			emit({ type: "response", id: responseId, ok: false, error: "the fake child rejects every command" });
+			return;
+		}
 		emit({ type: "response", id: responseId, ok: true, result: { command, pid: process.pid } });
 	}
 }
@@ -245,6 +284,7 @@ export async function createFakeChildSession(options: FakeChildOptions = {}): Pr
 			FAKE_CHILD_LOG: logPath,
 			FAKE_CHILD_CONTROL: controlPath,
 			FAKE_CHILD_SELF_EXIT_MS: String(selfExitMs),
+			...(options.reportsAgentId ? { FAKE_CHILD_AGENT_ID: options.reportsAgentId } : {}),
 		},
 		async receivedRequests(): Promise<string[]> {
 			const entries = await readLog(logPath);

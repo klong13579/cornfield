@@ -1,16 +1,16 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type {
-	RemoteSkillItemDto,
-	SkillActivation,
-	SkillScope,
-	SkillScopeRowDto,
-	SkillStatus,
-	SkillsResultDto,
-} from "../../lib/pi-client-api";
+import type { RemoteSkillItemDto, SkillScope, SkillScopeRowDto, SkillsResultDto } from "../../lib/pi-client-api";
 import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import {
+	SKILL_ACTIVATION_LABELS,
+	SKILL_SCOPE_LABELS,
+	SKILL_STATUS_LABELS,
+	skillStatusClass,
+	skillVersionText,
+} from "./skill-display";
 
 /**
  * 技能工作台（T10B）—— 回答五个问题，每个都来自 serve 端既有事实源，前端不自己猜：
@@ -28,40 +28,14 @@ import { useSession } from "../../state/use-session";
  * 顶部「开源 Skill Hub」（h2）：list_remote_skills 浏览远程技能市场 + install_remote_skill 装到本机 skills。
  */
 
-const SCOPE_LABELS: Record<SkillScope, string> = { agent: "Agent", project: "Project", global: "全局" };
+/** 范围分组的展示顺序（本页专有：Agent 详情页不按范围分组）。 */
 const SCOPE_ORDER: SkillScope[] = ["agent", "project", "global"];
-const ACTIVATION_LABELS: Record<SkillActivation, string> = {
-	loaded: "已加载",
-	discoverable: "可发现",
-	blocked: "受阻",
-};
-const STATUS_LABELS: Record<SkillStatus, string> = {
-	enabled: "启用",
-	disabled: "停用",
-	deprecated: "废弃",
-	unavailable: "读不到",
-};
-
-/** 版本显示：声明优先，否则内容指纹（并把「没声明」说清，不冒充版本号）。 */
-function versionText(row: SkillScopeRowDto): string {
-	if (row.version) return `v${row.version}`;
-	if (row.fingerprint) return `指纹 ${row.fingerprint}`;
-	return "版本未知";
-}
 
 function fmtDay(ts: number | undefined): string | null {
 	if (ts === undefined) return null;
 	const date = new Date(ts);
 	if (Number.isNaN(date.getTime())) return null;
 	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-/** 状态徽标配色（读写不到与「停用」不是一件事，颜色也不同）。 */
-function statusClass(status: SkillStatus): string {
-	if (status === "unavailable") return "bg-danger/10 text-danger";
-	if (status === "deprecated") return "bg-surface-2 text-ink-faint line-through";
-	if (status === "disabled") return "bg-surface-2 text-ink-faint";
-	return "bg-success/10 text-success";
 }
 
 export function SkillsView(): React.JSX.Element {
@@ -523,7 +497,7 @@ export function SkillsView(): React.JSX.Element {
 								▶
 							</span>
 							<span className="text-xs font-semibold tracking-[0.06em] text-ink uppercase">
-								{SCOPE_LABELS[group.scope]}
+								{SKILL_SCOPE_LABELS[group.scope]}
 							</span>
 							<span className="ml-auto font-mono text-xs text-ink-faint">{group.rows.length}</span>
 						</button>
@@ -566,12 +540,12 @@ export function SkillsView(): React.JSX.Element {
 											<div className="flex items-baseline gap-2">
 												<span className="text-xs font-medium text-ink-faint line-through">{row.name}</span>
 												<span
-													className={`rounded px-1.5 py-0.5 font-mono text-2xs ${statusClass(row.status)}`}
+													className={`rounded px-1.5 py-0.5 font-mono text-2xs ${skillStatusClass(row.status)}`}
 												>
-													{STATUS_LABELS[row.status]}
+													{SKILL_STATUS_LABELS[row.status]}
 												</span>
 												<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
-													{SCOPE_LABELS[row.scope]}
+													{SKILL_SCOPE_LABELS[row.scope]}
 												</span>
 											</div>
 											{row.description && (
@@ -625,14 +599,14 @@ function SkillRowView({
 					<span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
 						{row.source}
 					</span>
-					<span className={`rounded px-1.5 py-0.5 font-mono text-2xs ${statusClass(row.status)}`}>
-						{STATUS_LABELS[row.status]}
+					<span className={`rounded px-1.5 py-0.5 font-mono text-2xs ${skillStatusClass(row.status)}`}>
+						{SKILL_STATUS_LABELS[row.status]}
 					</span>
 					<span
 						className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-ink-faint"
-						title={`激活态：${ACTIVATION_LABELS[row.activation]}`}
+						title={`激活态：${SKILL_ACTIVATION_LABELS[row.activation]}`}
 					>
-						{ACTIVATION_LABELS[row.activation]}
+						{SKILL_ACTIVATION_LABELS[row.activation]}
 					</span>
 				</div>
 				{row.description && <div className="mt-0.5 line-clamp-2 text-xs text-ink-subtle">{row.description}</div>}
@@ -640,7 +614,7 @@ function SkillRowView({
 					<span title={row.path} className="max-w-[420px] truncate">
 						{row.path || "路径未知"}
 					</span>
-					<span>{versionText(row)}</span>
+					<span>{skillVersionText(row)}</span>
 					{day && <span>更新 {day}</span>}
 				</div>
 			</div>

@@ -213,6 +213,13 @@ export interface WorkspaceContext {
 	cwd: string;
 	/** Agent-scoped model/config source, e.g. `<agentDir>/.cornfield/config.yml`. */
 	modelConfigPath: string;
+	/**
+	 * The Agent the workspace declaration names as its default (§10 rung 3), mirrored here
+	 * so a reader sees the declaration in force without re-reading the file. Absent means
+	 * the workspace declared nothing — never an invented default. The relations validator
+	 * requires a declared value to name a known, enabled Agent (`workspace.default-agent-*`).
+	 */
+	defaultAgentId?: AgentId;
 	permissionMode?: WorkspacePermissionMode;
 	skillsDir?: string;
 	memoryDir?: string;
@@ -377,6 +384,13 @@ export interface DomainSnapshot {
 	agents: readonly AgentRecord[];
 	projects: readonly ProjectRecord[];
 	sessions: readonly SessionNode[];
+	/**
+	 * The client-wide default Agent (§10 rung 4): the `user.globalDefaultAgentId` value of
+	 * the user's own `<agentDir>/config.yml` (`USER_GLOBAL_DEFAULT_AGENT_KEY`). One value
+	 * for the whole client, so it belongs to no Project and to no WorkspaceContext. Absent
+	 * means nothing is declared there.
+	 */
+	userDefaultAgentId?: AgentId;
 	workspaceContexts?: readonly WorkspaceContext[];
 	schedules?: readonly ScheduleRecord[];
 	todos?: readonly AgentTodo[];

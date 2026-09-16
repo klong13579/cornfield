@@ -43,6 +43,8 @@ export type DomainViolationRule =
 	| "project.root-not-absolute"
 	| "project.default-agent-missing"
 	| "project.default-agent-disabled"
+	| "user.default-agent-missing"
+	| "user.default-agent-disabled"
 	| "session.agent-missing"
 	| "session.agent-disabled"
 	| "session.project-missing"
@@ -64,6 +66,8 @@ export type DomainViolationRule =
 	| "workspace.project-missing"
 	| "workspace.project-root-mismatch"
 	| "workspace.project-undeclared"
+	| "workspace.default-agent-missing"
+	| "workspace.default-agent-disabled"
 	| "schedule.agent-missing"
 	| "schedule.agent-disabled"
 	| "schedule.agent-unresolved"
@@ -156,7 +160,9 @@ function validateUniqueIds(concept: string, ids: readonly string[]): DomainViola
 	return violations;
 }
 
-/** An Agent's declared project bindings are a ceiling: nothing may reference outside them. */
+/**
+ * An Agent's declared project bindings are a ceiling: nothing may reference outside them.
+ */
 function checkProjectBinding(agent: AgentRecord | undefined, projectId: string, subject: string): DomainViolation[] {
 	if (!agent?.projectIds || agent.projectIds.includes(projectId)) return [];
 	return [
@@ -166,6 +172,36 @@ function checkProjectBinding(agent: AgentRecord | undefined, projectId: string, 
 			message: `agent "${agent.agentId}" does not declare a binding to project "${projectId}"`,
 		},
 	];
+}
+
+/** Which scope a declared default Agent came from; the rule id names it. */
+type DeclaredDefaultAgentSource = "project" | "workspace" | "user";
+
+/**
+ * A *declared* default Agent must name an Agent that exists and is enabled (§10 candidate
+ * check). One helper for all three declarations — Project, workspace and user-global —
+ * because it is one check: splitting it per source would let three verdicts drift while
+ * claiming to answer the same question. `field` is the name the declaration carries in
+ * its own file, so the message quotes what the reader actually declared.
+ */
+function checkDeclaredDefaultAgent(input: {
+	agentById: ReadonlyMap<AgentId, AgentRecord>;
+	agentId: AgentId;
+	source: DeclaredDefaultAgentSource;
+	field: string;
+	subject: string;
+}): DomainViolation[] {
+	const { agentById, agentId, source, field, subject } = input;
+	const agent = agentById.get(agentId);
+	if (!agent) {
+		return [
+			{ rule: `${source}.default-agent-missing`, subject, message: `${field} "${agentId}" is not a known Agent` },
+		];
+	}
+	if (!agent.enabled) {
+		return [{ rule: `${source}.default-agent-disabled`, subject, message: `${field} "${agentId}" is disabled` }];
+	}
+	return [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,7 +239,14 @@ export function validateAgents(snapshot: DomainSnapshot): DomainViolation[] {
 	return [...violations, ...validateUniqueIds("agent", agentIds)];
 }
 
-/** Project → its default Agent must exist and be enabled (§10). */
+/**
+ * Client-level declarations of a default Agent (§10 rungs 2 and 4). A Project's
+ * `defaultAgentId` and the user-global `userDefaultAgentId` are the same concept — an
+ * ambient client-level declaration naming the Agent that should serve a scope — so both
+ * are judged here, with the same existence + enabled check, and only the rule id's source
+ * differs. A declared value that cannot be honoured is reported, never read as "nothing
+ * declared": that demotion is what starts a session as the wrong Agent.
+ */
 export function validateProjects(snapshot: DomainSnapshot): DomainViolation[] {
 	const { agentById } = buildIndexes(snapshot);
 	const violations: DomainViolation[] = [];
@@ -216,20 +259,26 @@ export function validateProjects(snapshot: DomainSnapshot): DomainViolation[] {
 			});
 		}
 		if (project.defaultAgentId === undefined) continue;
-		const agent = agentById.get(project.defaultAgentId);
-		if (!agent) {
-			violations.push({
-				rule: "project.default-agent-missing",
+		violations.push(
+			...checkDeclaredDefaultAgent({
+				agentById,
+				agentId: project.defaultAgentId,
+				source: "project",
+				field: "defaultAgentId",
 				subject: project.projectId,
-				message: `defaultAgentId "${project.defaultAgentId}" is not a known Agent`,
-			});
-		} else if (!agent.enabled) {
-			violations.push({
-				rule: "project.default-agent-disabled",
-				subject: project.projectId,
-				message: `defaultAgentId "${project.defaultAgentId}" is disabled`,
-			});
-		}
+			}),
+		);
+	}
+	if (snapshot.userDefaultAgentId !== undefined) {
+		violations.push(
+			...checkDeclaredDefaultAgent({
+				agentById,
+				agentId: snapshot.userDefaultAgentId,
+				source: "user",
+				field: "user.globalDefaultAgentId",
+				subject: "user.globalDefaultAgentId",
+			}),
+		);
 	}
 	const projectIds = snapshot.projects.map(project => project.projectId);
 	return [...violations, ...validateUniqueIds("project", projectIds)];
@@ -411,7 +460,8 @@ function findCycle(start: SessionNode, byId: ReadonlyMap<SessionId, SessionNode>
 
 /**
  * WorkspaceContext is derived, so every field must still agree with what it was
- * derived from: the Agent's agentDir, and the Project's id and root (§4).
+ * derived from: the Agent's agentDir, the Project's id and root (§4), and — for a
+ * declared workspace default — a default Agent that can actually serve (§10).
  */
 export function validateWorkspaceContexts(snapshot: DomainSnapshot): DomainViolation[] {
 	const { agentById, projectById } = buildIndexes(snapshot);
@@ -440,6 +490,18 @@ export function validateWorkspaceContexts(snapshot: DomainSnapshot): DomainViola
 					message: `context agentDir "${context.agentDir}" is not the Agent's home "${agent.agentDir}"`,
 				});
 			}
+		}
+
+		if (context.defaultAgentId !== undefined) {
+			violations.push(
+				...checkDeclaredDefaultAgent({
+					agentById,
+					agentId: context.defaultAgentId,
+					source: "workspace",
+					field: "defaultAgentId",
+					subject,
+				}),
+			);
 		}
 
 		if (context.projectId === undefined) {

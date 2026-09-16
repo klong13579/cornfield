@@ -18,6 +18,8 @@ import type {
 } from "../src/results";
 import type { AgentTodoDto } from "../src/results/agent-todos";
 import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
+import type { ProjectDeleteDto, ProjectRecordDto, ProjectUpsertDto } from "../src/results/projects";
+import type { ChildSessionStatusDto, DelegateChildInput, DelegatedChildDto } from "../src/results/session-tree";
 
 /**
  * 协议形状锁定（P0，参照 codex schema_fixtures）：
@@ -126,9 +128,53 @@ type _AssertBringBackChildResult = _BringBackChildResult extends {
 	: never;
 const _bringBackChildResultShape: _AssertBringBackChildResult = true;
 
+type _DelegateChild = WireCommandOfType<"delegate_child">;
+// 入参形状就是 pi-wire 的 canonical `DelegateChildInput`：命令面与 DTO 面不各自长一份。
+const _delegateChildShape: _Equal<
+	_DelegateChild,
+	{ id?: string; type: "delegate_child"; sessionId?: string } & DelegateChildInput
+> = true;
+
+// 成功回执的形状即「一条真的在跑的子会话」：id/runId/status 三者缺一不可，
+// 否则客户端拿不到账本节点的身份，也无法区分「已启动」与「已有结果」。
+type _DelegatedChild = DelegatedChildDto;
+type _AssertDelegatedChild = _DelegatedChild extends {
+	sessionId: string;
+	runId: string;
+	status: ChildSessionStatusDto;
+	agentId: string;
+}
+	? true
+	: never;
+const _delegatedChildShape: _AssertDelegatedChild = true;
+
 type _ListProjects = WireCommandOfType<"list_projects">;
 type _AssertListProjects = _ListProjects extends { type: "list_projects"; sessionId?: string } ? true : never;
 const _listProjectsShape: _AssertListProjects = true;
+
+type _SetProject = WireCommandOfType<"set_project">;
+type _AssertSetProject = _SetProject extends {
+	type: "set_project";
+	projectId: string;
+	name: string;
+	root: string;
+	defaultAgentId?: string;
+}
+	? true
+	: never;
+const _setProjectShape: _AssertSetProject = true;
+
+type _DeleteProject = WireCommandOfType<"delete_project">;
+type _AssertDeleteProject = _DeleteProject extends { type: "delete_project"; projectId: string } ? true : never;
+const _deleteProjectShape: _AssertDeleteProject = true;
+
+// 写面的答复形状：声明回「存储里现在那一份」（不是发出去的那份 `root`），
+// 删除回「真的删掉了哪一个」—— 没有 `deleted` 标记位（没声明过就是 ok:false）。
+type _AssertProjectUpsertDto = ProjectUpsertDto extends { project: ProjectRecordDto } ? true : never;
+const _projectUpsertDtoShape: _AssertProjectUpsertDto = true;
+
+type _AssertProjectDeleteDto = ProjectDeleteDto extends { projectId: string } ? true : never;
+const _projectDeleteDtoShape: _AssertProjectDeleteDto = true;
 
 type _ListAgentTodos = WireCommandOfType<"list_agent_todos">;
 type _AssertListAgentTodos = _ListAgentTodos extends { type: "list_agent_todos"; sessionId?: string } ? true : never;
@@ -370,8 +416,12 @@ const COMMAND_TYPES = [
 	// Session Tree（T8）：父会话对被委派子会话的账本读取与结果带回
 	"get_session_tree",
 	"bring_back_child_result",
-	// Project（T8）：客户端级 Project registry 只读
+	// Session Tree（T8 写入口）：从父会话真的委派一个子会话
+	"delegate_child",
+	// Project（T8）：客户端级 Project registry
 	"list_projects",
+	"set_project",
+	"delete_project",
 	// Agent Todo（T10A）：Agent 级 Todo 板
 	"list_agent_todos",
 	"set_agent_todo",
@@ -397,5 +447,8 @@ describe("WireCommand shape lock", () => {
 		expect(COMMAND_TYPES).toContain("list_remote_skills");
 		expect(COMMAND_TYPES).toContain("listen_list");
 		expect(COMMAND_TYPES).toContain("set_agent_todo");
+		expect(COMMAND_TYPES).toContain("delegate_child");
+		expect(COMMAND_TYPES).toContain("set_project");
+		expect(COMMAND_TYPES).toContain("delete_project");
 	});
 });

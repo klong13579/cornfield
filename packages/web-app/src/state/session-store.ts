@@ -11,6 +11,8 @@ import type {
 	CronTestRunResultDto,
 	CronUpdateInput,
 	DashboardStatsDto,
+	DelegateChildInput,
+	DelegatedChildDto,
 	DiagnosisAggregationDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
@@ -211,6 +213,13 @@ export class SessionStore {
 	#sessionTreeLoading = false;
 	#sessionTreeError: string | undefined;
 	/**
+	 * 会话树读取的代际：每一次读取递增，换会话 / 新会话作废时也递增。
+	 *
+	 * 请求取不得消（pi-client 的 request 没有 abort），换会话之后才回来的那一份只能按代际
+	 * 丢掉 —— 与 `#projectGeneration` 同一套纪律。
+	 */
+	#sessionTreeGeneration = 0;
+	/**
 	 * 已声明的 Project。**不随会话变**（客户端 scope 的 registry，跨 Agent 共享），
 	 * 所以切会话不清空、不重读；只有归属 `#currentProjectId` 是会话级的。
 	 */
@@ -374,13 +383,10 @@ export class SessionStore {
 	}
 
 	newSession(): void {
-		// 新会话没有账本：上一会话的子会话树不得跟过来（私有字段与 view 要一起改，
-		// 否则要等下一个快照才会消失）。
-		this.#sessionTree = undefined;
-		this.#sessionTreeError = undefined;
 		const view = cloneView(this.getSnapshot());
-		view.sessionTree = undefined;
-		view.sessionTreeError = undefined;
+		// 新会话没有账本：上一会话的子会话树不得跟过来（私有字段与 view 要一起改，
+		// 否则要等下一个快照才会消失）；在途的那一次读取也一并作废 —— 它答的是上一会话的账本。
+		this.#invalidateSessionTree(view);
 		// 新会话就是一个新会话，与当前身份必然不同 —— 不看目标是什么，直接作废：
 		// 少了这一步，上一会话的在途 list_projects 会在新会话的快照到达前落进新视图。
 		this.#invalidateProjectAttribution(view);
@@ -645,10 +651,6 @@ export class SessionStore {
 	#setActiveAgent(agentId: string, workspace?: string, targetSessionFile?: string): void {
 		this.#activeAgentId = agentId;
 		this.#activeWorkspace = workspace;
-		// 会话树是上一个会话的账本视图，换会话后不能继续展示（否则把另一个 Agent 的子会话
-		// 挂在当前会话下）；等下一次 refreshSessionTree 给出真实答案。
-		this.#sessionTree = undefined;
-		this.#sessionTreeError = undefined;
 		const view = cloneView(this.getSnapshot());
 		// view.sessionId 是 serve 推来的焦点（agent 注册名）：它与目标不同，说明手上这批消息
 		// 属于**另一个 Agent**。留着它就是让 A 的工作显示在 B 的上下文里，等新快照到达再
@@ -666,15 +668,20 @@ export class SessionStore {
 		// 会话（打开另一个历史会话）同样是另一个会话的归属。目标会话文件未知的入口
 		// （switchSession / newSession）按空串算 —— 未知就是与已知不同：宁可让紧随其后的快照
 		// 重算一次，也不要让上一会话的归属（和它在途请求）继续落在屏幕上。
-		const identity = this.#projectIdentityOf(agentId, targetSessionFile);
+		const identity = this.#sessionIdentityOf(agentId, targetSessionFile);
 		if (identity !== this.#projectAttributionKey) this.#invalidateProjectAttribution(view);
 		// Todo 板跟着 **Agent** 走（不是会话）：同一个 Agent 换历史会话，板子不变；换 Agent 立即作废，
 		// 在重读结果回来之前界面上是「还不知道」，而不是上一个 Agent 的任务。
 		if (agentId !== this.#agentTodoKey) this.#invalidateAgentTodos(view);
 		view.activeAgentId = agentId;
 		view.activeWorkspace = workspace;
-		view.sessionTree = undefined;
-		view.sessionTreeError = undefined;
+		// 会话树是上一个会话的账本视图，换会话后不能继续展示（否则把另一个 Agent 的子会话
+		// 挂在当前会话下）；等下一次 refreshSessionTree 给出真实答案。
+		//
+		// 「同一个会话上的重复切换不算切换」这条判定与上面转录那一条同源：真把树作废，一次
+		// 在途读取就白读了，而同会话切换不会改变刷新副作用（依赖没变）—— 面板会停在「读取中」。
+		const sameSession = sameAgent && (targetSessionFile === undefined || targetSessionFile === view.sessionFile);
+		if (!sameSession) this.#invalidateSessionTree(view);
 		this.#view = view;
 		this.#notify();
 	}
@@ -699,9 +706,34 @@ export class SessionStore {
 		view.projectsError = undefined;
 	}
 
-	/** 归属对应的会话身份：焦点 agent + 会话文件（未知用空串）。一个概念一处定义。 */
-	#projectIdentityOf(agentId: string | null, sessionFile: string | undefined): string {
+	/**
+	 * 把会话树作废到「还没读过」：代际同步递增（在途响应从此落不了地）、手上的树与它的错误
+	 * 一起清空（私有字段与 view 要一起改，否则要等下一个快照才会消失）。
+	 *
+	 * **每一个改变会话身份的入口都必须走这里**（切换、打开历史会话、新会话）——
+	 * 漏掉一个入口就是漏掉一个「上一个会话的子树挂到新会话下面」的窗口。
+	 */
+	#invalidateSessionTree(view: SessionView): void {
+		this.#sessionTreeGeneration += 1;
+		this.#sessionTree = undefined;
+		this.#sessionTreeError = undefined;
+		view.sessionTree = undefined;
+		view.sessionTreeError = undefined;
+	}
+
+	/**
+	 * 会话身份：焦点 agent + 会话文件（未知用空串）。
+	 *
+	 * 一个概念一处定义 —— Project 归属、会话树、会话级写命令（委派 / 带回）的回执都按它判断
+	 * 「这还是不是同一个会话」；各写一份，就会出现两个面板对手上的会话身份理解不一致。
+	 */
+	#sessionIdentityOf(agentId: string | null, sessionFile: string | undefined): string {
 		return `${agentId ?? ""}|${sessionFile ?? ""}`;
+	}
+
+	/** 当前显示的会话身份（焦点 agent + 手上的会话文件）。 */
+	#currentSessionIdentity(): string {
+		return this.#sessionIdentityOf(this.#activeAgentId, this.#view?.sessionFile);
 	}
 
 	/** 工作目录短名：会话 cwd 优先，回落 agentDir 末段；均无则 undefined。 */
@@ -822,41 +854,104 @@ export class SessionStore {
 	 *
 	 * 失败不降级为空树：读不到（未附着 / 账本条目损坏）与「确实没有子会话」是两件事，
 	 * 后者是本命令的正常答案（children: []），前者必须让面板显示错误。
+	 *
+	 * 按代际提交（与 #loadProjects 同一套纪律）：请求取不得消，换会话 / 新会话时递增代际，
+	 * 迟到的那一份整份丢掉 —— 上一会话的子树，以及上一会话「读不出来」这条判决，都不得落进
+	 * 新视图。
 	 */
 	async refreshSessionTree(agentId?: string): Promise<void> {
+		const generation = ++this.#sessionTreeGeneration;
 		this.#sessionTreeLoading = true;
 		const pending = cloneView(this.getSnapshot());
 		pending.sessionTreeLoading = true;
 		this.#view = pending;
 		this.#notify();
+		let tree: SessionTreeDto | undefined;
+		let error: string | undefined;
 		try {
-			const tree = await this.#client.getSessionTree(agentId);
-			this.#sessionTree = tree;
-			this.#sessionTreeError = undefined;
+			tree = await this.#client.getSessionTree(agentId);
 		} catch (err) {
-			this.#sessionTree = undefined;
-			this.#sessionTreeError = errorMessageOf(err);
-		} finally {
-			this.#sessionTreeLoading = false;
-			const settled = cloneView(this.getSnapshot());
-			settled.sessionTree = this.#sessionTree;
-			settled.sessionTreeLoading = false;
-			settled.sessionTreeError = this.#sessionTreeError;
-			this.#view = settled;
-			this.#notify();
+			error = errorMessageOf(err);
+		}
+		// 判定在**每一个**写入点之前，成功与失败走同一条门。
+		if (generation !== this.#sessionTreeGeneration) return;
+		this.#sessionTree = tree;
+		this.#sessionTreeError = error;
+		this.#sessionTreeLoading = false;
+		const settled = cloneView(this.getSnapshot());
+		settled.sessionTree = tree;
+		settled.sessionTreeLoading = false;
+		settled.sessionTreeError = error;
+		this.#view = settled;
+		this.#notify();
+	}
+
+	/**
+	 * 当前会话身份（不透明键，**只可用于相等比较**）。
+	 *
+	 * 会话级写命令（委派 / 带回）的回执得按它对表：**提交时**取一次，结果回来时再取一次，
+	 * 不一致就说明用户已经离开了那个会话 —— 回执与错误都不属于现在这一屏，不得显示。
+	 * store 那边同样不会把上一个会话的账本刷进来（见 #refreshTreeAfterWrite）。
+	 */
+	sessionIdentity(): string {
+		return this.#currentSessionIdentity();
+	}
+
+	/**
+	 * 把一个子会话委派出去（delegate_child），并重读会话树。
+	 *
+	 * 失败**原样抛出**：serve 只在子进程真的起来且挂上父边之后才 OK，其余都是真错误（起不来、
+	 * 没挂上 broker、目标 Agent 不存在）；吞掉它就是在说「已经委派了」。
+	 *
+	 * 失败**也**重读账本（见 #refreshTreeAfterWrite）：serve 在子进程起不来 / 没过注册门时
+	 * 会把账本节点写成 `failed` 再报错 —— 不重读，那棵树就停在上一次读到的样子，而它上面
+	 * 没有这一行，用户会得出反的结论。重读不吞错误：原错误仍然原样抛给调用方。
+	 */
+	async delegateChild(input: DelegateChildInput, agentId?: string): Promise<DelegatedChildDto> {
+		// 提交时的会话身份就是这一次委派的归属：中途换了会话，它（以及 serve 刚写出的那一行
+		// 账本）都属于上一个会话。
+		const submitted = this.#currentSessionIdentity();
+		try {
+			const result = await this.#client.delegateChild(input, agentId);
+			await this.#refreshTreeAfterWrite(agentId, submitted);
+			return result;
+		} catch (err) {
+			await this.#refreshTreeAfterWrite(agentId, submitted);
+			throw err;
 		}
 	}
 
 	/**
-	 * 把子会话结果带回父会话（bring_back_child_result），并刷新会话树。
+	 * 把子会话结果带回父会话（bring_back_child_result），并重读会话树。
 	 *
 	 * 返回 serve 的原始结果（不只是布尔）：调用方要用 `firstTime` 区分「这次才带回」与
 	 * 「早就带回过」，用 `content` 展示带回来的东西；重复带回不报错，但不得重复注入。
+	 *
+	 * 失败也重读：请求超时 / 断线时 serve 可能已经记下了「已带回」，而手上这份还是旧的。
 	 */
 	async bringBackChild(childSessionId: string, agentId?: string): Promise<BroughtBackChildResultDto> {
-		const result = await this.#client.bringBackChildResult(childSessionId, agentId);
+		const submitted = this.#currentSessionIdentity();
+		try {
+			const result = await this.#client.bringBackChildResult(childSessionId, agentId);
+			await this.#refreshTreeAfterWrite(agentId, submitted);
+			return result;
+		} catch (err) {
+			await this.#refreshTreeAfterWrite(agentId, submitted);
+			throw err;
+		}
+	}
+
+	/**
+	 * 一次会话级写命令（委派 / 带回）之后的收尾：只有会话身份还是**提交时**那一个，才重读账本。
+	 *
+	 * 身份对不上就什么都不做：serve 刚写出来的那一行属于上一个会话，刷进来会被挂在错误的 root
+	 * 下（子会话看上去成了当前会话委派的），带回也会打错目标；而 `agentId` 参数此刻已经是旧的，
+	 * 拿它去问就是拿另一个会话的账本覆盖现在这一屏。新会话的账本由它自己的刷新补上 —— 换会话
+	 * 的入口都已经把树作废了。
+	 */
+	async #refreshTreeAfterWrite(agentId: string | undefined, submitted: string): Promise<void> {
+		if (submitted !== this.#currentSessionIdentity()) return;
 		await this.refreshSessionTree(agentId);
-		return result;
 	}
 
 	/**
@@ -870,6 +965,39 @@ export class SessionStore {
 	async refreshProjects(agentId?: string): Promise<void> {
 		// 手动重算：它是比任何在途请求更新的一次请求，所以递增 generation 让旧的那份作废。
 		return await this.#loadProjects(agentId, ++this.#projectGeneration);
+	}
+
+	/**
+	 * 声明或更新一个 Project（set_project），返回存储真正落盘的那一份；随后重读 registry 与归属。
+	 *
+	 * 失败**原样抛出**（root 已被别的 Project 占用 / 输入不成立 / 存储坏了）：吞掉它就会让用户
+	 * 以为已经声明好了，而盘上什么也没多。
+	 * 写入之后一律用重读而不是就地拼一份「写入后的样子」：`root` 由存储归一，一个 root 只能属于
+	 * 一个 Project —— 该重算的归属在 serve 那边，自拼一份就是在猜存储做了哪个决定。
+	 */
+	async setProject(project: ProjectRecordDto): Promise<ProjectRecordDto> {
+		try {
+			const result = await this.#client.setProject(project);
+			return result.project;
+		} finally {
+			// 失败也重读：请求超时 / 断线时写入可能已经落盘，而我们手上这份还是旧的 —— 报错不刷新，
+			// 屏幕上就会一直显示「没声明过」，直到用户手动刷新才发现它其实在了。
+			await this.refreshProjects(this.#activeAgentId ?? undefined);
+		}
+	}
+
+	/**
+	 * 删掉一个已声明的 Project（delete_project），随后重读 registry 与归属。
+	 *
+	 * 失败原样抛出（没声明过就是没删掉）：错误态比「默默地什么也没发生」诚实；
+	 * 重读同样在失败路径上做：serve 说「本来就不在」恰恰说明我们手里这份列表是旧的。
+	 */
+	async deleteProject(projectId: string): Promise<void> {
+		try {
+			await this.#client.deleteProject(projectId);
+		} finally {
+			await this.refreshProjects(this.#activeAgentId ?? undefined);
+		}
 	}
 
 	/**
@@ -916,7 +1044,7 @@ export class SessionStore {
 	 * 作废是**同步**的：在重算结果回来之前，界面上必须是「还不知道」，而不是上一个会话的归属。
 	 */
 	#syncProjectAttribution(): void {
-		const key = this.#projectIdentityOf(this.#activeAgentId, this.#view?.sessionFile);
+		const key = this.#currentSessionIdentity();
 		if (key === this.#projectAttributionKey) return;
 		this.#projectAttributionKey = key;
 		this.#currentProjectId = undefined;

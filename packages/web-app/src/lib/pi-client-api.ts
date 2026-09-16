@@ -17,6 +17,8 @@ import type {
 	CronTestRunResultDto,
 	CronUpdateInput,
 	DashboardStatsDto,
+	DelegateChildInput,
+	DelegatedChildDto,
 	EnvironmentSummaryDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
@@ -26,7 +28,10 @@ import type {
 	ModelCatalogDto,
 	ModelSelectionDto,
 	ModelTestResultDto,
+	ProjectDeleteDto,
 	ProjectListDto,
+	ProjectRecordDto,
+	ProjectUpsertDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
 	ProviderOAuthStartDto,
@@ -64,8 +69,12 @@ export type {
 	CronTaskWriteResultDto,
 	CronTestRunResultDto,
 	CronUpdateInput,
+	DelegateChildInput,
+	DelegatedChildDto,
+	ProjectDeleteDto,
 	ProjectListDto,
 	ProjectRecordDto,
+	ProjectUpsertDto,
 	ScheduleAgentResolution,
 	SessionTreeDto,
 	TaskDeliveryDto,
@@ -447,12 +456,20 @@ export interface PiClient {
 	 */
 	getSessionTree(sessionId?: string): Promise<SessionTreeDto>;
 	/**
+	 * 把一个子会话委派出去（delegate_child）。
+	 *
+	 * 成功才回一条**真实启动**的子会话记录；起不来、没通过注册门（子进程没真的以本会话为
+	 * parent 挂上 broker）、目标 Agent 不存在、父会话上不了 broker —— 全部招错，错误文本就是
+	 * serve 给的真实原因。调用方不得把它当成「已提交，稍后可能有」：没有 OK 就没有子会话。
+	 */
+	delegateChild(input: DelegateChildInput, sessionId?: string): Promise<DelegatedChildDto>;
+	/**
 	 * 把子会话的结果带回父会话（bring_back_child_result）。
 	 * 幂等：`firstTime:false` 表示此前已带回 —— 调用方不得重复注入同一份结果。
 	 */
 	bringBackChildResult(childSessionId: string, sessionId?: string): Promise<BroughtBackChildResultDto>;
 
-	// ── Project（T8：客户端级 Project registry 只读）──
+	// ── Project（T8：客户端级 Project registry）──
 	/**
 	 * 已声明的 Project + 被查询会话落在哪个 Project（list_projects）。
 	 *
@@ -460,6 +477,21 @@ export interface PiClient {
 	 * 「声明过但读不到」分开显示。sessionId 缺省 = 只要列表，不算会话归属。
 	 */
 	listProjects(sessionId?: string): Promise<ProjectListDto>;
+	/**
+	 * 声明或更新一个 Project（set_project），返回存储真正落盘的那一份。
+	 *
+	 * 形状复用读模型 `ProjectRecordDto`（存储的就是一份 `ProjectRecord`，不是第二套写入形状）；
+	 * `defaultAgentId` 缺省 = 不声明默认 Agent。`root` 必须是绝对路径，`root` 已被别的 Project
+	 * 占用也会招错 —— 失败**原样招错**，不静默改写别人的声明。
+	 */
+	setProject(project: ProjectRecordDto): Promise<ProjectUpsertDto>;
+	/**
+	 * 删掉一个已声明的 Project（delete_project）。
+	 *
+	 * 幂等：再删一次（已经不在）会招错，不是一次成功的空删除 —— 报「删掉了」而实际上早就不在，
+	 * 就是在拿一个不是这次调用的结果冒充这次调用的结果。
+	 */
+	deleteProject(projectId: string): Promise<ProjectDeleteDto>;
 
 	// ── Agent Todo（T10A：Agent 级 Todo 板，owner = Agent、Project 可选绑定）──
 	/**

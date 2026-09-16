@@ -63,6 +63,16 @@ export interface WorkspaceDeclaration {
 	root: string;
 	/** Primary project root for evolution scoping (relative, or absolute for external). */
 	projectRoot: string;
+	/**
+	 * Agent id this workspace declares as its default (§10 rung 3 of the default-Agent
+	 * chain). Absent means the workspace declares nothing — the chain falls to the
+	 * user-global default and then to the process's own Agent.
+	 *
+	 * Never defaulted: `ensureWorkspace` does not invent one, and the reader does not
+	 * normalize the value. An id that names no Agent (or a disabled one) is a broken
+	 * declaration, rejected where the resolution consumes it, not repaired here.
+	 */
+	defaultAgentId?: string;
 	/** Additional directories the agent may read/write (absolute, machine-specific). */
 	attachedRoots?: string[];
 	model?: WorkspaceModelConfig;

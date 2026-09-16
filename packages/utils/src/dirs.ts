@@ -94,6 +94,23 @@ export function getConfigDirName(): string {
 	return process.env.CORNFIELD_CONFIG_DIR || CONFIG_DIR_NAME;
 }
 
+/**
+ * Absolute config root (`~/.cornfield` by default).
+ *
+ * `CORNFIELD_CONFIG_DIR` may be an absolute path, in which case it *is* the root — joining
+ * it under `home` would put every path under a directory nobody writes. Otherwise it is a
+ * name relative to `home`. The one place this rule lives, so `DirResolver` and callers that
+ * must name the config root themselves (the Project store, session Agent resolution) agree
+ * on where the client's files are.
+ *
+ * `home` is a parameter and resolved at call time, so a process (or a test) pointed at
+ * another HOME reads that client's root.
+ */
+export function resolveConfigRootDir(home: string = os.homedir()): string {
+	const dirName = getConfigDirName();
+	return path.isAbsolute(dirName) ? dirName : path.join(home, dirName);
+}
+
 /** Get the config agent directory name relative to home (e.g. ".cornfield/agent" or CORNFIELD_CONFIG_DIR + "/agent"). */
 export function getConfigAgentDirName(): string {
 	return `${getConfigDirName()}/agent`;
@@ -124,10 +141,8 @@ class DirResolver {
 	readonly #agentCache = new Map<string, string>();
 
 	constructor(agentDirOverride?: string) {
-		const dirName = getConfigDirName();
-		// CORNFIELD_CONFIG_DIR may be absolute (e.g. /tmp/test-cornfield) — use it directly;
-		// otherwise join it under the home directory (relative name like ".cornfield").
-		this.configRoot = configRootOverride ?? (path.isAbsolute(dirName) ? dirName : path.join(os.homedir(), dirName));
+		// The root below HOME (or the absolute `CORNFIELD_CONFIG_DIR`): see `resolveConfigRootDir`.
+		this.configRoot = configRootOverride ?? resolveConfigRootDir();
 
 		const defaultAgent = path.join(this.configRoot, "agent");
 		this.agentDir = agentDirOverride ? path.resolve(agentDirOverride) : defaultAgent;

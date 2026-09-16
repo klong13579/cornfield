@@ -1,14 +1,23 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { AgentInfoDto } from "@cornfield/wire";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { ProjectList, projectLabelOf } from "../src/components/ProjectContext";
 import { AgentSwitcher } from "../src/layout/AgentSwitcher";
 import { AppShell } from "../src/layout/AppShell";
 import { NotFoundView } from "../src/layout/NotFoundView";
-import { ProjectSwitcher } from "../src/layout/ProjectSwitcher";
+import {
+	EMPTY_PROJECT_DRAFT,
+	ProjectPanel,
+	type ProjectPanelState,
+	ProjectSwitcher,
+	projectDraftToRecord,
+} from "../src/layout/ProjectSwitcher";
 import { activePanelOf, getPanels, panelHandle } from "../src/layout/panel-registry";
 import type { ProjectRecordDto } from "../src/lib/pi-client-api";
 import { WorkspaceView } from "../src/pages/workspace/WorkspaceView";
-import type { SessionView } from "../src/state/session-store";
+import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
+import { SessionStore, type SessionView } from "../src/state/session-store";
 
 /**
  * T10D：Navigation 与 AppShell 收口。
@@ -18,11 +27,12 @@ import type { SessionView } from "../src/state/session-store";
  *      面板 mount 出来的组件，旧的 PAGE_META / findPageMeta 不再存在（深链与刷新因此走同一条路）。
  *   2. **路由上下文**：当前面板由匹配链上的 handle 解析 —— 子路由（/models/catalog、
  *      /records/:id）命中自己的面板，没人认领的路径不会冒充某个面板。
- *   3. **上下文控件**：Agent / Project 两个控件各自只读自己的来源，三种「没有」
- *      （未连接 / 未声明 / 未归属、读不到）不会被说成同一件事；外壳不代管工作台操作。
+ * 3. **上下文控件**：Agent / Project 两个控件各自只读自己的来源，三种「没有」
+ *      （未连接 / 空集 / 不属于任何 Project、读不到）不会被说成同一件事；外壳不代管工作台操作。
  *
- * 本文件不 mock 任何模块：两个 Switcher 是无 hook 的纯函数组件（直接调用即可拿到元素树、
- * 触发 onChange/onClick），AppShell 只读路由匹配链与注册表，不需要会话 store。
+ * 本文件不 mock 任何模块：两个 Switcher 的面板是无 hook 的纯函数组件（直接调用即可拿到元素树、
+ * 触发 onChange/onClick），AppShell 只读路由匹配链与注册表，不需要会话 store；Project 写面那一段
+ * 用真 store + 假 socket（只替掉网络层）。
  */
 
 // ── 最小 DOM 垫片（只为满足 ../src/router 模块求值里 createHashRouter 读取 window/history；
@@ -133,6 +143,21 @@ function fire(root: ReactNode, type: string, handler: string, payload: unknown):
 	const el = elementOfType(root, type);
 	const fn = (el.props as Record<string, unknown>)[handler];
 	if (typeof fn !== "function") throw new Error(`<${type}> 上没有 ${handler}`);
+	(fn as (arg: unknown) => void)(payload);
+}
+
+/**
+ * 按可见文字找元素再触发处理器。
+ *
+ * 面板里有好几个按钮，只按「第一个 <button>」定位会打到那个文字不相干的刷新钮上。
+ */
+function fireOnText(root: ReactNode, type: string, text: string, handler: string, payload?: unknown): void {
+	const el = collect(root).find(
+		node => node.type === type && textOf((node.props as { children?: ReactNode }).children) === text,
+	);
+	if (!el) throw new Error(`元素树里没有文字为「${text}」的 <${type}>`);
+	const fn = (el.props as Record<string, unknown>)[handler];
+	if (typeof fn !== "function") throw new Error(`<${type}>「${text}」上没有 ${handler}`);
 	(fn as (arg: unknown) => void)(payload);
 }
 
@@ -386,8 +411,10 @@ describe("ProjectSwitcher", () => {
 		const without = renderToStaticMarkup(createElement(ProjectSwitcher, { view: viewOf({ projects: [] }) }));
 		expect(without).not.toContain("重新读取项目列表");
 
+		// 面板是受控的无 hook 组件，可以直接调用；壳（ProjectSwitcher）自己持有草稿/错误/忙碌态，
+		// 只能在 React 里渲染，所以这一条点按钮的断言针对面板本身。
 		let refreshed = 0;
-		const tree = ProjectSwitcher({ view: viewOf({ projects: [] }), onRefresh: () => (refreshed += 1) });
+		const tree = panelOf({ view: viewOf({ projects: [] }), onRefresh: () => (refreshed += 1) });
 		fire(tree, "button", "onClick", undefined);
 		expect(refreshed).toBe(1);
 	});
@@ -407,16 +434,15 @@ describe("上下文隔离：Agent 与 Project 互不污染", () => {
 		expect(projectHtml).toContain("boom");
 	});
 
-	it("Agent 数量变化不影响 Project 读数（客户端 scope 不随 Agent 变）", () => {
-		const withAgents = renderToStaticMarkup(
-			createElement(ProjectSwitcher, {
-				view: viewOf({ agents: AGENTS, projects: PROJECTS, currentProjectId: "dtc" }),
-			}),
+	it("Agent 数量变化不影响 Project 的读数（客户端 scope 不随 Agent 变）", () => {
+		// 读数 = chip 上的归属判定 + 已声明清单，两者都不看 agents。
+		// （声明表单里的默认 Agent 选择器**故意**来自注册表 —— 那不是 Project 的读数。）
+		const withAgents = viewOf({ agents: AGENTS, projects: PROJECTS, currentProjectId: "dtc" });
+		const withoutAgents = viewOf({ agents: [], projects: PROJECTS, currentProjectId: "dtc" });
+		expect(projectLabelOf(withAgents)).toEqual(projectLabelOf(withoutAgents));
+		expect(renderToStaticMarkup(createElement(ProjectList, { view: withAgents }))).toBe(
+			renderToStaticMarkup(createElement(ProjectList, { view: withoutAgents })),
 		);
-		const withoutAgents = renderToStaticMarkup(
-			createElement(ProjectSwitcher, { view: viewOf({ agents: [], projects: PROJECTS, currentProjectId: "dtc" }) }),
-		);
-		expect(withAgents).toBe(withoutAgents);
 	});
 
 	it("未连接时两个控件各自说各自的「未连接」，都不编造内容", () => {
@@ -425,5 +451,339 @@ describe("上下文隔离：Agent 与 Project 互不污染", () => {
 		expect(renderToStaticMarkup(createElement(ProjectSwitcher, { view }))).toContain(
 			"未连接——Project registry 不可用",
 		);
+	});
+});
+
+// ── 7. Project 写面：声明 / 删除真的落到 wire，错误原样显示 ────────────
+
+/**
+ * 写面的测试替身：真 `PiClientAdapter` + 假 socket。
+ *
+ * 面板、壳、草稿→记录的转换、store 全部是真源码（直接调用，不 mock 模块）；被替掉的只有网络
+ * 这一层，断言的也是链路上真实发出的命令。
+ *
+ * 这里证不了的：在浏览器里点那一下（本目录没有 DOM 测试环境）。所以「声明可达」由三段接起来：
+ * 表单确实画在控件里 → 点「声明」真的把动作交出去 → 动作真的发出了 `set_project` 并重读列表。
+ */
+let lastCreated: FakeWebSocket | undefined;
+const createdAdapters: PiClientAdapter[] = [];
+
+class FakeWebSocket implements PiWebSocketLike {
+	readyState = 1;
+	sent: string[] = [];
+	onopen: PiWebSocketLike["onopen"] = null;
+	onmessage: PiWebSocketLike["onmessage"] = null;
+	onclose: PiWebSocketLike["onclose"] = null;
+	onerror: PiWebSocketLike["onerror"] = null;
+
+	constructor(_url: string) {
+		lastCreated = this;
+	}
+
+	send(data: string): void {
+		this.sent.push(data);
+	}
+
+	close(): void {}
+
+	receive(data: string): void {
+		this.onmessage?.({ data });
+	}
+}
+
+const fakeCtor: PiWebSocketCtor = FakeWebSocket;
+const WS_CONFIG: ServeConnectionConfig = { wsUrl: "ws://127.0.0.1:1/ws", token: "" };
+
+afterEach(() => {
+	for (const adapter of createdAdapters) adapter.disconnect();
+	createdAdapters.length = 0;
+});
+
+function sentRequests(): Array<{ id: string; command: Record<string, unknown> }> {
+	return (lastCreated?.sent ?? [])
+		.map(s => JSON.parse(s) as { type?: string; id?: string; command?: Record<string, unknown> })
+		.filter(
+			(f): f is { id: string; command: Record<string, unknown> } => f.type === "request" && !!f.id && !!f.command,
+		);
+}
+
+function respondTo(id: string, result: unknown): void {
+	lastCreated?.receive(JSON.stringify({ type: "response", id, ok: true, result }));
+}
+
+function respondErrorTo(id: string, error: string): void {
+	lastCreated?.receive(JSON.stringify({ type: "response", id, ok: false, error }));
+}
+
+async function createConnectedStore(): Promise<SessionStore> {
+	lastCreated = undefined;
+	const adapter = new PiClientAdapter(WS_CONFIG, fakeCtor);
+	createdAdapters.push(adapter);
+	const store = new SessionStore();
+	store.init(adapter);
+	const connectPromise = store.connect();
+	lastCreated?.onopen?.({});
+	lastCreated?.receive(JSON.stringify({ type: "hello_ack", connectionId: "c1", protocolVersion: 1 }));
+	await connectPromise;
+	return store;
+}
+
+/** 受控的 Project 面板（无 hook，可直接调用）：没给的处理器一律空实现。 */
+function panelOf({
+	view,
+	state,
+	onRefresh,
+	onChange,
+	onDeclare,
+	onDelete,
+}: {
+	view: SessionView;
+	state?: ProjectPanelState;
+	onRefresh?: () => void;
+	onChange?: (patch: Partial<ProjectPanelState>) => void;
+	onDeclare?: () => void;
+	onDelete?: () => void;
+}): ReactElement {
+	return ProjectPanel({
+		view,
+		state: state ?? { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false },
+		...(onRefresh ? { onRefresh } : {}),
+		onChange: onChange ?? noop,
+		onDeclare: onDeclare ?? noop,
+		onDelete: onDelete ?? noop,
+	});
+}
+
+describe("Project 写面：声明 / 删除", () => {
+	it("声明表单长在控件里：id / 名称 / 绝对路径 / 默认 Agent 只能从已注册清单里选", () => {
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, agents: AGENTS }) }),
+		);
+		expect(html).toContain('aria-label="project id"');
+		expect(html).toContain('aria-label="名称"');
+		expect(html).toContain('aria-label="项目根路径"');
+		expect(html).toContain("声明</button>");
+		expect(html).toContain("不指定默认 Agent");
+		// 默认 Agent 是选择项，不是自由文本：清单里的 agent 真的成了选项
+		expect(html).toContain('value="hr"');
+		expect(html).toContain("HR（hr）");
+		// 已声明过才有可删的东西
+		expect(html).toContain("选择要删除的 Project");
+	});
+
+	it("未连接：不画写面（发不出去的命令不是声明），也不替清单编内容", () => {
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, { view: viewOf({ connected: false, projects: undefined }) }),
+		);
+		expect(html).not.toContain("声明</button>");
+		expect(html).not.toContain("选择要删除的 Project");
+		expect(html).toContain("未连接——Project registry 不可用");
+	});
+
+	it("点「声明」真的把动作交出去（不是画着好看的按钮）", () => {
+		let declared = 0;
+		const tree = panelOf({
+			view: viewOf({ projects: PROJECTS, agents: AGENTS }),
+			state: {
+				draft: { projectId: "dtc", name: "DTC", root: "/Users/me/dtc", defaultAgentId: "hr" },
+				deleteTargetId: "",
+				busy: false,
+			},
+			onDeclare: () => (declared += 1),
+		});
+		fireOnText(tree, "button", "声明", "onClick");
+		expect(declared).toBe(1);
+	});
+
+	it("声明可达：填表 → 声明 → serve 真的收到 set_project，写完后重读 registry", async () => {
+		const store = await createConnectedStore();
+		const parsed = projectDraftToRecord({
+			projectId: "dtc",
+			name: "DTC",
+			root: "/Users/me/dtc",
+			defaultAgentId: "hr",
+		});
+		if (!parsed.ok) throw new Error(parsed.error);
+
+		const pending = store.setProject(parsed.record);
+		// 断言可能在响应之前就失败：先挂一个接住 rejection 的分支，别让 afterEach 的断开变成
+		// 「测试之间未处理的错误」（重试分支仍在最后真等它）。
+		void pending.catch(() => {});
+
+		const write = sentRequests().at(-1);
+		expect(write?.command).toMatchObject({
+			type: "set_project",
+			projectId: "dtc",
+			name: "DTC",
+			root: "/Users/me/dtc",
+			defaultAgentId: "hr",
+		});
+
+		respondTo(write!.id, { project: parsed.record });
+		await Bun.sleep(0);
+
+		// 写完之后重读（归属由 serve 重算，不是客户端自己拼一份「写入后的样子」）
+		const refresh = sentRequests().at(-1);
+		expect(refresh?.command).toMatchObject({ type: "list_projects" });
+		respondTo(refresh!.id, { projects: PROJECTS, currentProjectId: "dtc" });
+
+		expect(await pending).toMatchObject({ projectId: "dtc" });
+		expect(store.getSnapshot().currentProjectId).toBe("dtc");
+	});
+
+	it("没选默认 Agent 就不带那个字段（缺省不是空串）", async () => {
+		const store = await createConnectedStore();
+		const parsed = projectDraftToRecord({
+			projectId: "cornfield",
+			name: "CornField",
+			root: "/Users/me/cornfield",
+			defaultAgentId: "",
+		});
+		if (!parsed.ok) throw new Error(parsed.error);
+		expect(parsed.record.defaultAgentId).toBeUndefined();
+
+		const pending = store.setProject(parsed.record);
+		void pending.catch(() => {});
+		const write = sentRequests().at(-1);
+		expect(write?.command).toMatchObject({
+			type: "set_project",
+			projectId: "cornfield",
+			name: "CornField",
+			root: "/Users/me/cornfield",
+		});
+		// 没选默认 Agent 就是**不发这个字段**（缺省与空串不是一回事）
+		expect(write?.command).not.toHaveProperty("defaultAgentId");
+
+		respondTo(write!.id, { project: parsed.record });
+		await Bun.sleep(0);
+		respondTo(sentRequests().at(-1)!.id, { projects: [PROJECTS[0]] });
+		await pending;
+	});
+
+	it("删除：真的发出 delete_project；serve 说「本来就不在」就原样报错，并重读成最新列表", async () => {
+		const store = await createConnectedStore();
+		const pending = store.deleteProject("dtc");
+		void pending.catch(() => {});
+
+		const remove = sentRequests().at(-1);
+		expect(remove?.command).toMatchObject({ type: "delete_project", projectId: "dtc" });
+
+		respondErrorTo(
+			remove!.id,
+			'delete_project failed: no Project declared with projectId "dtc"; nothing was removed.',
+		);
+		await Bun.sleep(0);
+
+		// 失败也重读：这条判决说明我们手里那份列表是旧的
+		const refresh = sentRequests().at(-1);
+		expect(refresh?.command).toMatchObject({ type: "list_projects" });
+		respondTo(refresh!.id, { projects: [PROJECTS[0]] });
+
+		await expect(pending).rejects.toThrow("nothing was removed");
+		expect(store.getSnapshot().projects?.map(p => p.projectId)).toEqual(["cornfield"]);
+	});
+
+	it("错误真的被画出来：本地校验的不成立、以及 serve 的原始判决", async () => {
+		// 1) 本地就能看出的不成立（空字段）：面板把原文画出来
+		const invalid = projectDraftToRecord({
+			projectId: "   ",
+			name: "DTC",
+			root: "/Users/me/dtc",
+			defaultAgentId: "",
+		});
+		if (invalid.ok) throw new Error("空 projectId 不该通过");
+		const invalidHtml = renderToStaticMarkup(
+			createElement(ProjectPanel, {
+				view: viewOf({ projects: PROJECTS, agents: AGENTS }),
+				state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false, error: invalid.error },
+				onChange: noop,
+				onDeclare: noop,
+				onDelete: noop,
+			}),
+		);
+		expect(invalidHtml).toContain(invalid.error);
+
+		// 2) serve 的判决（从一次真失败的写入里取出来）同样原文可见，不被换成自造的提示
+		const store = await createConnectedStore();
+		const parsed = projectDraftToRecord({
+			projectId: "dtc",
+			name: "DTC",
+			root: "relative/dir",
+			defaultAgentId: "",
+		});
+		if (!parsed.ok) throw new Error(parsed.error);
+		const pending = store.setProject(parsed.record);
+		void pending.catch(() => {});
+		const write = sentRequests().at(-1);
+		respondErrorTo(
+			write!.id,
+			'set_project failed: root must be an absolute path (got "relative/dir"); a relative root would resolve against the serve process cwd.',
+		);
+		await Bun.sleep(0);
+		respondTo(sentRequests().at(-1)!.id, { projects: PROJECTS });
+
+		let message = "";
+		try {
+			await pending;
+		} catch (err) {
+			message = err instanceof Error ? err.message : String(err);
+		}
+		expect(message).toContain("root must be an absolute path");
+
+		const html = renderToStaticMarkup(
+			createElement(ProjectPanel, {
+				view: viewOf({ projects: PROJECTS, agents: AGENTS }),
+				state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false, error: message },
+				onChange: noop,
+				onDeclare: noop,
+				onDelete: noop,
+			}),
+		);
+		expect(html).toContain("root must be an absolute path");
+	});
+
+	it("草稿→记录：字段去空格；projectId / 名称 / root 空着就不发", () => {
+		const parsed = projectDraftToRecord({
+			projectId: "  dtc  ",
+			name: " 米克原子 DTC ",
+			root: "  /Users/me/dtc ",
+			defaultAgentId: "  hr ",
+		});
+		if (!parsed.ok) throw new Error(parsed.error);
+		expect(parsed.record).toEqual({
+			projectId: "dtc",
+			name: "米克原子 DTC",
+			root: "/Users/me/dtc",
+			defaultAgentId: "hr",
+		});
+
+		for (const draft of [
+			{ projectId: "", name: "DTC", root: "/Users/me/dtc", defaultAgentId: "" },
+			{ projectId: "dtc", name: "  ", root: "/Users/me/dtc", defaultAgentId: "" },
+			{ projectId: "dtc", name: "DTC", root: "", defaultAgentId: "" },
+		]) {
+			expect(projectDraftToRecord(draft).ok).toBe(false);
+		}
+	});
+
+	it("删除目标没选就不发命令（不替用户默认挑一个再删）", () => {
+		let removed = 0;
+		const tree = panelOf({
+			view: viewOf({ projects: PROJECTS, agents: AGENTS }),
+			state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false },
+			onDelete: () => (removed += 1),
+		});
+		// 没选时删除钮是禁用的（画出来但点不动），选了才可点
+		const button = collect(tree).find(node => node.type === "button" && textOf(node.props.children) === "删除");
+		if (!button) throw new Error("面板里没有删除钮");
+		expect((button.props as { disabled?: boolean }).disabled).toBe(true);
+
+		const ready = panelOf({
+			view: viewOf({ projects: PROJECTS, agents: AGENTS }),
+			state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "dtc", busy: false },
+			onDelete: () => (removed += 1),
+		});
+		fireOnText(ready, "button", "删除", "onClick");
+		expect(removed).toBe(1);
 	});
 });

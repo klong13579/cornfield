@@ -1,15 +1,29 @@
-import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@cornfield/wire";
+import type {
+	HostToolDefinitionDto,
+	ModelInfoDto,
+	SkillScopeRowDto,
+	SkillsResultDto,
+	ToolSwitchDto,
+	ToolSwitchesDto,
+} from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import {
+	SKILL_ACTIVATION_LABELS,
+	SKILL_SCOPE_LABELS,
+	SKILL_STATUS_LABELS,
+	skillStatusClass,
+	skillVersionText,
+} from "../skills/skill-display";
 import { FileExplorer } from "../workspace/FileExplorer";
 import { KindBadge } from "./AgentsView";
 
 /**
- * Agent 详情（FR-2）—— 6 tab：Skills / 模型 / 工具 / 画像 / 文件 / Prompts。
- * 数据源：Skills 读 .cornfield/skills 真实列表（fs_list+SKILL.md）、画像读 mission.md+user.md、
+ * Agent 详情（FR-2）—— 7 tab：Skills / 钉钉 / 模型 / 工具 / 画像 / 文件 / Prompts。
+ * 数据源：Skills 读 serve get_skills（与「技能」页同一份结果）、画像读 mission.md+user.md、
  * 模型接 get_available_models/set_model 真命令、画像实时建模待连接器路径（缺口 B5）。
  */
 
@@ -24,9 +38,6 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: "files", label: "文件" },
 	{ id: "prompts", label: "Prompts" },
 ];
-
-// 技能列表改为真实数据：fs_list 读 .cornfield/skills/ 目录（serve skillCount 同源）。
-// 版本/描述从各 skill 的 SKILL.md frontmatter 解析（fs_read）。
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
@@ -132,7 +143,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					))}
 				</div>
 
-				{tab === "skills" && <SkillsView agentId={agentId} />}
+				{tab === "skills" && <AgentSkillsTab agentId={agentId} />}
 
 				{tab === "dingtalk" && <DingtalkView agentId={agentId} />}
 
@@ -677,61 +688,40 @@ function ToolSwitchesView({ agentId }: { agentId: string }): React.JSX.Element {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Skills tab：真实技能列表（fs_list 读 .omp/skills/，SKILL.md frontmatter 解析）
+// Skills tab：直接读 serve get_skills（与「技能」页同一个结果，不再自己扫目录/解析 frontmatter）。
+// 五个事实都由 serve 给：scope（范围）/ source（来源）/ version（声明+指纹）/ activation（进没进会话）/
+// errors（受阻与发现错误）。启停入口在「技能」页（同一份数据 + set_skill_enabled）。
+// 展示词表（范围/激活/状态标签、版本与配色）两页共用 ./skills/skill-display。
 // ─────────────────────────────────────────────────────────────────────
 
-interface SkillInfo {
-	name: string;
-	desc?: string;
-	version?: string;
-}
-
-/** 解析 skills/<name>/SKILL.md 的 frontmatter（name/description/version）。 */
-function parseFrontmatter(text: string): { desc?: string; version?: string; name?: string } {
-	const out: { desc?: string; version?: string; name?: string } = {};
-	const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
-	if (!m) return out;
-	for (const line of m[1].split("\n")) {
-		const mm = line.match(/^(name|description|version)\s*:\s*(.+)$/);
-		if (mm) {
-			const val = mm[2].trim().replace(/^["']|["']$/g, "");
-			if (mm[1] === "description") out.desc = val;
-			else if (mm[1] === "version") out.version = val;
-			else out.name = val;
-		}
-	}
-	return out;
-}
-
-function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
+/**
+ * 该 agent 的技能（get_skills 定向本 agent）。
+ * 列表内容 = 本次会话加载的技能 + 停用名单 + 受阻/发现错误，都是 serve 的事实，不在前端重算。
+ */
+function AgentSkillsTab({ agentId }: { agentId: string }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
-	const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+	const [data, setData] = useState<SkillsResultDto | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
-		if (!view.connected) return; // 连接就绪后再拉，避免 fs_list 在握手期失败
+		if (!view.connected) return; // 连接就绪后再拉，避免 get_skills 在握手期失败
+		// 换 Agent / 重连先清空：留着上一个 Agent 的技能列表，就是在替它发言
+		setData(null);
+		setError(null);
 		const load = async (): Promise<void> => {
 			try {
-				const { entries } = await store.fsList(agentId, ".cornfield/skills");
-				const dirs = entries.filter(e => e.type === "dir");
-				const infos = await Promise.all(
-					dirs.map(async d => {
-						// 读 SKILL.md frontmatter（可能不在顶层而在一级子目录，容错）
-						try {
-							const { text } = await store.fsRead(agentId, `.cornfield/skills/${d.name}/SKILL.md`);
-							const fm = parseFrontmatter(text);
-							return { name: fm.name ?? d.name, desc: fm.desc, version: fm.version };
-						} catch {
-							// 无 SKILL.md（纯目录/素材）——仅列目录名
-							return { name: d.name };
-						}
-					}),
-				);
-				if (!cancelled) setSkills(infos);
+				const result = await store.fetchSkills(agentId); // sessionId 定向本 agent
+				if (!cancelled) {
+					setData(result);
+					setError(null);
+				}
 			} catch (err) {
-				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+				if (!cancelled) {
+					setData(null);
+					setError(err instanceof Error ? err.message : String(err));
+				}
 			}
 		};
 		void load();
@@ -740,10 +730,13 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 		};
 	}, [agentId, store, view.connected]);
 
+	if (!view.connected) {
+		return <div className="px-1 py-8 text-center text-[12px] text-ink-faint">未连接——技能列表不可用</div>;
+	}
 	if (error) {
 		return <div className="px-1 py-3 text-[12px] text-danger">技能列表加载失败：{error}</div>;
 	}
-	if (!skills) {
+	if (!data) {
 		return (
 			<div className="flex flex-col gap-2 px-1 py-3">
 				{[0, 1, 2, 3].map(i => (
@@ -752,36 +745,85 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 			</div>
 		);
 	}
-	if (skills.length === 0) {
-		return (
-			<div className="px-1 py-8 text-center text-[12px] text-ink-faint">
-				该 agent 没有已安装技能（.cornfield/skills/ 为空）
-			</div>
-		);
+
+	// 需要人看见的问题：Project 归属未知 + 被挡住的技能 + 发现错误（与「技能」页同一套事实）
+	const problems: Array<{ title: string; detail: string }> = [];
+	if (data.scope.projectError) problems.push({ title: "Project 归属未知", detail: data.scope.projectError });
+	for (const blocked of data.blocked) {
+		problems.push({ title: `受阻：${blocked.name}`, detail: `${blocked.path} —— ${blocked.reason}` });
+	}
+	for (const err of data.errors) {
+		problems.push({ title: "发现错误", detail: err.path ? `${err.path} —— ${err.message}` : err.message });
 	}
 
 	return (
 		<div>
-			{skills.map(skill => (
-				<div
-					key={skill.name}
-					className="flex items-baseline gap-3 border-b border-hairline px-1 py-3.5 transition-colors hover:bg-surface"
-				>
-					<span className="w-[220px] shrink-0 font-mono text-[13px] font-medium text-ink">{skill.name}</span>
-					<span className="min-w-0 flex-1 text-[12px] text-ink-subtle">{skill.desc ?? "—"}</span>
-					<span className="shrink-0 font-mono text-[12px] text-ink-faint">{skill.version ?? ""}</span>
-					<button
-						type="button"
-						className="toggle shrink-0 on"
-						aria-checked={true}
-						role="switch"
-						disabled
-						title="技能启停即将支持"
-					/>
+			{data.skills.length === 0 ? (
+				<div className="px-1 py-8 text-center text-[12px] text-ink-faint">
+					该 agent 本次会话未加载任何技能（停用名单 {data.disabled.length} 项）
 				</div>
-			))}
+			) : (
+				data.skills.map(row => <SkillLine key={`loaded:${row.name}`} row={row} />)
+			)}
+
+			{data.disabled.length > 0 && (
+				<section className="mt-6">
+					<h4 className="mb-3 section-title text-ink-faint">已停用（settings skills.ignoredSkills）</h4>
+					{data.disabled.map(row => (
+						<SkillLine key={`disabled:${row.name}`} row={row} dimmed />
+					))}
+				</section>
+			)}
+
+			{problems.length > 0 && (
+				<section className="mt-6 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3">
+					<div className="mb-1 text-[12px] font-semibold text-danger">发现错误 {problems.length} 项</div>
+					{problems.map(problem => (
+						<div key={`${problem.title}:${problem.detail}`} className="text-[11px] text-ink-subtle">
+							<span className="font-medium text-ink">{problem.title}</span>：{problem.detail}
+						</div>
+					))}
+				</section>
+			)}
+
 			<div className="mt-3 text-[11px] text-ink-faint">
-				{skills.length} 个已安装技能（.cornfield/skills/ 真实列表）；启用/停用待 set_skill_enabled 协议。
+				{data.skills.length} 个本次会话加载的技能 · 停用 {data.disabled.length} · 受阻/错误 {problems.length}
+				—— 数据来自 get_skills（agentDir {data.scope.agentDir || "未知"}）；启用/停用在「技能」页操作。
+			</div>
+		</div>
+	);
+}
+
+/** 一行技能：名字 + 描述 + 版本（声明或指纹）+ serve 给的五个事实。 */
+function SkillLine({ row, dimmed }: { row: SkillScopeRowDto; dimmed?: boolean }): React.JSX.Element {
+	return (
+		<div
+			className={`border-b border-hairline px-1 py-3 transition-colors hover:bg-surface ${dimmed ? "opacity-70" : ""}`}
+		>
+			<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+				<span
+					className={`w-[200px] shrink-0 font-mono text-[13px] font-medium text-ink ${dimmed ? "line-through" : ""}`}
+				>
+					{row.name}
+				</span>
+				<span className="min-w-[200px] flex-1 text-[12px] text-ink-subtle">{row.description || "—"}</span>
+				<span className="w-[110px] shrink-0 text-right font-mono text-[12px] text-ink-faint">
+					{skillVersionText(row)}
+				</span>
+			</div>
+			<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-ink-faint">
+				<span className="rounded bg-surface-2 px-1.5 py-0.5">{SKILL_SCOPE_LABELS[row.scope]}</span>
+				<span>
+					{row.providerName ?? row.provider} · {row.source}
+				</span>
+				<span className={`rounded px-1.5 py-0.5 ${skillStatusClass(row.status)}`}>
+					{SKILL_STATUS_LABELS[row.status]}
+				</span>
+				<span className="rounded bg-surface-2 px-1.5 py-0.5">{SKILL_ACTIVATION_LABELS[row.activation]}</span>
+				<span className="max-w-[420px] truncate" title={row.path || "磁盘上找不到 SKILL.md"}>
+					{row.path || "路径未知"}
+				</span>
+				{row.reason && <span className="max-w-[420px] truncate">原因：{row.reason}</span>}
 			</div>
 		</div>
 	);
