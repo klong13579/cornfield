@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { WireCommand, WireCommandOfType } from "../src/commands";
+import type { WireSessionIndexEntry } from "../src/frames";
 import type {
 	EvolvedSkillDto,
 	EvolvedSkillsDto,
@@ -25,6 +26,7 @@ import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
 import type { ProjectDeleteDto, ProjectRecordDto, ProjectUpsertDto } from "../src/results/projects";
 import type { ChildSessionStatusDto, DelegateChildInput, DelegatedChildDto } from "../src/results/session-tree";
 import type { Scope } from "../src/scope";
+import type { SessionSnapshot } from "../src/snapshot";
 
 /**
  * 协议形状锁定（P0，参照 codex schema_fixtures）：
@@ -317,6 +319,20 @@ const _cronUpdateShape: _Equal<_CronUpdate, { id?: string; type: "cron_update"; 
 const _cronRemoveShape: _Equal<_CronRemove, { id?: string; type: "cron_remove"; taskId: string }> = true;
 const _cronTestRunShape: _Equal<_CronTestRun, { id?: string; type: "cron_test_run"; name: string; inMs?: number }> =
 	true;
+
+// ── T24：会话归属（projectId 的权威形状） ──
+
+// new_session 的 projectId 可选：缺省 = 这个会话没有声明归属（与今天行为一致），
+// 不是「落回启动根」；给了就必须能被 serve 解出根，解不出走 ok:false。
+const _newSessionShape: _Equal<
+	WireCommandOfType<"new_session">,
+	{ id?: string; type: "new_session"; sessionId?: string; parentSession?: string; projectId?: string }
+> = true;
+
+// list_sessions 投影与会话快照都带**权威** projectId（会话头里那一份）；未记录 = undefined，
+// 不拿 cwd 反推一个 —— 归属是记录下来的事实，不是投影端按路径猜出来的。
+const _sessionIndexProjectId: _Equal<WireSessionIndexEntry["projectId"], string | undefined> = true;
+const _sessionSnapshotProjectId: _Equal<SessionSnapshot["projectId"], string | undefined> = true;
 
 // ── 运行时命令清单快照 ──
 

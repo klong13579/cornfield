@@ -85,8 +85,8 @@ export const DOMAIN_AUTHORITY: Record<DomainConcept, ConceptAuthority> = {
 	},
 	project: {
 		owner: "client",
-		authority: null,
-		pending: "WP4 — today a Project is only implicit in a session's cwd / git toplevel",
+		authority:
+			"client-scope registry ~/.cornfield/agent/projects.json (`agent-domain/project-store`); a session's binding is recorded in its own header as SessionHeader.projectId/projectSource",
 	},
 	workspaceContext: {
 		owner: "derived",
@@ -188,6 +188,40 @@ export interface ProjectRecord {
 	name: string;
 	/** Input to default-agent resolution, below `session.agentId` (§10). */
 	defaultAgentId?: AgentId;
+}
+
+/**
+ * Which scope named a session's Project. The binding rungs, most authoritative first.
+ *
+ *   - `"session"` — the session's own record. A caller resolved the Project while the session
+ *     was assembled and wrote it into the header. It stays true when the cwd stops matching
+ *     (the checkout moved, the session did not): the record is the assertion, the cwd is not.
+ *   - `"cwd"` — inferred from the session's working directory through the Project registry
+ *     (`matchProjectForPath`, deepest declared root wins). The legacy rung, for sessions that
+ *     recorded nothing; its answer is only as good as the cwd it was read from.
+ */
+export type ProjectBindingSource = "session" | "cwd";
+
+/**
+ * Where a session's Project came from, `"none"` included.
+ *
+ * `"none"` is a fact of its own, not an empty binding: a session nothing named a Project for
+ * (`undefined` id) is different from one whose record went stale, and a reader that had only
+ * `"cwd"`/`"session"` would have to spell the first case as an empty string or a missing field
+ * — both of which read as "unknown".
+ */
+export type ProjectSource = ProjectBindingSource | "none";
+
+/**
+ * A resolved Project binding plus its provenance, persisted in the session header as the pair
+ * `projectId` / `projectSource`.
+ *
+ * Same rule as `ResolvedAgentRef` (§10): the caller resolves it, the session store only records
+ * it. `source` cannot be `"none"` — a ref exists exactly when a Project was named.
+ */
+export interface ResolvedProjectRef {
+	projectId: ProjectId;
+	source: ProjectBindingSource;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

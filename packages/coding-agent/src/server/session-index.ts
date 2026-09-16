@@ -117,6 +117,9 @@ async function indexOne(source: SessionIndexSource, file: JsonlFile): Promise<Wi
 			source: source.source,
 			title,
 			cwd: header.cwd,
+			// 归属只从会话头读：旧会话没有 projectId 就是没有（undefined），**不**拿 cwd 猜一个
+			// ——猜出来的归属会让前端分组把会话放到一个它自己从未声明过的 Project 下。
+			projectId: header.projectId,
 			startTime: header.timestamp,
 			endTime: endTime ?? header.timestamp,
 			messageCount: counts.messages,
@@ -140,6 +143,8 @@ interface ParsedHeader {
 	timestamp: string;
 	title?: string;
 	cwd?: string;
+	/** 会话头记录的权威归属（SessionHeader.projectId）；未记录 = undefined。 */
+	projectId?: string;
 	model?: string;
 }
 
@@ -216,11 +221,13 @@ function parseSessionHeader(headText: string): ParsedHeader | null {
 			timestamp?: string;
 			title?: string;
 			cwd?: string;
+			projectId?: string;
 		};
 		if (parsed.type !== "session" || !parsed.id || !parsed.timestamp) return null;
 		const header: ParsedHeader = { id: parsed.id, timestamp: parsed.timestamp };
 		if (parsed.title) header.title = parsed.title;
 		if (parsed.cwd) header.cwd = parsed.cwd;
+		if (parsed.projectId && typeof parsed.projectId === "string") header.projectId = parsed.projectId;
 		header.model = findModelChange(headText);
 		return header;
 	} catch {

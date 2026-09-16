@@ -149,6 +149,11 @@ export interface WireSessionIndexEntry {
 	title?: string;
 	/** 会话打开时的工作目录（header.cwd；cli 会话为 `omp` 启动目录，agent 会话为该 agent 的 agentDir）。 */
 	cwd?: string;
+	/**
+	 * 会话归属的 Project（header.projectId）。**未记录就是 undefined** —— 老会话没有这个字段，
+	 * 不拿 cwd 反推一个：归属是会话记录下来的事实，不是投影端按路径猜出来的。
+	 */
+	projectId?: string;
 	/** 开始时间（header.timestamp，ISO）。 */
 	startTime: string;
 	/** 结束时间（最后一条 entry 的 timestamp，ISO；仅头部时 = startTime）。 */

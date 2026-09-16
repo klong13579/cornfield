@@ -227,4 +227,23 @@ describe("SessionManager.moveTo", () => {
 		const newArtifactDir = newFile.slice(0, -6); // strip .jsonl
 		expect(fs.existsSync(newArtifactDir)).toBe(true);
 	});
+
+	it("搬迁后不残留旧 Project 归属（那条记录是对旧 cwd 的断言）", async () => {
+		const session = SessionManager.create(cwdA);
+		await session.newSession({ project: { projectId: "repo", source: "session" } });
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+
+		expect(getHeader(await loadEntriesFromFile(session.getSessionFile()!))?.projectId).toBe("repo");
+
+		await session.moveTo(cwdB);
+
+		const header = getHeader(await loadEntriesFromFile(session.getSessionFile()!));
+		expect(header?.cwd).toBe(path.resolve(cwdB));
+		// 记录随 cwd 失效：留着就会让头声称一个它已经离开的 Project。
+		// 之后由 resolver 按新 cwd 重新推导，或在没人声明时诚实地回「没有」。
+		expect(header && "projectId" in header).toBe(false);
+		expect(header && "projectSource" in header).toBe(false);
+	});
 });

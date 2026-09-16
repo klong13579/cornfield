@@ -105,7 +105,12 @@ export type MultiplexCommand =
 	| { id?: string; type: "follow_up"; sessionId?: string; message: string; images?: ImageContent[] }
 	| { id?: string; type: "abort"; sessionId?: string }
 	| { id?: string; type: "abort_and_prompt"; sessionId?: string; message: string; images?: ImageContent[] }
-	| { id?: string; type: "new_session"; sessionId?: string; parentSession?: string }
+	/**
+	 * 新建会话。`projectId` 是**权威归属**：serve 按它解析工作根与边界根（coding-agent 的
+	 * session-workspace resolver），未声明的 id 直接 ok:false；缺省 = 这个会话没有声明归属
+	 * （行为与今天一致，**不**静默落回启动根）。
+	 */
+	| { id?: string; type: "new_session"; sessionId?: string; parentSession?: string; projectId?: string }
 	// P3：用户消息/自定义消息（不经 LLM 转发的直接入队）
 	| { id?: string; type: "send_user_message"; sessionId?: string; message: string }
 	| {
