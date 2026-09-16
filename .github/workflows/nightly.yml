@@ -58,3 +58,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun scripts/auto-release.ts
+
+  # 为什么在这里而不是 ci.yml：这个套件测的是 benchmark harness 自身（报告形状、
+  # 会话 dump 落盘、任务编排），红了说明 harness 变了，不等于产品坏了——不该给每次 push
+  # 当门禁。从 ci.yml 的分片扫描里移出，改成每晚跑一次：静默坏掉一天内就能暴露。
+  # 不需要原生 addon：这三个文件不碰 Rust 栈。
+  benchmark_harness:
+    runs-on: ubuntu-22.04
+    if: github.repository == 'klong13579/cornfield'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+      - name: Cache bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - name: Benchmark harness tests
+        run: bun --cwd=packages/typescript-edit-benchmark run test
