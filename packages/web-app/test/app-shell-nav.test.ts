@@ -17,7 +17,6 @@ import { activePanelOf, getPanels, panelHandle } from "../src/layout/panel-regis
 import type { ChildSessionNodeDto, ProjectRecordDto } from "../src/lib/pi-client-api";
 import {
 	agentIdentitySource,
-	CROSS_AGENT_NOTE,
 	EMPTY_NEW_SESSION_DRAFT,
 	NewSessionForm,
 	type NewSessionInput,
@@ -849,7 +848,7 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 		expect(html).toContain("注册表里还没有 Agent");
 		expect(html).not.toContain("未连接——读不到 Agent 注册表");
 		expect((elementOfType(tree, "button").props as { disabled?: boolean }).disabled).toBe(true);
-		expect(newSessionSubmitState(viewOf({ agents: [] }), EMPTY_NEW_SESSION_DRAFT).canSubmit).toBe(false);
+		expect(newSessionSubmitState(viewOf({ agents: [] })).canSubmit).toBe(false);
 	});
 
 	it("无 Project：说清「还没声明过」并给出声明文件路径（不是读取失败、也不是读取中）", () => {
@@ -915,7 +914,7 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 				onCreate: noop,
 			}),
 		);
-		expect(html).toContain("与当前焦点不同：新会话仍建在当前焦点上");
+		expect(html).toContain("与当前焦点不同：不改选时仍按当前焦点（§10 第 1 级优先）");
 		expect(html).toContain("本会话焦点（§10 第 1 级）");
 	});
 
@@ -926,16 +925,22 @@ describe("NewSessionForm：三个意图各自落到哪", () => {
 		expect(source.label).toContain("看不见");
 	});
 
-	it("选别的 Agent：提交被挡住，并给出能走的那条路", () => {
+	it("选别的 Agent：提交不再被挡，选中的 Agent 真的交出去", () => {
 		const view = viewOf({ agents: AGENTS, activeAgentId: "default" });
 		const draft = { ...EMPTY_NEW_SESSION_DRAFT, agentId: "hr" };
-		const state = newSessionSubmitState(view, draft);
-		expect(state.canSubmit).toBe(false);
-		expect(state.hint).toBe(CROSS_AGENT_NOTE);
+		// 跨 Agent 提交在 store 那边已经是顺序正确的（先切后建），这里没有理由再挡
+		expect(newSessionSubmitState(view).canSubmit).toBe(true);
 
-		const tree = formOf({ view, draft });
-		expect(renderToStaticMarkup(tree)).toContain(CROSS_AGENT_NOTE);
-		expect((elementOfType(tree, "button").props as { disabled?: boolean }).disabled).toBe(true);
+		const seen: NewSessionInput[] = [];
+		const tree = formOf({ view, draft, onCreate: input => seen.push(input) });
+		const html = renderToStaticMarkup(tree);
+		expect(html).toContain("已改选");
+		expect(html).toContain("提交时先切到它并等 serve 确认");
+		expect((elementOfType(tree, "button").props as { disabled?: boolean }).disabled).toBe(false);
+
+		// 提交：交给创建路径的是**被改选的那个** Agent，不是焦点
+		fire(tree, "form", "onSubmit", { preventDefault: noop });
+		expect(seen).toEqual([{ agentId: "hr" }]);
 	});
 
 	it("提交真的把三个字段交出去（去空格；空串不带出去）", () => {

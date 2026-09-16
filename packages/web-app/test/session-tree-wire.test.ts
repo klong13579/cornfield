@@ -108,6 +108,25 @@ async function createConnectedStore(): Promise<{ store: SessionStore; adapter: P
 	return { store, adapter };
 }
 
+/**
+ * serve 连接后必推的 agent 注册表（本连接焦点那个标 `active: true`）。
+ *
+ * 「新会话建在哪个 Agent 上」的判据就是这个焦点读数：注册表还没到就无从确定，不得建（见
+ * SessionStore.newSession）。后台真实顺序也是先注册表再可能有点击（hello_ack →
+ * broadcastServerSnapshot），所以要用例真的走到新建，就得先把注册表摆上。
+ */
+function pushAgents(...ids: string[]): void {
+	lastCreated?.receive(
+		JSON.stringify({
+			type: "push",
+			event: {
+				type: "server_snapshot",
+				sessions: ids.map((id, index) => ({ id, active: index === 0, attached: true })),
+			},
+		}),
+	);
+}
+
 const CHILD = {
 	sessionId: "child-1",
 	parentSessionId: "sess-root",
@@ -409,13 +428,17 @@ describe("Agent 隔离（不同 Agent 不混入主流）", () => {
 
 	it("新会话清掉上一会话的子树", async () => {
 		const { store } = await createConnectedStore();
+		pushAgents("hr");
 		const tree = store.refreshSessionTree("hr");
 		respond({ sessionId: "sess-root", children: [CHILD] });
 		await tree;
 		expect(store.getSnapshot().sessionTree?.children).toHaveLength(1);
 
-		store.newSession();
+		const created = store.newSession();
+		// 调用即作废（不等回执）：上一会话的账本不得跟着新会话走到下一屏
 		expect(store.getSnapshot().sessionTree).toBeUndefined();
+		respondTo("new_session", { cancelled: false });
+		expect((await created).kind).toBe("created");
 	});
 });
 

@@ -16,6 +16,10 @@ import { SessionTree } from "./SessionTree";
  *
  * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引，
  * 按 source 字段分源）。无 mock——任一源无数据不伪造，显示空态。
+ *
+ * 两个「新会话」钮（折叠薄栏与展开态）是**同一个动作**，且与顶栏表单走**同一条创建路径**
+ * （`SessionStore.newSession`：先等目标 Agent 切过去，再带显式目标建）。它们与表单的唯一区别是
+ * 不选项：直建就是「当前焦点 Agent 上建一个」——所以它们传空入参，由那条路径自己解析焦点。
  */
 
 type SourceId = "webui" | "cli";
@@ -167,7 +171,7 @@ export function SessionSidebar(): React.JSX.Element {
 					<button
 						type="button"
 						className="nav-item"
-						onClick={() => store.newSession()}
+						onClick={() => void store.newSession()}
 						aria-label="新会话"
 						title="新会话"
 					>
@@ -183,7 +187,7 @@ export function SessionSidebar(): React.JSX.Element {
 						<button
 							type="button"
 							className="flex w-full items-center justify-center gap-2 rounded-md border border-hairline bg-accent px-3 py-2 text-[13px] font-semibold text-on-accent transition-colors hover:bg-accent-hover"
-							onClick={() => store.newSession()}
+							onClick={() => void store.newSession()}
 						>
 							<Plus size={14} strokeWidth={2} />
 							新会话

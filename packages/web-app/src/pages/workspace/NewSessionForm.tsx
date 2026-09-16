@@ -12,13 +12,12 @@ import type { SessionView } from "../../state/session-store";
  *      让用户以为自己选了一个其实没生效的东西，那比不提供这个控件更糟。
  *
  * 今天的落点（都是查过实现的事实，不是猜测）：
- *   - **Agent**：serve 的 `new_session` 建在**本连接当前焦点会话**上（`resolveTarget` 用
- *     `ctx.activeAgentId`），所以「不换 Agent 直接新建」是真落。换 Agent 再新建今天**落不下去**：
- *     store 的 `focusAgent` 与 `newSession` 都是 fire-and-forget，而 serve 逐帧并发处理
- *     （wire-server.ts `void core.handleCommand(...)`），`switch_session` 还要 await
- *     `registry.attach` —— `new_session` 可能先被处理并落在**旧** Agent 上。那不是用户要的
- *     那次新建，所以这里不开这个口子，只把正确的做法指出来。
- *   - **标题**：wire 有 `set_session_name`，但 `PiClient` 没暴露它 —— 缺一条客户端封装。
+ *   - **Agent**：**可写**。提交走 store 的 `newSession` 这一条唯一路径：先把目标 Agent 切过去
+ *     并**等 serve 确认**（attach + switch_session 两半都 await），确认不了就整条命令不发；
+ *     确认之后才带**显式目标**发 `new_session`（wire 的 `sessionId`）。serve 逐帧并发处理
+ *     （wire-server.ts `void core.handleCommand(...)`），所以「先切后建」如果不等切换落地，
+ *     就会建到**旧** Agent 上 —— 这个顺序由 store 一处保证，这一屏只负责把选中的 Agent 交出去。
+ *   - **标题**：wire 有 `set_session_name`，由适配层在**创建成功之后**跟一次（落在新会话上）。
  *   - **Project**：**没有**「把会话绑到某个 Project」的命令：会话归属由工作目录按 WP4 的 root
  *     规则推导（`matchProjectForPath`），创建时不可选。
  *
@@ -132,12 +131,8 @@ export function projectFieldState(
 export const PROJECT_FIELD_NOTE =
 	"暂不支持写入：没有「把会话绑到某个 Project」的命令 —— 会话归属由工作目录按 root 规则推导";
 
-/** 标题字段今天的写入面：没有。缺的是 `PiClient` 对 `set_session_name` 的封装。 */
-export const TITLE_FIELD_NOTE = "暂不支持写入：wire 有 set_session_name，但 PiClient 没暴露它";
-
-/** 换 Agent 再新建时给出的做法（不是资格判定，是操作顺序）。 */
-export const CROSS_AGENT_NOTE =
-	"换 Agent 和新建会话今天不是一次原子操作（store 的 focusAgent / newSession 都是 fire-and-forget，serve 逐帧并发处理，new_session 可能先落在旧 Agent 上）。先用顶栏把 Agent 切过去，再回来新建。";
+/** 标题字段今天的写入面：创建成功后由适配层跟一次 `set_session_name`（wire 没有「创建时命名」）。 */
+export const TITLE_FIELD_NOTE = "创建成功后落名：wire 没有「创建时命名」，是创建后紧跟一次 set_session_name";
 
 export interface NewSessionSubmitState {
 	canSubmit: boolean;
@@ -148,20 +143,16 @@ export interface NewSessionSubmitState {
 /**
  * 这次新建能不能提交。
  *
- * 三条都是从上面那些事实上读出来的：未连接（发不出去）、注册表里一个 Agent 都没有（新会话落在谁
- * 身上无从确定）、以及选了别的 Agent（那条路今天会落到错的 Agent 上）。都不是风格偏好。
+ * 两条都是从上面那些事实上读出来的：未连接（发不出去）、注册表里一个 Agent 都没有（新会话落在谁
+ * 身上无从确定）。**不再按「选了别的 Agent」挡提交** —— 那条路今天真的能走（store 的 `newSession`
+ * 先切后建，等不到确认就不建），挡它就是挡住一件已经正确的事。选中的 Agent 到底存不存在不在这里
+ * 判：本地没有资格替 serve 下这个结论，serve 的原文才是权威。
  */
-export function newSessionSubmitState(
-	view: AgentFocusSource & Pick<SessionView, "connected">,
-	draft: NewSessionDraft,
-): NewSessionSubmitState {
+export function newSessionSubmitState(view: AgentFocusSource & Pick<SessionView, "connected">): NewSessionSubmitState {
 	if (!view.connected) return { canSubmit: false, hint: "未连接——命令发不出去" };
 	if (view.agents.length === 0) {
 		return { canSubmit: false, hint: "注册表里还没有 Agent：新会话落在谁身上无从确定" };
 	}
-	const focusId = activeAgentIdOf(view);
-	const picked = draft.agentId.trim();
-	if (picked !== "" && picked !== focusId) return { canSubmit: false, hint: CROSS_AGENT_NOTE };
 	return { canSubmit: true, hint: "" };
 }
 
@@ -178,7 +169,7 @@ export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFo
 	const focusAgent = activeAgentOf(view);
 	const project = projectFieldState(view);
 	const currentProject = currentProjectOf(view);
-	const submit = newSessionSubmitState(view, draft);
+	const submit = newSessionSubmitState(view);
 	const picked = draft.agentId.trim();
 	const overridden = picked !== "" && picked !== focusId;
 	// 这一屏真正会被用的那个 Agent：改选了就是被改选的那个，否则是焦点 Agent。
@@ -198,7 +189,7 @@ export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFo
 				<span className="text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">新建会话</span>
 				<span className="flex-1" />
 				{/* 落不下去的字段一律在提交前就写在这里，不在提交时静默丢掉 */}
-				<span className="text-[11px] text-ink-faint">Agent 可写 · Project / 标题今天写不进去</span>
+				<span className="text-[11px] text-ink-faint">Agent 可写（先切过去再建）· Project 今天写不进去</span>
 			</div>
 
 			<div className="flex flex-wrap items-end gap-2">
@@ -285,14 +276,19 @@ export function NewSessionForm({ view, draft, onChange, onCreate }: NewSessionFo
 						（§10 第 2 级）
 						{currentProject.defaultAgentId === focusId
 							? " · 与当前焦点一致"
-							: " · 与当前焦点不同：新会话仍建在当前焦点上"}
+							: " · 与当前焦点不同：不改选时仍按当前焦点（§10 第 1 级优先）"}
 					</span>
 				)}
 			</div>
 
 			{/* 三个字段各自的去向，逐条明说：不写进去的字段不许只靠一个点不动的控件暗示 */}
 			<div className="mt-1 space-y-0.5 text-[11px] text-ink-faint">
-				<div>Agent：{overridden ? `已改选 —— ${CROSS_AGENT_NOTE}` : "新建时用当前焦点的 Agent"}</div>
+				<div>
+					Agent：
+					{overridden
+						? "已改选 —— 提交时先切到它并等 serve 确认，确认不了就不建；确认之后才在它上面建会话"
+						: "新建时用当前焦点的 Agent（它已经是本连接的焦点，不再多切一次）"}
+				</div>
 				<div>
 					Project：
 					{project.kind === "disconnected"
