@@ -55,6 +55,22 @@ export type SearchToolInput = Static<typeof searchSchema>;
 
 const DEFAULT_MATCH_LIMIT = 20;
 
+/**
+ * Files above the native search size cap are never read. Saying so is the whole
+ * point of this notice: an empty result must not be indistinguishable from
+ * "nothing matched" (2026-09-16: a 4.4 MB file answering "No matches found" for a
+ * literal on its own first line). The cap itself lives in the native grep
+ * (`MAX_FILE_BYTES`); it is deliberately not restated here so the two cannot
+ * drift.
+ */
+function formatSkippedOversized(count: number): string {
+	const verb = count === 1 ? "file exceeds" : "files exceed";
+	const aux = count === 1 ? "was" : "were";
+	// "not searched in full" is true of both cases this flag covers: a walk skips the
+	// file entirely, an explicitly named one is searched over its leading window only.
+	return `${count} ${verb} the search size limit and ${aux} not searched in full.`;
+}
+
 export interface SearchToolDetails {
 	truncation?: TruncationResult;
 	matchLimitReached?: number;
@@ -72,6 +88,8 @@ export interface SearchToolDetails {
 	 * `result.text` lines but uses a `│` gutter and `*` to mark match lines (vs space for
 	 * context). The TUI uses this directly so it never parses model-facing hashline anchors. */
 	displayContent?: string;
+	/** Files the native search never read because they exceed its size cap. */
+	skippedOversized?: number;
 }
 
 type SearchParams = Static<typeof searchSchema>;
@@ -174,6 +192,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 				if (exactFilePaths) {
 					const matches: GrepMatch[] = [];
 					let limitReached = false;
+					let skippedOversized = 0;
 					for (const exactFilePath of exactFilePaths) {
 						const fileResult = await grep(
 							{
@@ -193,6 +212,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 							undefined,
 						);
 						limitReached = limitReached || Boolean(fileResult.limitReached);
+						skippedOversized += fileResult.skippedOversized ?? 0;
 						const relativeFilePath = path.relative(searchPath, exactFilePath).replace(/\\/g, "/");
 						matches.push(...fileResult.matches.map(match => ({ ...match, path: relativeFilePath })));
 					}
@@ -203,6 +223,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 						filesWithMatches: new Set(offsetMatches.map(match => match.path)).size,
 						filesSearched: exactFilePaths.length,
 						limitReached,
+						skippedOversized: skippedOversized > 0 ? skippedOversized : undefined,
 					};
 				} else {
 					result = await grep(
@@ -275,14 +296,18 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 			const { record: recordFile, list: fileList } = createFileRecorder();
 			const fileMatchCounts = new Map<string, number>();
 			if (selectedMatches.length === 0) {
+				const skipped = result.skippedOversized ?? 0;
 				const details: SearchToolDetails = {
 					scopePath,
 					matchCount: 0,
 					fileCount: 0,
 					files: [],
 					truncated: false,
+					...(skipped > 0 ? { skippedOversized: skipped } : {}),
 				};
-				return toolResult(details).text("No matches found").done();
+				// A file that was never opened is not a file that did not match.
+				const text = skipped > 0 ? `No matches found; ${formatSkippedOversized(skipped)}` : "No matches found";
+				return toolResult(details).text(text).done();
 			}
 			const outputLines: string[] = [];
 			let linesTruncated = false;
@@ -354,6 +379,10 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 			if (matchLimitReached || result.limitReached) {
 				outputLines.push("", limitMessage);
 			}
+			const skippedOversized = result.skippedOversized ?? 0;
+			if (skippedOversized > 0) {
+				outputLines.push("", formatSkippedOversized(skippedOversized));
+			}
 			const rawOutput = outputLines.join("\n");
 			const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
 			const sidecarId = truncation.truncated
@@ -374,6 +403,7 @@ export class SearchTool implements AgentTool<typeof searchSchema, SearchToolDeta
 				truncated,
 				matchLimitReached: matchLimitReached ? effectiveLimit : undefined,
 				resultLimitReached: result.limitReached ? internalLimit : undefined,
+				...(skippedOversized > 0 ? { skippedOversized } : {}),
 				displayContent: displayLines.join("\n"),
 			};
 			if (truncation.truncated) details.truncation = truncation;
@@ -485,7 +515,10 @@ export const searchToolRenderer = {
 				{ icon: "warning", title: "Search", description: args?.pattern, meta: ["0 matches"] },
 				uiTheme,
 			);
-			return new Text([header, formatEmptyMessage("No matches found", uiTheme)].join("\n"), 0, 0);
+			const lines = [header, formatEmptyMessage("No matches found", uiTheme)];
+			const skipped = details?.skippedOversized ?? 0;
+			if (skipped > 0) lines.push(uiTheme.fg("warning", formatSkippedOversized(skipped)));
+			return new Text(lines.join("\n"), 0, 0);
 		}
 
 		const summaryParts = [formatCount("match", matchCount), formatCount("file", fileCount)];
