@@ -1,8 +1,9 @@
 /**
- * serve 侧 Project 桥的测试（T8 读面 / 写面）。
+ * serve 侧 Project 桥的测试（T8 读面 / 写面，T27 改成权威归属）。
  *
- * 用真文件、真存储：
- *   - 读面的意义全在「读不到 ≠ 没有」这条分界上（换成 mock 存储就什么都验不到了）；
+ * 用真文件、真存储、真会话：
+ *   - 读面的意义全在「归属从哪来」这条分界上（会话头记的权威值 → cwd 回落 → 没有）
+ *     与「读不到 ≠ 没有」上（换成 mock 存储就什么都验不到了）；
  *   - 写面的意义全在「答复 = 盘上现在那一份」上 —— 一次 `set_project` 说成功而盘上没变，
  *     或一次 `delete_project` 说删掉了而东西还在，都是把没发生的事说成发生了。所以这里
  *     每一步都回读真文件来对账，而不是断言桥的返回值跟自己一致。
@@ -14,6 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { loadProjects, projectsFilePath, upsertProject } from "@cornfield/coding-agent/agent-domain/project-store";
 import { declareProject, dropProject, readProjectContext } from "@cornfield/coding-agent/server/projects-wire";
+import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
 
 const ENV_KEYS = ["HOME", "CORNFIELD_CONFIG_DIR"] as const;
 
@@ -36,7 +38,25 @@ afterEach(async () => {
 	await fs.rm(home, { recursive: true, force: true });
 });
 
-describe("readProjectContext", () => {
+/**
+ * 一个真会话：归属的权威就是它头里那一份（`SessionManager` 结构上就满足查询要的 `session`）。
+ * 会话文件写进临时目录 —— 那条路径只是为了让会话真的是会话，不是被测的东西。
+ */
+async function sessionAt(
+	cwd: string,
+	project?: { projectId: string; source: "session" | "cwd" },
+): Promise<SessionManager> {
+	const manager = SessionManager.create(cwd, path.join(home, "sessions"));
+	if (project) await manager.newSession({ project });
+	return manager;
+}
+
+/** 查归属要给的 agentDir：一个空目录就够（声明文件不存在 = 没有额外 roots）。 */
+function agentDirOf(): string {
+	return path.join(home, "agent-home");
+}
+
+describe("readProjectContext（会话归属）", () => {
 	it("没有存储文件 = 明确空集（不是错误）", async () => {
 		expect(await readProjectContext()).toEqual({ projects: [] });
 	});
@@ -58,31 +78,66 @@ describe("readProjectContext", () => {
 		});
 	});
 
-	it("会话 cwd 落在某个 Project 里时给出归属（原目录与子目录都算）", async () => {
+	it("不问会话就不做归属判断（连来源都不给，不拿别的路径冒充会话上下文）", async () => {
+		await upsertProject({ projectId: "repo", root: home, name: "Repo" });
+
+		const result = await readProjectContext();
+		expect(result.currentProjectId).toBeUndefined();
+		// 「没问过」与「问了、没有」不是同一件事：前者连来源字段都不出现。
+		expect("currentProjectSource" in result).toBe(false);
+	});
+
+	it("权威优先：会话头记的归属胜出，即使 cwd 落在另一个 Project 里", async () => {
+		await upsertProject({ projectId: "repo", root: path.join(home, "repo"), name: "Repo" });
+		await upsertProject({ projectId: "dtc", root: path.join(home, "dtc"), name: "DTC" });
+		// cwd 在 repo 里，但会话记的是 dtc：记录是断言，cwd 不是。
+		const session = await sessionAt(path.join(home, "repo"), { projectId: "dtc", source: "session" });
+
+		const result = await readProjectContext({ session, agentDir: agentDirOf() });
+
+		expect(result.currentProjectId).toBe("dtc");
+		expect(result.currentProjectSource).toBe("session");
+	});
+
+	it("旧会话（头里没记）= 按 cwd 匹配回落，来源标 cwd（原目录与子目录都算，最深声明的祖先赢）", async () => {
 		const root = path.join(home, "repo");
 		const nested = path.join(root, "packages", "app");
 		await fs.mkdir(nested, { recursive: true });
 		await upsertProject({ projectId: "repo", root, name: "Repo" });
 		await upsertProject({ projectId: "app", root: nested, name: "App" });
 
-		// 最深声明的祖先 root 获胜（与域里 matchProjectForPath 同一规则）
-		expect((await readProjectContext(root)).currentProjectId).toBe("repo");
-		expect((await readProjectContext(nested)).currentProjectId).toBe("app");
+		const atRoot = await sessionAt(root);
+		const atNested = await sessionAt(nested);
+
+		const fromRoot = await readProjectContext({ session: atRoot, agentDir: agentDirOf() });
+		expect(fromRoot.currentProjectId).toBe("repo");
+		expect(fromRoot.currentProjectSource).toBe("cwd");
+
+		const fromNested = await readProjectContext({ session: atNested, agentDir: agentDirOf() });
+		expect(fromNested.currentProjectId).toBe("app");
+		expect(fromNested.currentProjectSource).toBe("cwd");
 	});
 
-	it("会话 cwd 不在任何 Project 里 = 不给归属（不编一个）", async () => {
+	it("问了、确实没有归属 = 没有 currentProjectId + 来源 none（不是「没问过」）", async () => {
 		await upsertProject({ projectId: "repo", root: path.join(home, "repo"), name: "Repo" });
+		const session = await sessionAt(path.join(home, "elsewhere"));
 
-		const result = await readProjectContext(path.join(home, "elsewhere"));
+		const result = await readProjectContext({ session, agentDir: agentDirOf() });
+
 		expect(result.projects).toHaveLength(1);
 		expect(result.currentProjectId).toBeUndefined();
+		expect(result.currentProjectSource).toBe("none");
 	});
 
-	it("不给会话 cwd 时不做归属判断（不拿别的路径冒充会话上下文）", async () => {
-		await upsertProject({ projectId: "repo", root: home, name: "Repo" });
+	it("会话记的 Project 注册表里没有 = 报错，不静默回落成 cwd 或「未归属」", async () => {
+		const atRepo = path.join(home, "repo");
+		await fs.mkdir(atRepo, { recursive: true });
+		await upsertProject({ projectId: "repo", root: atRepo, name: "Repo" });
+		// 会话说自己在 ghost 上：按 cwd 能匹配到 repo —— 回落过去等于把一条已经不成立的归属
+		// 改写成另一条，调用方再也看不到「这个会话的绑定失效了」。
+		const session = await sessionAt(atRepo, { projectId: "ghost", source: "session" });
 
-		const result = await readProjectContext();
-		expect(result.currentProjectId).toBeUndefined();
+		await expect(readProjectContext({ session, agentDir: agentDirOf() })).rejects.toThrow(/does not declare/);
 	});
 
 	it("存储损坏时报错，不退化成空列表（否则「声明过但坏了」会显示成「没声明过」）", async () => {
@@ -93,12 +148,14 @@ describe("readProjectContext", () => {
 		await expect(readProjectContext()).rejects.toThrow(/not valid JSON/);
 	});
 
-	it("存储版本不符同样报错", async () => {
+	it("存储版本不符同样报错（问了会话也一样）", async () => {
 		const file = projectsFilePath();
 		await fs.mkdir(path.dirname(file), { recursive: true });
 		await Bun.write(file, `${JSON.stringify({ version: 99, projects: {} })}\n`);
+		const session = await sessionAt(path.join(home, "repo"));
 
 		await expect(readProjectContext()).rejects.toThrow(/version 99/);
+		await expect(readProjectContext({ session, agentDir: agentDirOf() })).rejects.toThrow(/version 99/);
 	});
 });
 
@@ -198,12 +255,14 @@ describe("declareProject（set_project 的写面）", () => {
 		);
 	});
 
-	it("写进去又读得回来：声明 → 读面能看到它，且 root 一致", async () => {
+	it("写进去又读得回来：声明 → 读面能看到它，且 root 一致（带会话归属一起）", async () => {
 		await declareProject({ projectId: "repo", name: "Repo", root: path.join(home, "repo") });
+		const session = await sessionAt(path.join(home, "repo", "src"));
 
-		expect(await readProjectContext(path.join(home, "repo", "src"))).toEqual({
+		expect(await readProjectContext({ session, agentDir: agentDirOf() })).toEqual({
 			projects: [{ projectId: "repo", root: path.join(home, "repo"), name: "Repo" }],
 			currentProjectId: "repo",
+			currentProjectSource: "cwd",
 		});
 	});
 });
@@ -252,9 +311,14 @@ describe("dropProject（delete_project 的写面）", () => {
 
 	it("删完之后读面也看不到它（写面与读面是同一份事实）", async () => {
 		await upsertProject({ projectId: "repo", root: path.join(home, "repo"), name: "Repo" });
+		const session = await sessionAt(path.join(home, "repo"));
 
 		await dropProject("repo");
 
-		expect(await readProjectContext(path.join(home, "repo"))).toEqual({ projects: [] });
+		// 项目没了，会话头里什么都没记：归属回落到 cwd 也匹配不上了。
+		expect(await readProjectContext({ session, agentDir: agentDirOf() })).toEqual({
+			projects: [],
+			currentProjectSource: "none",
+		});
 	});
 });

@@ -37,7 +37,7 @@
  */
 
 import * as path from "node:path";
-import { logger } from "@cornfield/utils";
+import { getAgentDir, logger } from "@cornfield/utils";
 import type {
 	BroughtBackChildResultDto,
 	ChildSessionNodeDto,
@@ -62,6 +62,7 @@ import { type ChildSession, ChildSessionSupervisor } from "../session/child-sess
 import type { ChildSessionRecord } from "../session/session-tree";
 import { SessionTreeManager, type SessionTreeSelf } from "../session/session-tree-manager";
 import { SessionLogTreeStore } from "../session/session-tree-store";
+import { resolveSessionWorkspace } from "../session/session-workspace";
 import { resolveAgentRuntimeDir } from "./agent-scope";
 import type { AgentMeta } from "./session-registry";
 
@@ -116,16 +117,29 @@ export interface SessionTreeWireOptions {
  */
 const hosts = new WeakMap<AgentSession, DelegationHost>();
 
-function hostFor(session: AgentSession, meta: AgentMeta, options: SessionTreeWireOptions): DelegationHost {
+async function hostFor(
+	session: AgentSession,
+	meta: AgentMeta,
+	options: SessionTreeWireOptions,
+): Promise<DelegationHost> {
 	const existing = hosts.get(session);
 	if (existing) return existing;
-	// root/depth/project 一律不填：它们今天没有被持久化（WP1 权威表把完整树节点列为
-	// 待建），编一个出来就是替会话声明一个没人记录过的身份。
+	// root/depth 不填：它们今天没有被持久化（WP1 权威表把完整树节点列为待建），编一个出来
+	// 就是替会话声明一个没人记录过的身份。
+	//
+	// projectId 不一样，它有权威来源：会话头记的那一个（`session/session-workspace` 判，
+	// 旧会话才按 cwd 匹配回落）。子节点记的是「父会话在哪个 Project 上委派了这个子会话」——
+	// 那正是这条边两端共享的事实。解析不出来就失败，不填等于把一个有归属的父会话委派出来的
+	// 子会话记成游离的。
 	const self: SessionTreeSelf = {
 		sessionId: session.sessionId,
 		agentId: meta.id,
 		intercomSessionId: parentEdgeId(session),
 	};
+	// 身份根与 `agent-scope` 同一条规则：它是 resolver 解析 roots 要的那一项，不是从 cwd 推的。
+	const agentDir = resolveAgentRuntimeDir({ agentId: meta.id, agentDir: meta.agentDir }) ?? getAgentDir();
+	const workspace = await resolveSessionWorkspace({ session: session.sessionManager, agentDir });
+	if (workspace.projectId !== undefined) self.projectId = workspace.projectId;
 	const host = (options.host ?? createServeDelegationHost)({ session, meta, self });
 	hosts.set(session, host);
 	return host;
@@ -141,7 +155,7 @@ export async function readSessionTree(
 	meta: AgentMeta,
 	options: SessionTreeWireOptions = {},
 ): Promise<SessionTreeDto> {
-	const records = await hostFor(session, meta, options).manager.records();
+	const records = await (await hostFor(session, meta, options)).manager.records();
 	const tree: SessionTreeDto = {
 		sessionId: session.sessionId,
 		agentId: meta.id,
@@ -182,7 +196,7 @@ export async function delegateChildSession(
 		throw new Error(`delegate_child cwd must be an absolute path, got ${JSON.stringify(cwdOverride)}`);
 	}
 
-	const host = hostFor(session, meta, options);
+	const host = await hostFor(session, meta, options);
 	const target = resolveTargetAgent(input.agentId, meta, options);
 	// 两件事，不是一个：`agentDir` 决定子进程**是哪个 Agent**（配置、技能、记忆都按它加载），
 	// `cwd` 是它在哪个工作区干活。default agent 这里两者天然不同（它的家是全局 agent 目录，
@@ -339,7 +353,7 @@ export async function bringBackChildResult(
 	childSessionId: string,
 	options: SessionTreeWireOptions = {},
 ): Promise<BroughtBackChildResultDto> {
-	const brought = await hostFor(session, meta, options).manager.bringBack(childSessionId);
+	const brought = await (await hostFor(session, meta, options)).manager.bringBack(childSessionId);
 	const result: BroughtBackChildResultDto = {
 		childSessionId,
 		resultRef: brought.resultRef,

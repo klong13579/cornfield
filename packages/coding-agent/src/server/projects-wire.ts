@@ -3,14 +3,20 @@
  *
  * 桥不拥有语义：Project 的权威是 `agent-domain/project-store`（`~/.cornfield/agent/projects.json`，
  * WP4），一个 root 只能被一个 Project 声明，root 比较按 symlink 归一。这里只做两件事：
- * 投影成 wire 形状，以及在调用方给出会话 cwd 时用**域里那条匹配规则**
- * （`matchProjectForPath`，最深声明的祖先 root 获胜）算出会话所在的 Project ——
- * 不在前端另写一份匹配规则。
+ * 投影成 wire 形状，以及把**会话的归属**原样搬过来 —— 归属的唯一判定在 `session/session-workspace`
+ * （会话记录的 `header.projectId` 权威 → 按 cwd 匹配回落 → 没有人声明过），桥不在这里再写一份。
  *
- * 失败模型照抄存储层，不自己发明一条更宽松的：
+ * 归属的输入是**会话本身**，不是它的 cwd 字符串：只拿到一个目录的桥只能按路径猜，而
+ * 「这个会话属于哪个 Project」是会话记录下来的事实，猜出来的归属会让调用方把一个会话
+ * 放到它从未声明过的 Project 下。来源随归属一起返回（`currentProjectSource`）：
+ * 「会话记的」与「按目录算的」不是一个可信度。
+ *
+ * 失败模型照抄存储层与 resolver，不自己发明一条更宽松的：
  *   - 文件不存在 → 空数组（「没声明过」是明确的事实）；
- *   - 文件在但损坏 / 版本不符 / 条目形状不对 → **抛**，由命令回 ok:false。
- * 把后者降级成空列表，会把「声明过但读坏了」显示成「没声明过」—— 用户会以为自己的项目消失了。
+ *   - 文件在但损坏 / 版本不符 / 条目形状不对 → **抛**，由命令回 ok:false；
+ *   - 会话记录的 Project 注册表里不存在、声明文件读不出来 → 同样**抛**（resolver 的判决）。
+ * 把任何一种降级成空列表或「没归属」，都会把「声明过但读坏了」显示成「没声明过」——
+ * 用户会以为自己的项目消失了，或者以为会话没有被归属。
  *
  * 写面（`set_project` / `delete_project`）同样只搬存储的判决：谁占用 root、版本、读写失败都由
  * 存储说了算，这里只补上「调用方给进来的形状本身不成立」这一层（见 `projectInputError`），
@@ -20,31 +26,39 @@
 import * as path from "node:path";
 
 import type { ProjectDeleteDto, ProjectListDto, ProjectRecordDto, ProjectUpsertDto } from "@cornfield/wire";
-import {
-	loadProjects,
-	matchProjectForPath,
-	projectsFilePath,
-	removeProject,
-	upsertProject,
-} from "../agent-domain/project-store";
+import { loadProjects, projectsFilePath, removeProject, upsertProject } from "../agent-domain/project-store";
 import type { ProjectRecord } from "../agent-domain/types";
+import { resolveSessionWorkspace, type SessionWorkspaceSource } from "../session/session-workspace";
 
 /**
- * 已声明的 Project + （可选）会话所在的 Project。
+ * 问「这个会话属于哪个 Project」时要给的东西。
  *
- * `sessionCwd` 缺省 = 调用方只要列表，不要归属判断 —— 不拿别的路径（agentDir、进程 cwd）
- * 冒充会话上下文：那会得出一个看起来像答案的猜测。
+ * `session` 是**会话本身**（`SessionManager` 结构上就满足它）：它的头记着归属，它的 cwd 是旧会话的
+ * 回落依据。只给一个 cwd 字符串的旧签名已经删掉 —— 那个形状答不了这个问题，只能按路径猜。
+ * `agentDir` 是 resolver 要的身份根（它不是从 cwd 推出来的）。
+ */
+export interface SessionProjectQuery {
+	session: SessionWorkspaceSource;
+	agentDir: string;
+}
+
+/**
+ * 已声明的 Project + （可选）会话所在的 Project 及其来源。
+ *
+ * 没给查询（`query` 缺省）= 调用方只要列表，不做归属判断 —— 不拿别的路径（agentDir、进程 cwd）
+ * 冒充会话上下文：那会得出一个看起来像答案的猜测。给了查询就不再有「猜」这一步：归属由
+ * `session/session-workspace` 判，来源原样带出来（`"none"` 也是事实：问了，没人声明过）。
  *
  * 列表顺序即存储里的声明顺序（Object key 顺序，稳定）。这里不排序：排序是展示决定，
  * 链路里第一个「重排过的列表」会让「我上次看到的第 3 个」失去意义。
  */
-export async function readProjectContext(sessionCwd?: string): Promise<ProjectListDto> {
+export async function readProjectContext(query?: SessionProjectQuery): Promise<ProjectListDto> {
 	const records = await loadProjects();
 	const result: ProjectListDto = { projects: records.map(toProjectRecordDto) };
-	if (sessionCwd !== undefined) {
-		const match = matchProjectForPath(records, sessionCwd);
-		if (match) result.currentProjectId = match.projectId;
-	}
+	if (!query) return result;
+	const workspace = await resolveSessionWorkspace({ session: query.session, agentDir: query.agentDir });
+	result.currentProjectSource = workspace.projectSource;
+	if (workspace.projectId !== undefined) result.currentProjectId = workspace.projectId;
 	return result;
 }
 

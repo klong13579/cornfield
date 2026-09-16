@@ -435,10 +435,18 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "list_projects": {
 					try {
 						// 会话归属只看**已 attach** 的会话（不 lazy attach）：查一次项目列表不应把 agent 拉起来。
+						// 归属问的是**会话本身**（它头里记着权威 projectId），不是它的 cwd 字符串 ——
+						// 只拿到一个目录的桥只能按路径猜。agentDir 是 resolver 要的身份根。
 						const attached = registry.getAttached(command.sessionId ?? ctx.activeAgentId);
-						done(await readProjectContext(attached?.session.sessionManager.getCwd()));
+						done(
+							await readProjectContext(
+								attached
+									? { session: attached.session.sessionManager, agentDir: attached.meta.agentDir }
+									: undefined,
+							),
+						);
 					} catch (err) {
-						// 存储存在但读不出来 → ok:false（不当成「没有 Project」）
+						// 存储存在但读不出来 / 会话记的 Project 注册表里没有 → ok:false（不当成「没有 Project」）
 						fail(`list_projects failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;

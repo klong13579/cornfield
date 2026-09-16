@@ -239,11 +239,15 @@ export type MultiplexCommand =
 	 * 列出已声明的 Project，并给出被查询会话落在哪个 Project 里（ProjectListDto）。
 	 *
 	 * Project registry 是客户端 scope（跨 Agent 共享的业务边界），本身不依赖某个会话；
-	 * `sessionId` 可选，只用来算 `currentProjectId`（用已 attach 会话的 cwd 按 WP4 的 root
-	 * 匹配规则算，不 lazy attach）。不传 = 只要列表。
+	 * `sessionId` 可选，只用来算 `currentProjectId` + `currentProjectSource`（不 lazy attach）。
+	 * 不传 = 只要列表。
 	 *
-	 * 存储文件不存在 = 明确空集（projects: []）；文件在但读不出来 = ok:false，
-	 * **不得**退化成空列表 —— 「没声明过」与「声明过但坏了」是两件事。
+	 * 归属的权威是**会话自己的记录**（`SessionHeader.projectId`）：只有旧会话（没记过）才按它的
+	 * cwd 与 WP4 的 root 规则匹配回落。回复里带的来源（`currentProjectSource`）就是要让调用方
+	 * 看得出这次是「会话记的」还是「按目录算的」—— 两者不是一个可信度。
+	 *
+	 * 存储文件不存在 = 明确空集（projects: []）；文件在但读不出来 / 会话记录的 Project 在注册表里
+	 * 不存在 = ok:false，**不得**退化成空列表或「没归属」—— 「没声明过」与「声明过但坏了」是两件事。
 	 */
 	| { id?: string; type: "list_projects"; sessionId?: string }
 	/**

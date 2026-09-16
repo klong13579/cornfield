@@ -23,7 +23,13 @@ import type {
 } from "../src/results";
 import type { AgentTodoDto } from "../src/results/agent-todos";
 import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
-import type { ProjectDeleteDto, ProjectRecordDto, ProjectUpsertDto } from "../src/results/projects";
+import type {
+	ProjectDeleteDto,
+	ProjectListDto,
+	ProjectRecordDto,
+	ProjectUpsertDto,
+	SessionProjectSourceDto,
+} from "../src/results/projects";
 import type { ChildSessionStatusDto, DelegateChildInput, DelegatedChildDto } from "../src/results/session-tree";
 import type { Scope } from "../src/scope";
 import type { SessionSnapshot } from "../src/snapshot";
@@ -334,6 +340,14 @@ const _newSessionShape: _Equal<
 const _sessionIndexProjectId: _Equal<WireSessionIndexEntry["projectId"], string | undefined> = true;
 const _sessionSnapshotProjectId: _Equal<SessionSnapshot["projectId"], string | undefined> = true;
 
+// ── T27：归属投影的来源（list_projects 的 currentProjectSource） ──
+
+// 归属三档：会话记的 / 按 cwd 算的 / 没人声明过；字段缺省 = 没问过（没有会话可查）。
+// 这里是手抄的一份形状（与 coding-agent 的 `ProjectSource` 同形）—— 漂了就是两个包在说两件事。
+const _projectSourceShape: _Equal<SessionProjectSourceDto, "session" | "cwd" | "none"> = true;
+const _projectListSourceShape: _Equal<ProjectListDto["currentProjectSource"], SessionProjectSourceDto | undefined> =
+	true;
+
 // ── 运行时命令清单快照 ──
 
 const COMMAND_TYPES = [
@@ -558,6 +572,17 @@ describe("WireCommand shape lock", () => {
 		};
 		expect(degraded.skills).toHaveLength(1);
 		expect(degraded.error).toContain("解析失败");
+	});
+
+	it("list_projects：归属来源三态可分（没问过 / 问了没有 / 有归属）", () => {
+		const unasked: ProjectListDto = { projects: [] };
+		const askedNone: ProjectListDto = { projects: [], currentProjectSource: "none" };
+		const bound: ProjectListDto = { projects: [], currentProjectId: "dtc", currentProjectSource: "session" };
+
+		// 「没问过」连字段都不出现：调用方不得把它渲染成「问了、没有」。
+		expect("currentProjectSource" in unasked).toBe(false);
+		expect(askedNone.currentProjectSource).toBe("none");
+		expect(bound.currentProjectSource).toBe("session");
 	});
 
 	it("covers every type in the union at compile time", () => {

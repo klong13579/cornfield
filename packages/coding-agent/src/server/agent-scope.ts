@@ -7,18 +7,21 @@
  *   agentDir            哪个目录是它的家 —— `resolveAgentRuntimeDir`（本文件唯一的推导；default agent
  *                       的 meta.agentDir 是 serve 进程 cwd，不是它的家）
  *   会话根 sessionCwd    已 attach 会话的 cwd（= registry agent 的 agentDir；未 attach 时按 agentDir 推算）
- *   Project             WP4 `project-store` 的 `matchProjectForPath`（最深声明的祖先 root 获胜）
+ *   Project             已 attach = 会话的归属，`session/session-workspace` 判（会话头记的
+ *                       `projectId` 权威，旧会话才按 cwd 匹配回落）；未 attach = 按 agentDir 这条
+ *                       声明过的替身目录匹配（没有会话可问，来源如实标 `cwd`）
  *   声明的记忆目录        WP1 `deriveWorkspaceContext`（本模块不重新推导，只调用）
  *
- * 失败模型：Project 读坏了（存储损坏）不是「未归属」—— 记 `projectError`，让调用方少报一个
- * scope 而不是编一个。
+ * 失败模型：归属解析不出来（注册表读坏了 / 会话记的 Project 注册表里没有 / 声明文件读不出）
+ * 不是「未归属」—— 记 `projectError`，让调用方少报一个 scope 而不是编一个。
  */
 
 import { getAgentDir, logger } from "@cornfield/utils";
 import { findAgentRecord, loadAgentDirectory } from "../agent-domain/agent-directory";
 import { deriveWorkspaceContext } from "../agent-domain/default-agent";
 import { loadProjects, matchProjectForPath } from "../agent-domain/project-store";
-import type { AgentRecord, ProjectRecord } from "../agent-domain/types";
+import type { AgentRecord, ProjectId, ProjectRecord, ProjectSource } from "../agent-domain/types";
+import { resolveSessionWorkspace, type SessionWorkspaceSource } from "../session/session-workspace";
 import { readWorkspaceDeclaration } from "../skeleton/workspace";
 import type { AgentMeta, AttachedSession } from "./session-registry";
 
@@ -37,7 +40,13 @@ export interface AgentScopeAnchor {
 	attached: boolean;
 	/** 会话所属 Project（未归属 = undefined）。 */
 	project?: ProjectRecord;
-	/** Project registry 读失败的原因（有值 = 归属未知，不是未归属）。 */
+	/**
+	 * 那个归属是怎么来的（`"session"` = 会话头记的权威值，`"cwd"` = 按目录算的，
+	 * `"none"` = 问了，没有任何东西声明过）。未 attach 时 `sessionCwd` 是 agentDir 的替身，
+	 * 这里的 `"cwd"` 说的就是「按目录算的」，不是「会话的 cwd」。
+	 */
+	projectSource?: ProjectSource;
+	/** 归属解析不出来时的原因（有值 = 归属未知，不是未归属）。 */
 	projectError?: string;
 	/** WP1 `WorkspaceContext.memoryDir`（agentDir 声明了才有）。 */
 	declaredMemoryDir?: string;
@@ -81,15 +90,60 @@ export async function resolveAgentScope(input: ResolveAgentScopeInput): Promise<
 	if (sessionFile) anchor.sessionFile = sessionFile;
 
 	const projects = await loadProjectRecords(anchor);
-	if (projects.error) anchor.projectError = projects.error;
-	else if (projects.records) {
-		const match = matchProjectForPath(projects.records, sessionCwd);
-		if (match) anchor.project = match;
+	if (projects.error) {
+		anchor.projectError = projects.error;
+	} else if (projects.records) {
+		// 有会话就问 resolver（归属的唯一判定），没有就按 agentDir 这条声明过的替身目录匹配。
+		const attributed: AttributedProject = attached
+			? await attributedProject(attached.session.sessionManager, agentDir)
+			: {
+					ok: true,
+					projectId: matchProjectForPath(projects.records, agentDir)?.projectId,
+					source: "cwd",
+				};
+		if (!attributed.ok) {
+			anchor.projectError = attributed.error;
+		} else {
+			const record =
+				attributed.projectId === undefined
+					? undefined
+					: projects.records.find(candidate => candidate.projectId === attributed.projectId);
+			// resolver 刚在同一份注册表里认过这个 id，这一份读里却没有：注册表在两次读之间变了。
+			// 少报一个不留原因的归属，会把「刚被删掉」显示成「从来没有过」。
+			if (attributed.projectId !== undefined && !record) {
+				anchor.projectError = `Project "${attributed.projectId}" 是这个会话记录的归属，但注册表的这次读里已经没有它。`;
+			} else {
+				if (record) anchor.project = record;
+				anchor.projectSource = attributed.source;
+			}
+		}
 	}
 
 	const declared = await resolveDeclaredWorkspace(agentId, agentDir, sessionCwd, anchor.project);
 	if (declared.memoryDir !== undefined) anchor.declaredMemoryDir = declared.memoryDir;
 	return anchor;
+}
+
+/** 归属的判定结果：拿到了（说不定是「问了，没人声明过」）还是没拿到（带原因）。 */
+type AttributedProject = { ok: true; projectId?: ProjectId; source: ProjectSource } | { ok: false; error: string };
+
+/**
+ * 已 attach 的会话：归属问 `session/session-workspace`，本模块不重写一份判定。
+ *
+ * 读不出来（注册表损坏 / 会话记的 Project 注册表里没有 / workspace 声明读不出）不是「未归属」：
+ * 锚点记 `projectError` —— 调用方少报一个 scope，而不是编一个。
+ */
+async function attributedProject(session: SessionWorkspaceSource, agentDir: string): Promise<AttributedProject> {
+	try {
+		const workspace = await resolveSessionWorkspace({ session, agentDir });
+		return { ok: true, projectId: workspace.projectId, source: workspace.projectSource };
+	} catch (err) {
+		logger.debug("scope:project-attribution-unresolved", {
+			agentDir,
+			error: err instanceof Error ? err.message : String(err),
+		});
+		return { ok: false, error: `归属解析不出来：${err instanceof Error ? err.message : String(err)}` };
+	}
 }
 
 /** Project registry 读取：空列表是事实，读坏了是另一种事实。 */

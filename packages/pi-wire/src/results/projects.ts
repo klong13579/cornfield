@@ -23,16 +23,35 @@ export interface ProjectRecordDto {
 	defaultAgentId?: string;
 }
 
+/**
+ * 会话归属的来源，与 WP1 `ProjectSource` 同形（`agent-domain/types.ts`）：
+ *
+ *   - `"session"` —— 会话自己的记录说了算（`SessionHeader.projectId`，装配时由调用方解出）；
+ *   - `"cwd"` —— 按会话 cwd 与 Project root 匹配算出来的（旧会话的回落）；
+ *   - `"none"` —— 没有任何东西声明过归属。
+ *
+ * wire 面不 import coding-agent 的域类型（依赖方向是反的），所以这里是手抄的一份形状：
+ * 加一档要同时改 `agent-domain/types.ts` 的 `ProjectSource`，两个包由形状锁测试盯着。
+ */
+export type SessionProjectSourceDto = "session" | "cwd" | "none";
+
 /** `list_projects` 的答复。`projects: []` = 确实没有声明过任何 Project。 */
 export interface ProjectListDto {
 	projects: ProjectRecordDto[];
 	/**
-	 * 被查询会话落在哪个 Project 里（按 WP4 的 root 匹配规则算）。
+	 * 被查询会话落在哪个 Project 里（先读会话记录的权威归属，旧会话才按 cwd 匹配回落）。
 	 *
-	 * 缺省 = 没匹配上，或调用方没有指定会话。缺省不是「无 Project」的另一种写法：
+	 * 缺省 = 调用方没有指定会话（没问过）。缺省不是「无 Project」的另一种写法：
 	 * 它的含义是「这次没有可以对应的会话上下文」，调用方不得把它当成一个 Project。
 	 */
 	currentProjectId?: string;
+	/**
+	 * `currentProjectId` 的来源（见 `SessionProjectSourceDto`），与它同时出现。
+	 *
+	 * 缺省 = 没问过（没有会话可查）；`"none"` = 问了，确实没有任何东西声明过归属。
+	 * 「没问」与「问了、没有」不是同一件事：调用方不得把前者渲染成后者。
+	 */
+	currentProjectSource?: SessionProjectSourceDto;
 }
 
 /**

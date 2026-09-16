@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { Agent } from "@cornfield/agent";
 import { getBundledModel } from "@cornfield/ai";
 import { AssistantMessageEventStream } from "@cornfield/ai/utils/event-stream";
+import { upsertProject } from "@cornfield/coding-agent/agent-domain/project-store";
 import { Settings } from "@cornfield/coding-agent/config/settings";
 import type { Message, SessionInfo } from "@cornfield/coding-agent/intercom-extension/types";
 import type { AgentMeta } from "@cornfield/coding-agent/server/session-registry";
@@ -226,6 +227,40 @@ describe("parent edge identity", () => {
 		}
 
 		expect(declared[0]?.intercomSessionId).toBe("pinned-parent-tree");
+	});
+});
+
+/**
+ * 委派身份里的归属（T27）。
+ *
+ * 会话树上子节点的 `projectId` 不是桥编的：它来自**父会话的权威归属**
+ * （`session/session-workspace`：会话头记的优先，旧会话才按 cwd 匹配）。解析不出来就失败 ——
+ * 不填等于把一个有归属的父会话委派出来的子会话记成游离的。
+ *
+ * 注册表是客户端级的（HOME 下的 projects.json），所以这条用例自己隔离 HOME：不隔离就是拿
+ * 跑测试这台机器上真实的注册表当输入，「那个 Project 存不存在」会取决于开发机的状态。
+ */
+describe("delegation identity attribution", () => {
+	it("carries the Project the parent session resolves to", async () => {
+		const savedHome = process.env.HOME;
+		const savedConfigDir = process.env.CORNFIELD_CONFIG_DIR;
+		const home = TempDir.createSync("@cornfield-session-tree-home-");
+		try {
+			process.env.HOME = home.path();
+			delete process.env.CORNFIELD_CONFIG_DIR;
+			await upsertProject({ projectId: "tree-proj", root: tempDir.path(), name: "Tree" });
+			const declared: Array<DelegationHostInput["self"]> = [];
+
+			await readSessionTree(session, META, selfCapturingOptions(declared));
+
+			expect(declared[0]?.projectId).toBe("tree-proj");
+		} finally {
+			if (savedHome === undefined) delete process.env.HOME;
+			else process.env.HOME = savedHome;
+			if (savedConfigDir === undefined) delete process.env.CORNFIELD_CONFIG_DIR;
+			else process.env.CORNFIELD_CONFIG_DIR = savedConfigDir;
+			await home[Symbol.asyncDispose]();
+		}
 	});
 });
 
