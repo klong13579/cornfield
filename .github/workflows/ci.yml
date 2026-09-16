@@ -231,14 +231,24 @@ jobs:
         # parallel-package sweep made them flaky (0-fail exit-1 runs).
         run: |
           set -e
+          pids=()
           for dir in packages/*/; do
             pkg="${dir%/}"
             [ "${pkg##*/}" = "gateway" ] && continue
             [ -f "$pkg/package.json" ] || continue
             grep -q '"test"' "$pkg/package.json" || continue
             (cd "$pkg" && bun run test -- --shard="${{ matrix.shard }}" --parallel=1) &
+            pids+=("$!")
           done
-          wait
+          # `wait` with no operands returns 0 no matter what the children did, so a
+          # failing package never failed this step — green runs carried failure-level
+          # annotations (2026-09-16: three compaction tests hung for weeks behind this).
+          # Wait on each pid and fail if any of them failed.
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          exit "$fail"
       - name: CLI smoke test
         run: bun run ci:test:smoke
 
