@@ -3,7 +3,7 @@ import { brandKeyOfModel, ProviderLogo } from "../components/ProviderLogo";
 import type { ToolView } from "../state/session-store";
 import { ActivityFold } from "./ActivityFold";
 import { Markdown } from "./Markdown";
-import { MsgActions } from "./MsgActions";
+import { type MsgActionKey, MsgActions } from "./MsgActions";
 
 /**
  * AssistantTurn —— 助手消息行容器（P2-W2-1）。把 R3 ActivityFold（thinking+tools 折叠）
@@ -37,6 +37,11 @@ export interface AssistantTurnProps {
 	onRegenerate?: () => void;
 	/** MsgActions 从此处分叉。 */
 	onFork?: () => void;
+	/**
+	 * 三条动作不可用时的真实原因（由 Transcript 定，这里只透传）。
+	 * 只有 Transcript 同时知道 streaming 与 entryId 的有无，MsgActions 不推断原因。
+	 */
+	disabledReasons?: Partial<Record<MsgActionKey, string>>;
 	className?: string;
 }
 
@@ -54,6 +59,7 @@ export function AssistantTurn({
 	onUndo,
 	onRegenerate,
 	onFork,
+	disabledReasons,
 	className = "",
 }: AssistantTurnProps): React.JSX.Element {
 	// 转录头像：能识别品牌的模型显示品牌 logo，未识别保持 π（应用身份占位）。
@@ -107,6 +113,7 @@ export function AssistantTurn({
 					onUndo={onUndo}
 					onRegenerate={onRegenerate}
 					onFork={onFork}
+					disabledReasons={disabledReasons}
 				/>
 			</div>
 		</div>
