@@ -1,0 +1,13 @@
+{
+  "page": "#/workspace",
+  "view": "1440x900",
+  "url": "http://127.0.0.1:4183/#/workspace",
+  "title": "CornField · AI Agent 控制台",
+  "elapsedMs": 16287,
+  "consoleLines": 4,
+  "consoleErrors": 1,
+  "networkIssues": 0,
+  "wsFrames": 29,
+  "controls": 81,
+  "stepsFailed": 0
+}

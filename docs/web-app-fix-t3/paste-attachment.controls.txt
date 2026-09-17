@@ -1,0 +1,81 @@
+a [12,-58 102x35] «跳到主要内容»
+a [14,196 211x35] «首页»
+a [14,234 211x35] «会话工作台»
+a [14,271 211x35] «会话记录»
+a [14,341 211x35] «Agent 总览»
+a [14,410 211x35] «Skills»
+a [14,448 211x35] «Memory»
+a [14,486 211x35] «Todo»
+a [14,523 211x35] «模型»
+a [14,561 211x35] «语音»
+a [14,631 211x35] «定时任务»
+a [14,668 211x35] «用量»
+a [14,706 211x35] «设置»
+button button [252,12 275x39] «新会话»
+button button [252,59 136x28] «列表»
+button button [392,59 136x28] «树»
+input [284,101 232x21] ph="过滤会话…"
+button button [252,135 87x28] «WebUI 会话»
+button button [343,135 69x28] «CLI 会话»
+button button [256,214 12x12] «pin 置顶»
+button button [274,212 249x38] «当前会话当前会话»
+button button [256,306 12x12] «pin 置顶»
+button button [274,304 249x38] «[System note: This is a fresh conversat…hr · 86 条»
+button button [256,360 12x12] «pin 置顶»
+button button [274,358 249x38] «你的工作区在哪？hr · 44 条»
+button button [256,414 12x12] «pin 置顶»
+button button [274,412 249x38] «[CRON-CONTEXT] Task: goal-2-kb-refresh …hr · 101 条»
+button button [256,469 12x12] «pin 置顶»
+button button [274,467 249x38] «[CRON-CONTEXT] Task: goal-1-context-int…hr · 193 条»
+button button [256,560 12x12] «pin 置顶»
+button button [274,558 249x38] «01a0ad85algorithm · 110 条»
+button button [495,864 32x26] «收起会话栏»
+button button [558,10 34x28] «切换会话栏»
+select [707,14 103x19] v="default" «切换 Agent»
+button button [969,56 31x25] «重新读取项目列表»
+select [646,111 354x28] «工作上下文»
+input [646,312 174x29] ph="project id" «project id»
+input [826,312 174x29] ph="名称" «名称»
+input [646,347 354x29] ph="/绝对/项目/根路径" «项目根路径»
+select [646,384 306x28] «默认 Agent»
+button button [958,382 42x31] «声明»
+button button [1198,10 34x28] «手机预览»
+button button [1244,10 34x28] «展开右栏»
+button button [1290,8 66x31] «compact»
+button button [1368,8 54x31] «新会话»
+button button DISABLED [1358,116 28x28]
+button button [1388,116 28x28]
+button button [607,180 813x30] «活动 · 0 个工具»
+button button DISABLED [602,447 28x28]
+button button DISABLED [632,447 28x28]
+button button DISABLED [662,447 28x28]
+button button [692,447 28x28]
+textarea [559,763 862x52] ph="@default 发消息，或直接提问…"
+button button [569,822 115x34] «d@default»
+input file [0,0 0x0] ph=""
+button button [701,824 83x31] «附件1»
+button button [792,826 33x27]
+button button [1130,824 228x31] «Ndeepseek-v4-flash medium»
+button button [1375,821 36x36] «发送»
+button button [0,0 0x0] «文件»
+button button [0,0 0x0] «产物»
+button button [0,0 0x0] «改动»
+button button [0,0 0x0] «▾·»
+button button [0,0 0x0] «▸.cornfield»
+button button [0,0 0x0] «▸commands»
+button button [0,0 0x0] «▸cron»
+button button [0,0 0x0] «▸knowledge»
+button button [0,0 0x0] «▸memories»
+button button [0,0 0x0] «▸raw»
+button button [0,0 0x0] «▸sessions»
+button button [0,0 0x0] «▸wiki»
+button button [0,0 0x0] «·.gitignore132»
+button button [0,0 0x0] «·agent.db4K»
+button button [0,0 0x0] «·agent.db-shm32K»
+button button [0,0 0x0] «·agent.db-wal2.2M»
+button button [0,0 0x0] «·AGENTS.md7K»
+button button [0,0 0x0] «·mission.md1K»
+button button [0,0 0x0] «·prompt-includes.json92»
+button button [0,0 0x0] «·TODO.md2K»
+button button [0,0 0x0] «·TOOLS.md11K»
+button button [0,0 0x0] «·user.md3K»

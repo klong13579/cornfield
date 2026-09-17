@@ -1,0 +1,10 @@
+
+──── 粘贴图片：合成 paste（DataTransfer 带真实 PNG File）→ 附件计数 ────
+step 2 eval (async () => { const ta = document.querySelector('textarea'); if (!ta) return 'no-textarea'; const c = document.createElement('canvas'); c.width = 4; c.height = 4; c.getContext('2d').fillRect(0,0,4,4); const blob = await new Promise(r => c.toBlob(r, 'image/png')); const f = new File([blob], 'paste.png', { type: 'image/png' }); const dt = new DataTransfer(); dt.items.add(f); const ev = new Event('paste', { bubbles: true, cancelable: true }); Object.defineProperty(ev, 'clipboardData', { value: dt, configurable: true }); ta.dispatchEvent(ev); await new Promise(r => setTimeout(r, 900)); const clip = Array.from(document.querySelectorAll('button')).find(b => (b.getAttribute('title') || '').includes('图片')); return { clipTitle: clip ? clip.getAttribute('title') : null }; })() → {"clipTitle":"1 张图片已附加（发送时随指令）"}
+step 3 wait 400ms
+step 4 fill textarea → ok
+
+──── 发送：验证出站 prompt 帧带 images 载荷 ────
+step 6 click @button=发送 → ok
+step 7 wait 2500ms
+step 8 shot → paste-send-sent-with-image.png

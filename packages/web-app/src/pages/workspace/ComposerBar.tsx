@@ -28,6 +28,7 @@ interface ModelMenuRow {
 export function groupModelsByProvider(
 	modelList: ModelMenuRow[],
 	currentModelId: string | null | undefined,
+	currentModelProvider?: string | null,
 ): Array<[string, ModelMenuRow[]]> {
 	const byProvider = new Map<string, ModelMenuRow[]>();
 	for (const m of modelList) {
@@ -35,12 +36,112 @@ export function groupModelsByProvider(
 		group.push(m);
 		byProvider.set(m.provider, group);
 	}
-	const currentProvider = currentModelId ? modelList.find(m => m.id === currentModelId)?.provider : undefined;
+	// 置顶依据是「实际生效的 provider」：同 id 多 provider 时按 id find 会错拿第一个，
+	// 显式给出 provider 时直接用它，否则退回按 id 查（兼容旧调用）。
+	const currentProvider =
+		currentModelProvider != null
+			? currentModelProvider
+			: currentModelId
+				? modelList.find(m => m.id === currentModelId)?.provider
+				: undefined;
 	return [...byProvider.entries()].sort((a, b) => {
 		if (currentProvider && a[0] === currentProvider) return -1;
 		if (currentProvider && b[0] === currentProvider) return 1;
 		return 0; // 稳定排序：同权重保留 serve 首现顺序
 	});
+}
+
+/** 从剪贴板 DataTransfer 里筛出图片文件；无则空数组——纯文本粘贴不 preventDefault、不被吞。 */
+export function imageFilesFromClipboardData(data: DataTransfer | null | undefined): File[] {
+	if (!data?.files) return [];
+	return Array.from(data.files).filter(file => file.type.startsWith("image/"));
+}
+
+/** 组合态 Enter 判据：只「非组合态 && Enter && 无 Shift」才发送；Shift+Enter 换行，中文输入法组合态按 Enter 不发送。 */
+export function shouldSendOnEnter(key: string, shiftKey: boolean, isComposing: boolean): boolean {
+	return key === "Enter" && !shiftKey && !isComposing;
+}
+
+/** 模型行是否为当前生效那条：provider 已知时要求精确匹配（同 id 多 provider 只标实际生效那一条）。 */
+export function isCurrentModel(
+	model: ModelMenuRow,
+	currentModelId: string | null | undefined,
+	currentModelProvider: string | null | undefined,
+): boolean {
+	if (!currentModelId || model.id !== currentModelId) return false;
+	if (currentModelProvider == null) return true; // provider 未知：退回按 id 匹配（老快照/局部视图）
+	return model.provider === currentModelProvider;
+}
+
+/** 模型列表子串过滤（provider / id，大小写不敏感）。 */
+export function filterModelList(modelList: ModelMenuRow[], query: string): ModelMenuRow[] {
+	const q = query.trim().toLowerCase();
+	if (!q) return modelList;
+	return modelList.filter(m => m.id.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q));
+}
+
+/**
+ * 模型列表（可过滤 + provider 分组 + 「当前」徽标只在实际生效那条落下）。
+ * 纯展示：列表/当前值/选中回调由调用方给，内部只持有过滤词状态（静态渲染可断言空过滤态）。
+ */
+export function ModelList({
+	modelList,
+	currentModelId,
+	currentModelProvider,
+	onSelect,
+}: {
+	modelList: ModelMenuRow[];
+	currentModelId: string | null;
+	currentModelProvider?: string | null;
+	onSelect: (id: string, provider: string) => void;
+}): React.JSX.Element {
+	const [filter, setFilter] = useState("");
+	const filtered = filterModelList(modelList, filter);
+	const groups = groupModelsByProvider(filtered, currentModelId, currentModelProvider);
+	return (
+		<>
+			<input
+				type="text"
+				className="mx-1.5 mb-1 w-[calc(100%-12px)] rounded border border-hairline bg-surface-2 px-2 py-1 font-mono text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+				placeholder="过滤模型（id / provider）…"
+				value={filter}
+				onChange={e => setFilter(e.target.value)}
+			/>
+			<div className="max-h-[46vh] overflow-y-auto overscroll-contain px-1 pb-1">
+				{filtered.length === 0 ? (
+					<div className="px-3 py-2 text-[12px] text-ink-faint">没有匹配 “{filter}” 的模型</div>
+				) : (
+					groups.map(([provider, models]) => (
+						<div key={provider}>
+							<div className="flex items-baseline gap-1.5 px-2.5 pt-1.5 pb-0.5">
+								<ProviderLogo provider={provider} size={10} />
+								<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+									{provider}
+								</span>
+								<span className="font-mono text-[9px] text-ink-faint">{models.length}</span>
+							</div>
+							{models.map(m => (
+								<button
+									key={`${provider}/${m.id}`}
+									type="button"
+									className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-surface-3 ${isCurrentModel(m, currentModelId, currentModelProvider) ? "bg-accent-dim" : ""}`}
+									onClick={() => onSelect(m.id, m.provider)}
+								>
+									<ProviderLogo provider={provider} modelId={m.id} size={10} />
+									<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{m.id}</span>
+									{isCurrentModel(m, currentModelId, currentModelProvider) && (
+										<span className="shrink-0 rounded bg-accent px-1 py-px font-mono text-[9px] text-on-accent">
+											当前
+										</span>
+									)}
+								</button>
+							))}
+						</div>
+					))
+				)}
+			</div>
+		</>
+	);
 }
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
@@ -140,10 +241,10 @@ function statusLabel(s: string): string {
 
 /**
  * 工作台输入区（assistant-ui Composer 就绪前的原生实现，两行：textarea + 工具栏）。
- * - Enter 发送 / Shift+Enter 换行 / Esc 中止（streaming 时）；发送↔停止原位替换
- * - 草稿自动保留（localStorage）
+ * - Enter 发送 / Shift+Enter 换行 / Esc 中止（streaming 时）；中文输入法组合态按 Enter 不发送
+ * - 草稿自动保留（localStorage）；粘贴图片转为附件随 prompt 发出（纯文本粘贴不被吞）
  * - 工具栏：Agent 选择器（按工作区分组 + CODING/WORKER + 钉钉角标）、附件、语音、
- *   模型/thinking 下拉、发送/停止
+ *   模型/thinking 下拉（模型列表可过滤、当前 provider 置顶）、发送/停止
  * - autoFocusDraft 仅约定聚焦（?q= 直达种子文本由 WorkspaceView 写入草稿 store）
  */
 export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }): React.JSX.Element {
@@ -173,10 +274,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
 
-	// 附件：文件选择 → base64 读入 → prompt.images 通道（真命令已支持）
-	const onPickImages = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const files = Array.from(e.target.files ?? []);
-		e.target.value = "";
+	// 附件：文件选择 / 粘贴图片 → base64 读入 → prompt.images 通道（真命令已支持）
+	const readImageFiles = (files: File[]) => {
 		for (const file of files) {
 			const reader = new FileReader();
 			reader.onload = () => {
@@ -187,6 +286,17 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 			};
 			reader.readAsDataURL(file);
 		}
+	};
+	const onPickImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+		readImageFiles(Array.from(e.target.files ?? []));
+		e.target.value = "";
+	};
+	// 粘贴图片按附件收下；纯文本粘贴不 preventDefault，交给默认行为（不被吞）。
+	const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+		const imageFiles = imageFilesFromClipboardData(e.clipboardData);
+		if (imageFiles.length === 0) return;
+		e.preventDefault();
+		readImageFiles(imageFiles);
 	};
 
 	/**
@@ -267,10 +377,11 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		}
 	}, [view.activeAgentId, view.agents]);
 
-	/** 模型按 provider 分组；当前模型所在 provider 置顶，其余保持 serve 返回顺序。 */
-	const modelGroups = useMemo(() => groupModelsByProvider(modelList, view.model), [modelList, view.model]);
-	/** 当前模型的 provider（顶栏按钮 logo 用）。 */
-	const currentProvider = useMemo(() => modelList.find(m => m.id === view.model)?.provider, [modelList, view.model]);
+	/** 当前模型的 provider（顶栏按钮 logo 用）—— 以快照权威 provider 为准；老快照/局部视图缺省时退回按 id 查。 */
+	const currentProvider = useMemo(
+		() => view.modelProvider ?? modelList.find(m => m.id === view.model)?.provider,
+		[modelList, view.model, view.modelProvider],
+	);
 
 	const active = view.isStreaming || view.phase !== "idle";
 	const agent = view.agents.find(a => a.id === agentId) ?? view.agents[0];
@@ -364,7 +475,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 				return;
 			}
 		}
-		if (e.key === "Enter" && !e.shiftKey) {
+		if (shouldSendOnEnter(e.key, e.shiftKey, e.nativeEvent.isComposing)) {
 			e.preventDefault();
 			if (active) {
 				store.abort();
@@ -427,6 +538,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						}}
 						onInput={autoGrow}
 						onKeyDown={onKeyDown}
+						onPaste={onPaste}
 						className="min-h-[52px] w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-1.5 font-inherit text-ink outline-none placeholder:text-ink-faint"
 					/>
 					<div className="flex items-center gap-2 px-2.5 pb-1.5">
@@ -578,42 +690,15 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 											无可用模型（未连接 / 列表加载中）
 										</div>
 									) : (
-										// 模型列表区可滚动（此前无 max-h 的整树弹出被视口截断，首屏只能看到
-										// 第一个 provider 组——模型对话框「只显示 alibaba」根因）；思维级别固定在底部。
-										<div className="max-h-[46vh] overflow-y-auto overscroll-contain px-1 pb-1">
-											{modelGroups.map(([provider, models]) => (
-												<div key={provider}>
-													<div className="flex items-baseline gap-1.5 px-2.5 pt-1.5 pb-0.5">
-														<ProviderLogo provider={provider} size={10} />
-														<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-															{provider}
-														</span>
-														<span className="font-mono text-[9px] text-ink-faint">{models.length}</span>
-													</div>
-													{models.map(m => (
-														<button
-															key={`${provider}/${m.id}`}
-															type="button"
-															className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors hover:bg-surface-3 ${m.id === view.model ? "bg-accent-dim" : ""}`}
-															onClick={() => {
-																store.setModel(m.id, m.provider);
-																setShowModelMenu(false);
-															}}
-														>
-															<ProviderLogo provider={provider} modelId={m.id} size={10} />
-															<span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">
-																{m.id}
-															</span>
-															{m.id === view.model && (
-																<span className="shrink-0 rounded bg-accent px-1 py-px font-mono text-[9px] text-on-accent">
-																	当前
-																</span>
-															)}
-														</button>
-													))}
-												</div>
-											))}
-										</div>
+										<ModelList
+											modelList={modelList}
+											currentModelId={view.model}
+											currentModelProvider={view.modelProvider}
+											onSelect={(id, provider) => {
+												store.setModel(id, provider);
+												setShowModelMenu(false);
+											}}
+										/>
 									)}
 									<div className="border-t border-hairline px-3 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
 										思维级别

@@ -138,6 +138,61 @@ export function PlanStrip({
 	);
 }
 
+/** compact 两步确认状态：idle → 点一下 arming → 再点 confirm 才真正压缩；cancel 复位。 */
+export type CompactStage = "idle" | "arming";
+
+/** compact 两步确认状态机：只有 arming 态点 confirm 才 fire；cancel 永不 fire。 */
+export function compactStageAfter(
+	stage: CompactStage,
+	action: "confirm" | "cancel",
+): { stage: CompactStage; fire: boolean } {
+	if (action === "cancel") return { stage: "idle", fire: false };
+	return { stage: "idle", fire: stage === "arming" };
+}
+
+/**
+ * 手动压缩入口（两步确认）：第一次点击只是「将臂」，显示确认文案，第二次点「确认」才真正发 compact。
+ * 结论写在标题里（会压缩上下文），不提供「一点就真压缩」的裸按钮。
+ */
+export function CompactButton({ onCompact }: { onCompact: () => void }): React.JSX.Element {
+	const [stage, setStage] = useState<CompactStage>("idle");
+	if (stage === "idle") {
+		return (
+			<button
+				type="button"
+				className="cbtn shrink-0"
+				title="手动压缩当前会话上下文（会压缩上下文，需二次确认）"
+				onClick={() => setStage("arming")}
+			>
+				compact
+			</button>
+		);
+	}
+	return (
+		<span className="flex shrink-0 items-center gap-1">
+			<span className="text-[11px] text-ink-faint">compact 会压缩上下文，确认？</span>
+			<button
+				type="button"
+				className="cbtn shrink-0"
+				onClick={() => {
+					const r = compactStageAfter("arming", "confirm");
+					setStage(r.stage);
+					if (r.fire) onCompact();
+				}}
+			>
+				确认
+			</button>
+			<button
+				type="button"
+				className="cbtn shrink-0"
+				onClick={() => setStage(compactStageAfter("arming", "cancel").stage)}
+			>
+				取消
+			</button>
+		</span>
+	);
+}
+
 /**
  * 会话工作台（FR-1）：自定义顶栏 + 转录区 + Composer（右栏已按用户决策移除，对话区占满全宽）。
  * 支持 ?q= 直达（Home Composer 跳转带话），一次性消费：自动发送后从 URL 移除 q 参数。
@@ -254,9 +309,7 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 							>
 								<PanelRight size={16} strokeWidth={1.5} />
 							</button>
-							<button type="button" className="cbtn shrink-0" onClick={() => store.compact()}>
-								compact
-							</button>
+							<CompactButton onCompact={() => store.compact()} />
 							<button type="button" className="cbtn shrink-0" onClick={() => setNewSessionOpen(open => !open)}>
 								新会话
 							</button>
