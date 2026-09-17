@@ -104,10 +104,12 @@ describe("saveListenText / listListenRecordings", () => {
 		expect(saved).toContain(isoRoot);
 		expect(path.basename(saved)).toMatch(/^\d{4}-\d{2}-\d{2}-听记测试\.json$/);
 
+		// v2 加了 provenance（听记是客户端级的，要标清是哪条 bot 录的）。
+		// 没传 provenance 就不落这个键 ——「未标注」不等于「标了个 null」，
+		// 所以字段集必须正好还是这三项。
 		const parsed = JSON.parse(await fsp.readFile(saved, "utf-8"));
-		expect(parsed.version).toBe(1);
-		expect(parsed.text).toBe("第一段录音");
-		expect(typeof parsed.recorded_at).toBe("string");
+		expect(parsed).toEqual({ version: 2, recorded_at: expect.any(String), text: "第一段录音" });
+		expect(Number.isNaN(Date.parse(parsed.recorded_at))).toBe(false);
 	});
 
 	test("list sorts by name desc and returns full text", async () => {

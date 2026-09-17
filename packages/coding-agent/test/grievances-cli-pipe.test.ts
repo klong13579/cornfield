@@ -22,12 +22,13 @@ import { PIPE_CAPACITY, runBothWays } from "./helpers/cli-pipe";
 const ROWS = 300;
 
 let root = "";
-let agentDir = "";
+/** The client dir: `autoqa.db` is client-scoped (`getClientDir()/autoqa.db`). */
+let clientDir = "";
 
 beforeEach(async () => {
 	root = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-grievances-pipe-"));
-	agentDir = path.join(root, "agent");
-	await fs.mkdir(agentDir, { recursive: true });
+	clientDir = path.join(root, "agent");
+	await fs.mkdir(clientDir, { recursive: true });
 	seedGrievances();
 });
 
@@ -37,7 +38,7 @@ afterEach(async () => {
 
 /** Write the database directly — the reader must not depend on the tool running first. */
 function seedGrievances(): void {
-	const db = new Database(path.join(agentDir, "autoqa.db"));
+	const db = new Database(path.join(clientDir, "autoqa.db"));
 	try {
 		db.run(`CREATE TABLE grievances (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,8 +73,15 @@ function outPath(name: string): string {
 	return path.join(root, name);
 }
 
+/**
+ * Point both roots at the temp tree. `autoqa.db` is client-scoped, so the client dir
+ * is the one that has to move; the config root moves with it so the run touches
+ * nothing of the developer's `~/.cornfield`. `CORNFIELD_AGENT_DIR` — what this
+ * fixture used to set — names neither root any more: the command opened the real
+ * `~/.cornfield/agent/autoqa.db` and reported that database's rows.
+ */
 function env(): Record<string, string> {
-	return { CORNFIELD_AGENT_DIR: agentDir };
+	return { CORNFIELD_CONFIG_DIR: root, CORNFIELD_CLIENT_DIR: clientDir };
 }
 
 describe("grievances output through a pipe", () => {
