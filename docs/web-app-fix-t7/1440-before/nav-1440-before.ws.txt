@@ -1,0 +1,21 @@
+<- {"type":"connected"}
+-> {"type":"hello","version":1,"token":""}
+<- {"type":"hello_ack","connectionId":"74e7ac50-7039-4c06-8c81-d541649ac2fd","protocolVersion":1,"gatewayWirePort":7892}
+-> {"type":"request","id":"req_1","command":{"type":"list_projects","id":"req_1"}}
+-> {"type":"request","id":"req_2","command":{"type":"list_agent_todos","id":"req_2"}}
+-> {"type":"request","id":"req_3","command":{"type":"git_changes","id":"req_3"}}
+-> {"type":"request","id":"req_4","command":{"type":"get_state","id":"req_4"}}
+-> {"type":"request","id":"req_5","command":{"type":"fs_read","sessionId":"default","path":"user.md","id":"req_5"}}
+<- {"type":"push","event":{"type":"server_snapshot","sessions":[{"id":"default","name":"default","active":true,"attached":true,"agentDir":"/Users/sz-0203015357/.cornfield/agents/default","skillCount":1,"sessionFile":"/Users/sz-0203015357/.cornfield/agents/default/sessions/--private-tmp-cf-ui-demo--/by-date/2026-09-17/221612__e791fd60.jsonl","model":{"provider":"narwal-plan","id":"deepseek-v4-flash","
+-> {"type":"request","id":"req_6","command":{"type":"fs_read","sessionId":"default","path":"user.md","id":"req_6"}}
+<- {"type":"push","event":{"type":"session_snapshot","sessionId":"default","snapshot":{"seq":202,"sessionId":"01a0afb9-9dc6-7000-84c2-be92e791fd60","sessionFile":"/Users/sz-0203015357/.cornfield/agents/default/sessions/--private-tmp-cf-ui-demo--/by-date/2026-09-17/221612__e791fd60.jsonl","model":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","api":"openai-completions","provider":"narwal-plan","
+-> {"type":"request","id":"req_7","command":{"type":"list_projects","id":"req_7"}}
+-> {"type":"request","id":"req_8","command":{"type":"git_changes","sessionId":"default","id":"req_8"}}
+<- {"type":"response","id":"req_1","ok":true,"result":{"projects":[],"currentProjectSource":"none"}}
+<- {"type":"response","id":"req_2","ok":true,"result":{"agentId":"default","todos":[]}}
+<- {"type":"response","id":"req_4","ok":true,"result":{"model":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","api":"openai-completions","provider":"narwal-plan","baseUrl":"https://coder.narwal.com/v1","reasoning":true,"input":["text","image"],"cost":{"input":0.14,"output":0.28,"cacheRead":0.03,"cacheWrite":0},"contextWindow":1000000,"maxTokens":384000,"thinking":{"mode":"effort","minLevel":"mi
+<- {"type":"response","id":"req_5","ok":true,"result":{"path":"user.md","text":"# User\n\n> Declarative user identity. Hand-authored via the `identity` tool or directly.\n> Stable facts: name, role, timezone, standing instructions.\n> Learned preferences belong in write_memory (target: \"user\"), not here.\n>\n> This is the **agentDir-level** user profile (project-scoped persona).\n> It supplements t
+<- {"type":"response","id":"req_6","ok":true,"result":{"path":"user.md","text":"# User\n\n> Declarative user identity. Hand-authored via the `identity` tool or directly.\n> Stable facts: name, role, timezone, standing instructions.\n> Learned preferences belong in write_memory (target: \"user\"), not here.\n>\n> This is the **agentDir-level** user profile (project-scoped persona).\n> It supplements t
+<- {"type":"response","id":"req_7","ok":true,"result":{"projects":[],"currentProjectSource":"none"}}
+<- {"type":"response","id":"req_3","ok":true,"result":{"repoRoot":"/Users/sz-0203015357/.cornfield","changes":[{"path":"agent.bak-migration-verify-20260917-185338/agent","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-shm","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-wal","index":null,"worktree":"untracke
+<- {"type":"response","id":"req_8","ok":true,"result":{"repoRoot":"/Users/sz-0203015357/.cornfield","changes":[{"path":"agent.bak-migration-verify-20260917-185338/agent","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-shm","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-wal","index":null,"worktree":"untracke

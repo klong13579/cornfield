@@ -1,0 +1,14 @@
+[
+	{
+		"eval": "document.querySelector('nav[aria-label=\"主导航\"]') ? getComputedStyle(document.querySelector('nav[aria-label=\"主导航\"]')).display : 'no-main-nav'"
+	},
+	{
+		"eval": "document.querySelector('button[aria-label=\"打开主导航\"]') ? 'has-toggle' : 'no-toggle-button'"
+	},
+	{
+		"eval": "Number([...document.querySelectorAll('button,a[href]')].filter(el => /主导航|菜单|打开导航/.test((el.getAttribute('aria-label') ?? '') + el.textContent)).length)"
+	},
+	{
+		"shot": "narrow"
+	}
+]

@@ -65,7 +65,14 @@ export function SidebarAgentContext({ view }: { view: SessionView }): React.JSX.
  * 组标题用真正的小标题元素（而不是 div）：它是这一段的标题，也是「侧栏有哪几组」这个事实
  * 在渲染层唯一的落点 —— 断言的锚点因此是文本本身，不是某个 class 名。
  */
-export function SidebarNav({ groups }: { groups: PanelGroupView[] }): React.JSX.Element {
+export function SidebarNav({
+	groups,
+	onNavigate,
+}: {
+	groups: PanelGroupView[];
+	/** 每条导航链接被点中后（导航已发起）再收尾的动作，例如窄屏抽屉关闭。 */
+	onNavigate?: () => void;
+}): React.JSX.Element {
 	return (
 		<>
 			{groups.map(group => (
@@ -82,6 +89,7 @@ export function SidebarNav({ groups }: { groups: PanelGroupView[] }): React.JSX.
 								title={panel.title}
 								aria-label={panel.title}
 								className="sidebar-item"
+								onClick={onNavigate}
 							>
 								<panel.icon size={15} strokeWidth={1.5} />
 								<span className="truncate">{panel.title}</span>

@@ -1,0 +1,13 @@
+{
+  "page": "#/",
+  "view": "1440x900",
+  "url": "http://127.0.0.1:4187/#/",
+  "title": "CornField · AI Agent 控制台",
+  "elapsedMs": 1385,
+  "consoleLines": 3,
+  "consoleErrors": 0,
+  "networkIssues": 0,
+  "wsFrames": 21,
+  "controls": 29,
+  "stepsFailed": 0
+}

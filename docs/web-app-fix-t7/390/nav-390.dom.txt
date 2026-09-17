@@ -1,0 +1,58 @@
+CornField · AI Agent 控制台
+
+夜深了
+cf-ui-demo · · 7 agent 运行中 · 0 定时任务待执行
+快速会话
+default
+hr（idle）
+algorithm（idle）
+me（idle）
+dataAgent（idle）
+sw（idle）
+mcode（idle）
+Agent default
+/
+Project 未归属
+/
+工作区 cf-ui-demo
+/
+会话 01a0afb9-9dc6-7000-84c2-be92e791fd60
+你
+
+帮我看看这张图（真发送 1 次）
+
+default
+
+没收到图。这条消息到我这里只有一行文字（`帮我看看这张图（真发送 1 次）`），没有任何图片附件内容，工作目录 `/private/tmp/cf-ui-demo` 也是空的。
+
+我不会凭空描述一张没看到的图。
+
+要我看图，给我其中一个：
+1. 图片的本地绝对路径（例如 `~/Downloads/xxx.png`），我用 `inspect_image` 读；
+2. 或者把图放到当前工作目录，告诉我文件名。
+
+顺带确认一下：如果你是在测「消息会不会重复发」——我这边只收到 1 条消息，没有重复投递。
+
+查看完整对话
+Enter 发送到当前会话
+转入会话工作台（同一会话）
+项目
+
+未声明任何 Project。声明文件：~/.cornfield/agent/projects.json
+
+检查今天的定时任务
+最近会话回顾
+语音记录一条指令
+切换模型
+打开 Agent 管理
+最近活跃
+d
+default
+—
+h
+hr
+—
+a
+algorithm
+—
+打开会话工作台 

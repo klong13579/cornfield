@@ -1,0 +1,32 @@
+[
+	{
+		"goto": "#/workspace",
+		"wait": 400
+	},
+	{
+		"eval": "(function(){ const a=document.querySelector('button[aria-label=\"打开主导航\"]'); const b=document.querySelector('button[aria-label=\"切换会话栏\"]'); const r=e=>e?JSON.stringify([Math.round(e.getBoundingClientRect().x),Math.round(e.getBoundingClientRect().y),Math.round(e.getBoundingClientRect().width),Math.round(e.getBoundingClientRect().height)]):'missing'; return 'main-nav='+r(a)+' session-drawer='+r(b); })()"
+	},
+	{
+		"shot": "workspace-both-entries"
+	},
+	{
+		"click": "@button=切换会话栏",
+		"wait": 300
+	},
+	{
+		"shot": "workspace-session-drawer-open"
+	},
+	{
+		"eval": "(function(){ var a=document.querySelector('aside'); return a && a.getBoundingClientRect().x >= -1 ? 'session-drawer-open' : 'session-drawer-closed'; })()"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 300
+	},
+	{
+		"shot": "workspace-main-nav-open"
+	},
+	{
+		"eval": "location.hash"
+	}
+]

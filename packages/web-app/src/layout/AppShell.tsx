@@ -1,6 +1,7 @@
 import { Outlet, useMatches } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopbar } from "./AppTopbar";
+import { MobileNav } from "./MobileNav";
 import { activePanelOf } from "./panel-registry";
 
 /**
@@ -23,6 +24,7 @@ export function AppShell(): React.JSX.Element {
 				跳到主要内容
 			</a>
 			<AppSidebar />
+			<MobileNav />
 			<div className="flex min-w-0 flex-1 flex-col">
 				{!panel?.customTopbar && <AppTopbar panel={panel} />}
 				<main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto">
