@@ -2485,6 +2485,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				type: "hello_ack",
 				connectionId: connection.connectionId,
 				protocolVersion: MULTIDEVICE_PROTOCOL_VERSION,
+				// 客户端（浏览器）读不到 env，代它把 gateway 的 wire 端口报过去：与下面 callGatewayWire
+				// 用的是同一个值。不报的话前端只能自己猜 7892 —— 隔离环境里那会连到真实 gateway。
+				gatewayWirePort: GATEWAY_WIRE_PORT,
 			});
 			// 列表 + 当前焦点快照（P1 兼容：客户端仍能只靠 session_snapshot 重建）
 			core.broadcastServerSnapshot();
