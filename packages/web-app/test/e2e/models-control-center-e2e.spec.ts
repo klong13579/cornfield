@@ -208,7 +208,18 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		// API Key 保存闭环（写在隔离副本上）：展开 narwal-plan 卡片 → 替换 → 保存 → 表单关闭
 		const planCard = page.locator("div.overflow-hidden.rounded-xl", { hasText: "narwal-plan" }).first();
 		await planCard.getByRole("button", { name: "管理" }).click();
-		await planCard.getByRole("button", { name: "替换" }).click();
+		// 这一栏的文案由「是否已有存凭据」决定：有 → 「替换」，无 → 「录入 API Key」。凭据来自真实库里被拷进来的
+		// agent.db，所以环境不对时（例：跑测试的 shell 里 HOME 被污染成临时目录 → 拷到的是空库）
+		// 它会把 4 分钟后的 locator 超时说清楚成一句前置依赖说明。
+		const replaceButton = planCard.getByRole("button", { name: "替换" });
+		if (!(await replaceButton.isVisible({ timeout: 3_000 }).catch(() => false))) {
+			throw new Error(
+				"narwal-plan 没有已存凭据（这一栏显示的是「录入 API Key」）。本 spec 需要开发机真实的 " +
+					"~/.cornfield/agent/agent.db 里有 narwal-plan 的 api_key，并拷贝进隔离 HOME；" +
+					"先确认 shell 的 HOME 是真实用户目录（不是被污染/临时覆盖的）。",
+			);
+		}
+		await replaceButton.click();
 		const keyInput = planCard.getByPlaceholder("API Key", { exact: true });
 		const keyConfirm = planCard.getByPlaceholder("再次输入确认");
 		await keyInput.fill("sk-e2e-closedloop-0123456789abcdef");
