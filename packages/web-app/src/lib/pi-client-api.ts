@@ -1,4 +1,6 @@
 import type {
+	AgentCreateDto,
+	AgentCreateInput,
 	AgentInfoDto,
 	AgentTodoDeleteDto,
 	AgentTodoDto,
@@ -53,6 +55,8 @@ import type {
 // 引入，保证「一个概念一种表示」—— 前端不再自己拼一份子会话/项目/Todo 形状。
 // 定时任务写面（T10C）同理：入参/回写形状都从 pi-wire 转发，前端不自建。
 export type {
+	AgentCreateDto,
+	AgentCreateInput,
 	AgentTodoDeleteDto,
 	AgentTodoDto,
 	AgentTodoListDto,
@@ -499,6 +503,18 @@ export interface PiClient {
 	// ── P3 多 Agent ──
 	/** 拉取注册表 agent 元数据列表（list_agents，不触发 attach）。 */
 	listAgents(): Promise<AgentInfoDto[]>;
+	/**
+	 * 建一个新 agentDir（create_agent），返回 serve 真落成的那一份读数。
+	 *
+	 * 与 `cornfield agent init` 走**同一条实现**：真写骨架 + workspace 声明 + registry，所以成功
+	 * 之后 `listAgents()` 里就有它了。失败**原样招错**（serve 的原文在 `PiServerError` 上，经
+	 * `serveVerdictOf` 取出即可原样展示）—— 名字非法 / 目录不可写 / mission 文件不存在都是用户
+	 * 能据以修的东西，不在这一层改写成一句「创建失败」。
+	 *
+	 * `created:false` 也是成功：同名 agentDir 本来就在，这次只把缺的骨架文件补齐（`agent init`
+	 * 的增量语义）。调用方要不要把这两种成功分开说，是它的事。
+	 */
+	createAgent(input: AgentCreateInput): Promise<AgentCreateDto>;
 	/** lazy attach 一个注册表 agent 到本进程（attach）。 */
 	attach(sessionId: string): Promise<void>;
 	/** 切换本连接的活动会话（switch_session；server 随后推新 session_snapshot）。 */

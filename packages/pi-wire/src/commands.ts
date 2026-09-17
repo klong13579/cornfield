@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent } from "@cornfield/ai";
 import type { AgentTodoDto } from "./results/agent-todos";
+import type { AgentCreateInput } from "./results/agents";
 import type { CronCreateInput, CronUpdateInput } from "./results/cron";
 import type { DelegateChildInput } from "./results/session-tree";
 
@@ -340,6 +341,18 @@ export type WireExtensionCommand =
 	| { id?: string; type: "detach"; sessionId: string }
 	/** P3 新增：列出所有已注册 agent 的元数据（不触发 attach）。 */
 	| { id?: string; type: "list_agents" }
+	/**
+	 * 建一个 agentDir（`cornfield agent init` 的 wire 面，入参见 `AgentCreateInput`）。
+	 *
+	 * 与 CLI 走**同一条实现**（`runAgentInit`）：真写盘（骨架文件 + `.cornfield/workspace.json`
+	 * 声明）并真进 `~/.cornfield/agent/registry.json`，所以命令成功后 `list_agents` 立刻看得见它。
+	 * 不挂会话也不 attach：建 agentDir 与哪个会话/附件无关（与 `set_project` 同类）。
+	 *
+	 * 失败是 `ok:false` 且 `error` 是**服务端原文**（名字含 NUL/`..`、未知 template、目录不可写、
+	 * mission 文件不存在 …）—— 客户端原样展示，不另编一套话术；收到 ok 就意味着盘上真的有它。
+	 * 答复是 `AgentCreateDto`（`created:false` = 同名目录本来就在、这次只补齐缺的文件）。
+	 */
+	| ({ id?: string; type: "create_agent" } & AgentCreateInput)
 	/**
 	 * P4 新增：历史会话索引（/records 列表页）。扫描 sessions 目录，返回按开始时间
 	 * 倒序的会话元数据列表。不实例化任何 session（纯文件索引）。

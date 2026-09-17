@@ -23,6 +23,7 @@ import type {
 	SkillsResultDto,
 } from "../src/results";
 import type { AgentTodoDto } from "../src/results/agent-todos";
+import type { AgentCreateDto, AgentCreateInput } from "../src/results/agents";
 import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
 import type {
 	ProjectDeleteDto,
@@ -213,6 +214,33 @@ type _AssertDeleteAgentTodo = _DeleteAgentTodo extends {
 	? true
 	: never;
 const _deleteAgentTodoShape: _AssertDeleteAgentTodo = true;
+
+// F1：建 agentDir（create_agent）—— 入参是 `AgentCreateInput`，答复是 `InitResult` 的 wire 投影。
+// `created` 必须在答复里：同名目录本来就在是**成功且增量补齐**，不是错误，调用方靠这一位分开。
+type _CreateAgent = WireCommandOfType<"create_agent">;
+type _AssertCreateAgent = _CreateAgent extends {
+	type: "create_agent";
+	name: string;
+	dir?: string;
+	mission?: string;
+	template?: string;
+}
+	? true
+	: never;
+const _createAgentShape: _AssertCreateAgent = true;
+
+type _AssertAgentCreateInput = AgentCreateInput extends { name: string } ? true : never;
+const _agentCreateInputShape: _AssertAgentCreateInput = true;
+
+type _AssertAgentCreateDto = AgentCreateDto extends {
+	name: string;
+	agentDir: string;
+	created: boolean;
+	filesWritten: number;
+}
+	? true
+	: never;
+const _agentCreateDtoShape: _AssertAgentCreateDto = true;
 
 // ── T10B：Skills / Memory 工作台的 scope 契约 ──
 type _GetMemory = WireCommandOfType<"get_memory">;
@@ -432,6 +460,7 @@ const COMMAND_TYPES = [
 	"attach",
 	"detach",
 	"list_agents",
+	"create_agent",
 	"list_sessions",
 	"get_session_messages",
 	"fs_list",
@@ -624,6 +653,8 @@ describe("WireCommand shape lock", () => {
 		// 编译期 _noMissing/_noExtra 断言；运行时只验证清单自洽。
 		expect(COMMAND_TYPES).toContain("set_mcp_server");
 		expect(COMMAND_TYPES).toContain("list_remote_skills");
+		// F1：建 agentDir —— 有了它，前端能建 agent，而不是只能走 CLI
+		expect(COMMAND_TYPES).toContain("create_agent");
 		expect(COMMAND_TYPES).toContain("listen_list");
 		expect(COMMAND_TYPES).toContain("set_agent_todo");
 		expect(COMMAND_TYPES).toContain("delegate_child");

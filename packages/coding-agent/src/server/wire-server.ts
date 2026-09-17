@@ -20,6 +20,7 @@ import type {
 } from "@cornfield/wire";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
+import { runAgentInit } from "../cli/agent-cli";
 import { withFileLock } from "../config/file-lock";
 import { parseModelString } from "../config/model-resolver";
 import { getDefault, SETTINGS_SCHEMA, type SettingPath, Settings } from "../config/settings";
@@ -492,6 +493,37 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			switch (command.type) {
 				case "list_agents": {
 					done({ agents: registry.buildSessionList(activeAgentIds()) });
+					return;
+				}
+				/**
+				 * 建一个 agentDir（`cornfield agent init` 的 wire 面）。
+				 *
+				 * 走 CLI 同一条实现（`runAgentInit`）：写骨架 + workspace 声明 + registry 三件事都在它
+				 * 里面，这里只搬入参、刷新进程内注册表。失败把**原文**交回去（名字非法 / 目录不可写 /
+				 * mission 文件不存在 …），不另编一套话术 —— 客户端的「失败原因」只能来自这里。
+				 *
+				 * 建完刷注册表是有必要的：注册表的权威是 `registry.json`，进程内 `#metas` 是它的缓存，
+				 * 不刷新则刚建好的 agentDir 在 `list_agents` / `attach` 里不存在，客户端看到的会是一个
+				 * 「刚建好但还没身份证」的 agent。刷新失败不回退成创建失败（盘上真的有它），只记日志。
+				 *
+				 * 与 CLI 并发建的互斥由注册表自己保证：`registerAgent` 的 read-modify-write 在
+				 * registry.json 的文件锁里（skeleton/registry.ts）—— 两个客户端同时建 agent 不会丢条目。
+				 */
+				case "create_agent": {
+					try {
+						const created = await runAgentInit({
+							name: command.name,
+							...(command.dir === undefined ? {} : { dir: command.dir }),
+							...(command.mission === undefined ? {} : { mission: command.mission }),
+							...(command.template === undefined ? {} : { template: command.template }),
+						});
+						// 不需要在这条命令上再自排一个队列：registry.json 的 read-modify-write 自己在文件锁里
+						// （skeleton/registry.ts），所以两个客户端同时建 agent 也不会丢条目。
+						for (const meta of await loadMetasSafe()) registry.registerMeta(meta);
+						done(created);
+					} catch (err) {
+						fail(err instanceof Error ? err.message : String(err));
+					}
 					return;
 				}
 				// ── Project（T8）：客户端级 Project registry 的读面与写面 ──

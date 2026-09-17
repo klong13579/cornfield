@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { isEnoent } from "@cornfield/utils";
 
 export interface FileLockOptions {
@@ -90,6 +91,10 @@ async function lockExists(lockPath: string): Promise<boolean> {
 async function acquireLock(filePath: string, options: FileLockOptions = {}): Promise<() => Promise<void>> {
 	const opts = { ...DEFAULT_OPTIONS, ...options };
 	const lockPath = getLockPath(filePath);
+
+	// 锁目录就在被锁文件旁边：全新 HOME 上它还不存在（调用方通常在拿到锁**之后**才建自己的目录，
+	// 因为写盘也在锁里）。所以先建父目录，否则 mkdir 锁目录会以 ENOENT 失败。
+	await fs.mkdir(path.dirname(lockPath), { recursive: true });
 
 	for (let attempt = 0; attempt < opts.retries; attempt++) {
 		if (await tryAcquireLock(lockPath)) {
