@@ -1,0 +1,6 @@
+[debug] [vite] connecting...
+[debug] [vite] connected.
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[warning] [web-app] serve command failed get_skills PiServerError: Server rejected "get_skills": unknown agent: does-not-exist
+    at #handleServerFrame (http://127.0.0.1:4174/@fs/Users/sz-0203015357/Desktop/Narwal/cornfield/.worktrees/squad-webapp-agents-t1/packages/pi-client/src/client.ts:285:26)
+    at ws.onmessage (http://127.0.0.1:4174/@fs/Users/sz-0203015357/Desktop/Narwal/cornfield/.worktrees/squad-webapp-agents-t1/packages/pi-client/src/client.ts:175:30)

@@ -1,0 +1,13 @@
+{
+  "page": "#/agents/does-not-exist",
+  "view": "1440x900",
+  "url": "http://127.0.0.1:4174/#/agents/does-not-exist",
+  "title": "CornField · AI Agent 控制台",
+  "elapsedMs": 3385,
+  "consoleLines": 4,
+  "consoleErrors": 0,
+  "networkIssues": 0,
+  "wsFrames": 19,
+  "controls": 23,
+  "stepsFailed": 0
+}

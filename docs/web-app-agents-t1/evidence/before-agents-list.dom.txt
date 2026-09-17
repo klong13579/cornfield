@@ -1,0 +1,88 @@
+CornField · AI Agent 控制台
+
+Agent
+1 工作区 · 7 agent · 1 运行中
+gateway · pid 49928 · 运行中
+调度器 8 任务
+algorithm
+hr
+me
+dataAgent
+sw
+全部
+默认工作区
+全部状态
+运行中
+执行中
+空闲
+已停用
+创建员工
+默认工作区
+7 agents
+d
+default
+WORKER
+运行中
+deepseek-v4-flash
+1 技能
+会话
+详情
+h
+hr
+WORKER
+钉钉
+空闲
+· gateway idle
+deepseek-v4-flash-0731
+11 技能
+会话
+详情
+a
+algorithm
+WORKER
+钉钉
+空闲
+· gateway idle
+deepseek-v4-flash-0731
+20 技能
+会话
+详情
+m
+me
+WORKER
+钉钉
+空闲
+· gateway idle
+deepseek-v4-flash-0731
+11 技能
+会话
+详情
+d
+dataAgent
+WORKER
+钉钉
+空闲
+· gateway idle
+deepseek-v4.1-flash
+19 技能
+会话
+详情
+s
+sw
+WORKER
+钉钉
+空闲
+· gateway idle
+deepseek-v4-flash-0731
+7 技能
+会话
+详情
+m
+mcode
+WORKER
+钉钉已停用
+已停用
+minimax-m3
+5 技能
+会话
+详情

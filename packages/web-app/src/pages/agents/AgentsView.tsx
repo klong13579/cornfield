@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import { type AgentDisplayStatus, type AgentStatusDisplay, agentStatusDisplay } from "./agent-status";
 import {
 	CreateAgentPanel,
 	type CreateAgentPhase,
@@ -12,6 +13,15 @@ import {
 	EMPTY_CREATE_AGENT_VALUES,
 	submitCreateAgent,
 } from "./CreateAgentPanel";
+
+const STATUS_FILTERS: readonly ["all" | AgentDisplayStatus, string][] = [
+	["all", "全部状态"],
+	["online", "运行中"],
+	["busy", "执行中"],
+	["idle", "空闲"],
+	["unmounted", "未挂载"],
+	["disabled", "已停用"],
+];
 
 /**
  * Agent 列表（FR-2）—— 数据源：server_snapshot → adapter 映射（view.agents）。
@@ -28,7 +38,7 @@ export function AgentsView(): React.JSX.Element {
 	const store = useSessionStore();
 	const agents = view.agents;
 	const [wsFilter, setWsFilter] = useState<string>("all");
-	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [statusFilter, setStatusFilter] = useState<"all" | AgentDisplayStatus>("all");
 	const [query, setQuery] = useState("");
 
 	// 「创建员工」面板：两个入口（筛选行右侧 / 空态里）开的是同一个，面板状态也归这里。
@@ -63,10 +73,12 @@ export function AgentsView(): React.JSX.Element {
 		setCreatePhase({ kind: "existing", agent: outcome.agent });
 	};
 
-	// serve 多 Agent 注册表就绪：挂载时拉一次 list_agents（server_snapshot 推送也会更新）
+	// serve 多 Agent 注册表就绪：挂载时拉一次 list_agents（server_snapshot 推送也会更新）。
+	// 与详情页各 tab 同款守卫：连接就绪（WS open）后再拉，不在握手期白发一条带堆栈的告警。
 	useEffect(() => {
+		if (!view.connected) return;
 		void store.fetchAgents();
-	}, [store]);
+	}, [store, view.connected]);
 
 	// gateway 运行状态（gateway_status → gateway.status.json，30s stale 刷新）
 	const [gwStatus, setGwStatus] = useState<GatewayStatusDto | null>(null);
@@ -97,28 +109,11 @@ export function AgentsView(): React.JSX.Element {
 	const bridgeState = (account: string): string | undefined =>
 		gwStatus?.accounts.find(a => a.accountId === account)?.bridgeState;
 
-	/**
-	 * 账号是否已停用（与 ComposerBar 同源判定）：gateway 运行中 + 绑定了钉钉 +
-	 * accountId 不在 gateway 账号表 = 停用。未绑定钉钉的本地 agent（default）不算。
-	 */
-	const isAccountStopped = (agent: AgentInfoDto): boolean => {
-		if (!gwStatus || gwStatus.stale) return false;
-		if (!agent.dingtalk) return false;
-		return !gwStatus.accounts.some(a => a.accountId === agent.id);
-	};
-
 	const workspaces = useMemo(() => Array.from(new Set(agents.map(a => a.workspace))), [agents]);
 
 	const filtered = agents.filter(agent => {
 		if (wsFilter !== "all" && agent.workspace !== wsFilter) return false;
-		// 停用态：gateway 账号停用视为 stopped（serve 快照仍可能是 idle）
-		const stopped = isAccountStopped(agent);
-		if (statusFilter !== "all") {
-			const matches = stopped
-				? agent.status === statusFilter || statusFilter === "stopped"
-				: agent.status === statusFilter;
-			if (!matches) return false;
-		}
+		if (statusFilter !== "all" && agentStatusDisplay(agent, gwStatus).key !== statusFilter) return false;
 		if (query && !agent.name.toLowerCase().includes(query.toLowerCase())) return false;
 		return true;
 	});
@@ -174,13 +169,7 @@ export function AgentsView(): React.JSX.Element {
 						))}
 					</div>
 					<div className="flex gap-0.5 rounded-md border border-hairline bg-surface-2 p-0.5">
-						{[
-							["all", "全部状态"],
-							["online", "运行中"],
-							["busy", "执行中"],
-							["idle", "空闲"],
-							["stopped", "已停用"],
-						].map(([key, label]) => (
+						{STATUS_FILTERS.map(([key, label]) => (
 							<button
 								key={key}
 								type="button"
@@ -258,7 +247,7 @@ export function AgentsView(): React.JSX.Element {
 										key={agent.id}
 										agent={agent}
 										gatewayBridge={bridgeState(agent.id)}
-										stopped={isAccountStopped(agent)}
+										display={agentStatusDisplay(agent, gwStatus)}
 										onOpen={() => navigate(`/agents/${agent.id}`)}
 										onSession={() => {
 											store.focusAgent(agent.id); // attach + 切 active，一处语义
@@ -278,35 +267,21 @@ export function AgentsView(): React.JSX.Element {
 function AgentCard({
 	agent,
 	gatewayBridge,
-	stopped,
+	display,
 	onOpen,
 	onSession,
 }: {
 	agent: AgentInfoDto;
 	/** gateway 侧 bridge 状态（gateway.status.json；无则 undefined）。 */
 	gatewayBridge?: string;
-	/** gateway 账号已停用（enabled:false，不在账号表）；覆盖 serve 快照状态显示。 */
-	stopped: boolean;
+	/** 状态结论（词 + 点色），父层用 {@link agentStatusDisplay} 统一算出。 */
+	display: AgentStatusDisplay;
 	onOpen: () => void;
 	onSession: () => void;
 }): React.JSX.Element {
-	// 停用态优先：gateway 账号下线（或禁用）→ 显示红色「已停用」，覆盖 serve 快照的 idle/online。
-	const dotClass = stopped
-		? "bg-danger"
-		: agent.status === "online"
-			? "bg-success"
-			: agent.status === "busy"
-				? "bg-warning animate-pulse"
-				: "bg-ink-faint";
-	const statusLabel = stopped
-		? "已停用"
-		: agent.status === "online"
-			? "运行中"
-			: agent.status === "busy"
-				? "执行中"
-				: agent.status === "idle"
-					? "空闲"
-					: "未挂载";
+	// 停用态优先：gateway 账号下线（或禁用）→ 红色「已停用」，覆盖 serve 快照的 idle/online。
+	const { label, dotClass } = display;
+	const stopped = display.key === "disabled";
 
 	return (
 		<div className="rounded-xl border border-hairline bg-surface p-4 transition-all duration-150 hover:-translate-y-px hover:border-hairline-strong active:scale-[0.98] active:translate-y-0">
@@ -335,7 +310,7 @@ function AgentCard({
 					</div>
 					<div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-subtle">
 						<span className={`h-2 w-2 rounded-full ${dotClass}`} />
-						{statusLabel}
+						{label}
 						{gatewayBridge && <span className="text-[11px] text-ink-faint">· gateway {gatewayBridge}</span>}
 					</div>
 				</div>
@@ -343,8 +318,6 @@ function AgentCard({
 			<div className="mt-3 flex items-center gap-4 border-t border-hairline pt-2.5 text-[12px] text-ink-faint">
 				{agent.model && <span className="truncate font-mono text-[11px] text-ink-subtle">{agent.model}</span>}
 				{agent.skillsCount !== undefined && <span>{agent.skillsCount} 技能</span>}
-				{agent.cronCount !== undefined && <span>{agent.cronCount} 定时任务</span>}
-				{agent.lastAction && <span className="ml-auto truncate">{agent.lastAction}</span>}
 			</div>
 			<div className="mt-3 flex gap-2">
 				<button

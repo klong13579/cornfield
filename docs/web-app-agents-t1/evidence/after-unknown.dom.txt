@@ -1,0 +1,15 @@
+CornField · AI Agent 控制台
+
+会话未注册
+未知 Agent
+—
+等待 Agent 注册表推送
+Skills
+钉钉
+模型配置
+工具开关
+用户画像
+文件
+Prompts
+技能列表加载失败：Server rejected "get_skills": unknown agent: does-not-exist
+← 返回 Agent 列表
