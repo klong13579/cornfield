@@ -17,6 +17,7 @@ import {
 	CONFIG_DIR_NAME,
 	getAgentStorageDbPath,
 	getDefaultAgentHome,
+	getProjectDir,
 	isEnoent,
 	logger,
 	procmgr,
@@ -162,10 +163,14 @@ export class Settings {
 	#persist: boolean;
 
 	private constructor(options: SettingsOptions = {}) {
-		// Settings describes an **Agent's** config: both bases default to the default Agent's home
-		// (`~/cf-workspace`) — its own `config.yml` / `.cornfield/config.yml`, never the client dir.
-		// Client-scope state (credentials, registry, caches) lives in the client dir instead.
-		this.#cwd = path.normalize(options.cwd ?? getDefaultAgentHome());
+		// Settings describes an **Agent's** config: the agentDir half defaults to the default Agent's
+		// home (`~/cf-workspace`), never the client dir — client-scope state (credentials, registry,
+		// caches) lives in the client dir instead.
+		//
+		// `cwd` 不是「家」：它决定**项目层**读哪一个 `.cornfield/config.yml`（F6 的「写侧跟随读侧」
+		// 也靠它）。CLI 在哪个仓库里跑，项目层就是那个仓库。把默认值改成家会让仓库自己的
+		// `.cornfield/config.yml` 不再被读到 —— 实测 `cornfield config get grep.enabled` 从 false 变 true。
+		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
 		this.#agentDir = path.normalize(options.agentDir ?? getDefaultAgentHome());
 		this.#configPath = options.inMemory ? null : path.join(this.#agentDir, "config.yml");
 		this.#persist = !options.inMemory;
