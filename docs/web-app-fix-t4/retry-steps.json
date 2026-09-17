@@ -1,0 +1,35 @@
+[
+	{
+		"mark": "断连态（--ws 指向不可达端口）点「重试」前后反馈与失败原因"
+	},
+	{
+		"eval": "([...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('重试') || (b.textContent||'').includes('连接中'))?.textContent || '').trim()"
+	},
+	{
+		"shot": "retry-before"
+	},
+	{
+		"click": "@button=重试"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "([...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('重试') || (b.textContent||'').includes('连接中'))?.textContent || '').trim()"
+	},
+	{
+		"shot": "retry-connecting"
+	},
+	{
+		"wait": 5000
+	},
+	{
+		"wait": 5000
+	},
+	{
+		"eval": "([...document.querySelectorAll('span')].map(s => (s.textContent||'').trim()).find(t => t && t.includes('超时')) || '')"
+	},
+	{
+		"shot": "retry-timeout"
+	}
+]
