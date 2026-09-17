@@ -18,6 +18,10 @@
 
 - **`CronUpdateInput.unbind`**（`src/results/cron.ts`）：改绑语义写进契约 —— 两个字段都不给 = 不动绑定；只给 `agentId`/`agentDir` = **整个绑定换成它**（不隐式保留旧身份）；两个都给必须指向同一个 Agent，否则网关 `ok:false`；`unbind: true` 显式清空（与上面两个字段互斥）。
 
+### Changed
+
+- **`set_config` 的缺省落点不再硬编码 `global`**（`src/commands.ts`）：不传 `scope` 时由服务端按「合并视图解析这个键的那一层」判定（有 project 层就写 project，否则写本实例的 `config.yml`），响应里回报的 `scope` 就是真落到的那一层。`get_config` / `set_config` 改为读/写**目标 agent 自己的配置实例**，因此需要该 agent 已挂载（未挂载时 `ok:false`，错误文本 `agent not attached: …`）；只查 agentDir 文件的 `get_agent_prompt_sources` 不受影响。
+
 ## [1.1.1] - 2026-09-06
 
 ### Added

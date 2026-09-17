@@ -12,6 +12,8 @@
 
 ### Changed
 
+- **配置写入落点只有一处实现：`Settings#setEffective`**（`src/config/settings.ts`, `src/server/wire-server.ts`, `src/session/agent-session.ts`, `test/agent-config-effective-layer.integration.test.ts`）：同一个 agentDir 既是「agent 家目录」又是「project」，于是两份 `config.yml` 各被一半写方写（工具开关写 `<agentDir>/config.yml`，模型路由与 thinking 写 `<agentDir>/.cornfield/config.yml`），而**读的时候 project 层压过 global**。现在「会被读回来的配置」一律走 `setEffective`：有 project 层就写 project，否则写本实例的 `config.yml`；`set_config` 缺省不再是硬编码的 `global`，回包报的 scope 就是真落到的那一层。读侧一律走**目标 agent 自己的 Settings 实例**（合并视图的唯一实现），不再自己拼文件读（`get_config` / `get_tool_switches` / `get_available_models` / `set_model_disabled`）。附带：project 层保存改成部分保存（只写本次改过的键），与 global 同纪律，不会复活被别处删掉的键。见 `docs/config/config-usage.md` §4。
+
 - **`registry.json` 的 read-modify-write 加文件锁**（`src/skeleton/registry.ts`, `src/config/file-lock.ts`, `test/registry-concurrency.test.ts`）：`registerAgent` 是「读整份 → 改一条 → 写回整份」，CLI 里「一次一个人敲」让旧假设成立，但 `serve` 是逐帧并发处理命令、gateway 启动时也在注册账号 —— 两个写方同时落笔，后写的那次会把先写的条目从 registry.json 里抹掉（agentDir 两份都在盘上，`agent list` 里少一个；同进程并发两次 `agent init` 实测 5/5 轮丢、两条 WS 连接 2/3 轮丢）。锁放在注册表自己身上，所以 CLI / serve / gateway 三个写方都受保护。`config/file-lock` 顺带自己建锁目录（新 HOME 上 `.cornfield/agent/` 还不存在时，拿锁不再以 ENOENT 失败）。
 
 - **`matchProjectForPath` 的规则改由 pi-wire 提供**（`src/agent-domain/project-store.ts`）：签名与返回类型不变（现有调用点零改动），内部改为对 target 与每个 root 各做 `resolveEquivalentPath` 归一，再调 pi-wire 的 `pickDeepestRootIndex` —— 前端用量面板问的是同一件事，规则不能再有两份实现（归一化留在 serve：realpath 是这边独有的事实）。
@@ -19,6 +21,10 @@
 - **听记条目改用 pi-wire 的规范形状**（`src/stt/listen-service.ts`）：`ListenRecordingSummary` 不再自建同形接口，改从 `@cornfield/wire` 引入 `ListenRecordingDto`（两端一份，字段加一处同时可见）。
 
 ### Fixed
+
+- **模型可见性与停用名单按 agent，不再吃全局单例**（`src/config/model-registry.ts`, `src/session/agent-session.ts`, `src/server/wire-server.ts`, `src/sdk.ts`）：default agent 的 `disabledProviders: [narwal-plan]` 此前会让**所有** agent 的模型选择器都看不到 narwal-plan（列表与名单都读全局 `Settings.instance` / 模块级 `settings` 代理）。现在 `ModelRegistry.getAvailable(settings?)` / `#isModelAvailable(model, settings)` 接受调用方自己的 Settings（缺省仍是模块级 settings，非会话调用方行为不变），会话侧传自己的那份；停用名单也写进目标 agent 自己的配置，而不是写到 default 的 `config.yml`（写错人 + 读侧读不到）。
+
+- **骨架发的 `modelRoles` 是旧键**（`src/skeleton/assets/.cornfield/config.yml`）：活键是 `modelRoutes`，旧键只在读入迁移时被认一次（并会重写整个文件、丢掉注释）。新建的 agentDir 现在直接写活键。
 
 - **看板选 thinking 档位现在真的落盘**（`src/server/wire-server.ts`, `packages/pi-wire/src/commands.ts`, `test/wire-server-thinking-persist.integration.test.ts`）：`set_thinking_level` 增加可选 `persist`。此前 UI 上改了档位、配置文件一个字节不动、重启回退，而且没有任何提示 —— 「看起来能配、其实只改了本次会话」。缺省仍是只改本会话（`cycle_thinking_level` 等随时切档的语义不变），看板显式传 `persist: true` 才写进目标 agent 的配置。
 
