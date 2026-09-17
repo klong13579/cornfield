@@ -1,0 +1,23 @@
+CornField · AI Agent 控制台
+
+Todo
+Agent 长期任务 · Project 筛选
+Agent
+Agent Todo
+owner hr
+<agentDir>/.cornfield/agent-todos.json（agentDir 为 hr 的 home）
+看板 Agent
+跟随焦点（default）
+default
+hr
+algorithm
+me
+dataAgent
+sw
+mcode
+全部 0
+0 未完成 · 0 已完成
+通用（不绑 Project）
+添加
+标题为空不能添加 —— 先输入要记的任务。
+hr 还没有长期任务。上面加一条。

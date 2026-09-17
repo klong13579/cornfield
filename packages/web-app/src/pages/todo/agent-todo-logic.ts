@@ -1,5 +1,7 @@
 import { isTerminalAgentTodoStatus } from "@cornfield/wire";
 import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto, ProjectRecordDto } from "../../lib/pi-client-api";
+import { activeAgentIdOf } from "../../state/agent-context";
+import type { SessionView } from "../../state/session-store";
 
 /**
  * Agent Todo 工作台的投影逻辑（纯函数，无 DOM）。
@@ -42,6 +44,26 @@ export function projectRegistryOf(view: {
 	if (view.projectsError) return { state: "unreadable", error: view.projectsError };
 	if (view.projects === undefined) return { state: "pending" };
 	return { state: "loaded", projects: view.projects };
+}
+
+/** 板子归属源码：显式 pin + 焦点解析所需的最小视图面。 */
+export type BoardAgentSource = Pick<SessionView, "todoBoardAgentId" | "activeAgentId" | "agents">;
+
+/**
+ * 板子归属：显式 pin 优先，否则与全站焦点解析同源（{@link activeAgentIdOf}）。
+ *
+ * 一处定义：工作台标题、占位文案、写操作的 `agentId` 都从这里取 —— 各写一份，就会出现
+ * 「标题写着一个 Agent、写进另一个 Agent 的板子」这种漂移。
+ */
+export function boardAgentIdOf(view: BoardAgentSource): string | undefined {
+	return view.todoBoardAgentId ?? activeAgentIdOf(view);
+}
+
+/** 板子归属的展示名：Agent 名（查不到落回 id，连 id 都没有才落回 default）。 */
+export function boardAgentNameOf(view: BoardAgentSource): string {
+	const id = boardAgentIdOf(view);
+	if (id === undefined) return "default";
+	return view.agents.find(agent => agent.id === id)?.name ?? id;
 }
 
 export function matchesAgentTodoFilter(todo: AgentTodoDto, filter: AgentTodoFilter): boolean {
