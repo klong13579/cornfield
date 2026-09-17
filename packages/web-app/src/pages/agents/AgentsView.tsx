@@ -39,6 +39,9 @@ export function AgentsView(): React.JSX.Element {
 	// （跳详情 / 已在）随后才到 —— 屏上不该先擦掉一个还在进行中的动作。
 	const createBusy = createPhase.kind === "submitting";
 
+	// 删除入口（detach）：每个 agent 卡片的操作结果（成功/失败/忙态拦截）就地反馈。
+	const [detachOutcomes, setDetachOutcomes] = useState<Record<string, { ok: boolean; text: string }>>({});
+
 	const openCreate = (): void => {
 		// 每次都从干净状态开：上一次的输入与结论不能当成这一次的前提。
 		setCreateValues(EMPTY_CREATE_AGENT_VALUES);
@@ -61,6 +64,20 @@ export function AgentsView(): React.JSX.Element {
 		}
 		// 同名 agentDir 本来就在（增量补齐）：也是成功，但不是「新建」，留在面板上说明白。
 		setCreatePhase({ kind: "existing", agent: outcome.agent });
+	};
+
+	/**
+	 * 卸载（detach）一个已挂载的 agent。忙态由 store 拦截（不发命令，返回 busy:true），
+	 * 其它失败展示 serve 原文；成功后在卡片上留一条「已卸载」，列表状态随 store 刷新同步。
+	 */
+	const onDetach = async (agent: AgentInfoDto): Promise<void> => {
+		const res = await store.detachAgent(agent.id);
+		setDetachOutcomes(prev => ({
+			...prev,
+			[agent.id]: res.ok
+				? { ok: true, text: "已卸载" }
+				: { ok: false, text: res.busy ? `该 agent 正在执行任务（${agent.phase ?? "busy"}），无法卸载` : res.error },
+		}));
 	};
 
 	// serve 多 Agent 注册表就绪：挂载时拉一次 list_agents（server_snapshot 推送也会更新）
@@ -264,6 +281,8 @@ export function AgentsView(): React.JSX.Element {
 											store.focusAgent(agent.id); // attach + 切 active，一处语义
 											navigate("/workspace");
 										}}
+										onDetach={() => void onDetach(agent)}
+										detachFeedback={detachOutcomes[agent.id] ?? null}
 									/>
 								))}
 							</div>
@@ -281,6 +300,8 @@ function AgentCard({
 	stopped,
 	onOpen,
 	onSession,
+	onDetach,
+	detachFeedback,
 }: {
 	agent: AgentInfoDto;
 	/** gateway 侧 bridge 状态（gateway.status.json；无则 undefined）。 */
@@ -289,6 +310,9 @@ function AgentCard({
 	stopped: boolean;
 	onOpen: () => void;
 	onSession: () => void;
+	onDetach: () => void;
+	/** 本次卸载操作的就地反馈（成功/失败/忙态拦截）；暂无操作时为 null。 */
+	detachFeedback: { ok: boolean; text: string } | null;
 }): React.JSX.Element {
 	// 停用态优先：gateway 账号下线（或禁用）→ 显示红色「已停用」，覆盖 serve 快照的 idle/online。
 	const dotClass = stopped
@@ -367,7 +391,27 @@ function AgentCard({
 				>
 					详情
 				</button>
+				{agent.attached && agent.id !== "default" && (
+					<button
+						type="button"
+						className="btn btn-secondary btn-sm shrink-0"
+						onClick={e => {
+							e.stopPropagation();
+							onDetach();
+						}}
+					>
+						卸载
+					</button>
+				)}
 			</div>
+			{detachFeedback && (
+				<div
+					className={`mt-2 text-[11px] ${detachFeedback.ok ? "text-ink-faint" : "text-danger"}`}
+					data-testid={`detach-feedback-${agent.id}`}
+				>
+					{detachFeedback.text}
+				</div>
+			)}
 		</div>
 	);
 }

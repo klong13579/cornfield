@@ -1,0 +1,25 @@
+# serve list_agents 实测输出（只读探针）
+
+探针：`PiClientAdapter` 直连运行中的 serve（`ws://127.0.0.1:7891/ws`，token 空），
+`listAgents()` → 7 个 agent。未 attach / detach 任何真实 agent（写动作由单元测试覆盖）。
+
+要点（与票 09 能力清单对照）：
+
+- `attached` 全为 `true`（serve 启动即预挂载）；`active` 只有 default（本连接焦点）。
+- `phase` 全为 `idle`（无会话在跑，忙态在单元测试里用 fake serve 构造）。
+- **无 `role` 字段** → `workspace` 恒「默认工作区」（这是票 08/T1 的分组问题，不在本票）。
+- **无 `cronCount` / `lastAction` 字段**（证实为死字段，删除渲染由票 10/T1/T3 执行）。
+- 无 `start` / `stop` / `restart` 命令面（`commands.ts` 全命令面确认）。
+
+| id | status | attached | active | phase | model | skillsCount |
+|---|---|---|---|---|---|---|
+| default | online | true | true | idle | deepseek-v4-flash | 1 |
+| hr | idle | true | false | idle | deepseek-v4-flash-0731 | 11 |
+| algorithm | idle | true | false | idle | deepseek-v4-flash-0731 | 20 |
+| me | idle | true | false | idle | deepseek-v4-flash-0731 | 11 |
+| dataAgent | idle | true | false | idle | deepseek-v4.1-flash | 19 |
+| sw | idle | true | false | idle | deepseek-v4-flash-0731 | 7 |
+| mcode | idle | true | false | idle | minimax-m3 | 5 |
+
+（`mcode` 的 `dingtalk.enabled=false`，其余账号 `enabled=true`；`agentDir` 各自指向
+`OMP-workspace-test/*`，default 指向 `~/.cornfield/agents/default`。）

@@ -50,6 +50,8 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	const [hostTools, setHostToolsState] = useState<HostToolDefinitionDto[]>(() => store.getHostTools());
 	const [newHostName, setNewHostName] = useState("");
 	const [newHostDesc, setNewHostDesc] = useState("");
+	// 卸载（detach）就地反馈：成功/失败/忙态拦截。
+	const [detachFeedback, setDetachFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
 	const registerHostTool = () => {
 		const name = newHostName.trim();
@@ -75,6 +77,19 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	// 当前模型（裸 id，与「模型配置」tab 的 Provider/Model 两个下拉同源：AgentDetailView → ModelPicker）。
 	const currentModel = agent?.model ?? view.model ?? "";
 
+	/** 卸载当前 agent（detach）；忙态由 store 拦截，其它失败展示 serve 原文。 */
+	const onDetach = async (): Promise<void> => {
+		const res = await store.detachAgent(agentId);
+		setDetachFeedback(
+			res.ok
+				? { ok: true, text: "已卸载" }
+				: {
+						ok: false,
+						text: res.busy ? `该 agent 正在执行任务（${agent?.phase ?? "busy"}），无法卸载` : res.error,
+					},
+		);
+	};
+
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="page-narrow">
@@ -97,6 +112,15 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 							<span className="badge fail" title="gateway.json 中该账号已停用">
 								钉钉已停用
 							</span>
+						)}
+						{agent?.attached && agentId !== "default" && (
+							<button
+								type="button"
+								className="btn btn-secondary btn-sm shrink-0"
+								onClick={() => void onDetach()}
+							>
+								卸载
+							</button>
 						)}
 						<button
 							type="button"
@@ -121,6 +145,14 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					<div className="mt-2 text-[15px] text-ink-subtle">
 						{agent ? `${agent.workspace} · 最近活跃 ${agent.lastAction ?? "—"}` : "等待 Agent 注册表推送"}
 					</div>
+					{detachFeedback && (
+						<div
+							className={`mt-1 text-[12px] ${detachFeedback.ok ? "text-ink-faint" : "text-danger"}`}
+							data-testid="detach-feedback"
+						>
+							{detachFeedback.text}
+						</div>
+					)}
 				</div>
 
 				{/* 5 tabs */}
