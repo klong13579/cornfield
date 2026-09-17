@@ -16,7 +16,7 @@
  * 不是「未归属」—— 记 `projectError`，让调用方少报一个 scope 而不是编一个。
  */
 
-import { getAgentDir, logger } from "@cornfield/utils";
+import { getDefaultAgentHome, logger } from "@cornfield/utils";
 import { findAgentRecord, loadAgentDirectory } from "../agent-domain/agent-directory";
 import { deriveWorkspaceContext } from "../agent-domain/default-agent";
 import { loadProjects, matchProjectForPath } from "../agent-domain/project-store";
@@ -63,7 +63,7 @@ export interface AgentScopeAnchor {
  * 调用方要么自己给出缺省（本模块的锚点），要么如实报错（委派不能把子进程放进一个不是那个 Agent 的家里）。
  */
 export function resolveAgentRuntimeDir(input: { agentId: string; agentDir?: string }): string | undefined {
-	if (input.agentId === DEFAULT_AGENT_ID) return getAgentDir();
+	if (input.agentId === DEFAULT_AGENT_ID) return getDefaultAgentHome();
 	return input.agentDir?.trim() || undefined;
 }
 
@@ -78,7 +78,7 @@ export interface ResolveAgentScopeInput {
 /** 解析焦点 Agent 的 scope 锚点。不抛：读不到的每一块都有明确的缺省与原因。 */
 export async function resolveAgentScope(input: ResolveAgentScopeInput): Promise<AgentScopeAnchor> {
 	const { agentId, meta, attached } = input;
-	const agentDir = resolveAgentRuntimeDir({ agentId, agentDir: meta?.agentDir }) ?? getAgentDir();
+	const agentDir = resolveAgentRuntimeDir({ agentId, agentDir: meta?.agentDir }) ?? getDefaultAgentHome();
 	const sessionCwd = attached?.session.sessionManager.getCwd() ?? agentDir;
 	const anchor: AgentScopeAnchor = {
 		agentId,

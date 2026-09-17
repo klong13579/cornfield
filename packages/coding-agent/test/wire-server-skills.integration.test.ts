@@ -128,7 +128,7 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 			expect(dropped?.description).toContain("用户级技能 seed");
 
 			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入
-			const cfgPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
+			const cfgPath = path.join(isolatedHome, "cf-workspace", "config.yml");
 			let cfg = "";
 			const cfgDeadline = Date.now() + 3000;
 			while (Date.now() < cfgDeadline) {

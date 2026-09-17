@@ -4,7 +4,7 @@
  * 真 serve + 隔离 HOME + 隔离 project cwd（不 mock、不发 prompt、不产生费用）。
  *
  * F6（写侧跟随读侧优先级）：
- *   - 有 project 层（`<cwd>/.cornfield/config.yml` 存在）时，`set_config`（不带 scope）写**它**；
+ *   - 有 project 层（`<agentDir>/.cornfield/config.yml` 存在）时，`set_config`（不带 scope）写**它**；
  *     写完后 `<agentDir>/config.yml` 一字节都不动（同一个 agent 的一份配置不再被劈成两半）。
  *   - 读侧（`get_config` / `get_tool_switches`）读到的是刚写下去的那份（合并视图：project 压 global）。
  *   - 写 project 只动本次改过的键，文件里原有的键与注释不被整份覆盖。
@@ -44,10 +44,12 @@ let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
 let token = "";
 
-/** default agent 的配置根（Settings.init 的 agentDir），不是 serve 的 cwd。 */
-const globalConfigPath = (): string => path.join(isolatedHome, ".cornfield", "agent", "config.yml");
-/** default agent 的 project 层：serve cwd 下的 `.cornfield/config.yml`。 */
-const projectConfigPath = (): string => path.join(projectCwd, ".cornfield", "config.yml");
+/** default Agent 的家（agentDir = ~/cf-workspace，doc §12）。它的配置层都在家里。 */
+const defaultAgentHome = (): string => path.join(isolatedHome, "cf-workspace");
+/** default Agent 的 global 层（`<agentDir>/config.yml`，Settings 的 configPath）。 */
+const globalConfigPath = (): string => path.join(defaultAgentHome(), "config.yml");
+/** default Agent 的 project 层（`<agentDir>/.cornfield/config.yml`）—— 它自己的那份配置根。 */
+const projectConfigPath = (): string => path.join(defaultAgentHome(), ".cornfield", "config.yml");
 /** registry agent 的配置文件（没 project 层 → 就是它自己的 config.yml）。 */
 const agentConfigPath = (name: string): string => path.join(isolatedHome, "agents", name, "config.yml");
 /** agentDir 自带 project 层的 agent 的目录与 project 层文件。 */
@@ -81,25 +83,31 @@ beforeAll(async () => {
 	savedHome = process.env.HOME;
 	process.env.HOME = isolatedHome;
 
-	// default agent 的 project 层：**预先存在的** project 文件（层「存在」与否只看这个文件）。
+	// serve 的 cwd：一个普通项目目录。default Agent 的配置**不**从这里读（它的家才是配置根）。
 	projectCwd = path.join(isolatedHome, "project");
-	await fs.mkdir(path.join(projectCwd, ".cornfield"), { recursive: true });
+	await fs.mkdir(projectCwd, { recursive: true });
+
+	// default Agent 的 project 层（它自己家里的那份）：**预先存在的** project 文件
+	// （层「存在」与否只看这个文件）。
+	await fs.mkdir(path.join(defaultAgentHome(), ".cornfield"), { recursive: true });
 	await Bun.write(
 		projectConfigPath(),
 		YAML.stringify({ theme: { dark: "anthracite" }, grep: { enabled: true } }, null, 2),
 	);
 
-	// default agent 的全局层：自带停用名单（F2 的病灶：它不该影响别的 agent）。
-	const globalAgentDir = path.dirname(globalConfigPath());
-	await fs.mkdir(globalAgentDir, { recursive: true });
+	// default Agent 的 global 层：自带停用名单（F2 的病灶：它不该影响别的 agent）。
+	await fs.mkdir(defaultAgentHome(), { recursive: true });
 	await Bun.write(
 		globalConfigPath(),
 		YAML.stringify({ shellPath: "/bin/zsh", disabledProviders: [PROBE_PROVIDER] }, null, 2),
 	);
 
 	// 无 key 的探针 provider：让「可用模型列表」在不同 agent 之间有可观测的差别。
+	// models.yml 是**客户端级**的模型目录（ModelRegistry 从 client dir 读），不是某个 agent 的家。
+	const clientDir = path.join(isolatedHome, ".cornfield", "agent");
+	await fs.mkdir(clientDir, { recursive: true });
 	await Bun.write(
-		path.join(globalAgentDir, "models.yml"),
+		path.join(clientDir, "models.yml"),
 		YAML.stringify(
 			{
 				providers: {

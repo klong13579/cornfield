@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
-import { getAgentDir, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
+import { getClientDir, getDefaultAgentHome, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
@@ -703,7 +703,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					// 生成 reportId 和路径
 					const sessionId = readSessionId(sf);
 					const reportId = generateReportId(sessionId);
-					const reportsDir = path.join(getAgentDir(), "diagnosis-reports");
+					const reportsDir = path.join(getClientDir(), "diagnosis-reports");
 					const reportPath = path.join(reportsDir, `${reportId}.md`);
 					const summaryPath = path.join(reportsDir, `${reportId}.summary.json`);
 
@@ -3012,7 +3012,7 @@ interface RemoteSkillItem {
 
 /** 安装根目录：~/.cornfield/agent/skills（与 native skills 发现一致：skills/<name>/SKILL.md）。 */
 function remoteSkillsDir(): string {
-	return path.join(getAgentDir(), "skills");
+	return path.join(getClientDir(), "skills");
 }
 
 /** 解析 source 缺省值：插件市场配置（marketplaces.json）里的第一个 marketplace 源。 */
@@ -3198,7 +3198,7 @@ interface AgentMcpJson {
 }
 
 function agentMcpJsonPath(): string {
-	return path.join(getAgentDir(), "mcp.json");
+	return path.join(getClientDir(), "mcp.json");
 }
 
 async function readAgentMcpJson(): Promise<AgentMcpJson> {
@@ -3644,16 +3644,20 @@ function parseGitLog(stdout: string): { hash: string; author: string; message: s
 
 // ── 配置读写（票 03）──
 
-/** 目标 agent 的 config.yml 路径：default 的配置根是全局 agent 目录，registry agent 是自身 agentDir。 */
+/** 目标 agent 的 config.yml 路径：每个 agent 都是自己的 agentDir（default = 它的家 ~/cf-workspace）。 */
 function agentConfigPathFor(meta: AgentMeta): string {
-	return meta.id === "default" ? path.join(getAgentDir(), "config.yml") : path.join(meta.agentDir, "config.yml");
+	return path.join(agentHomeFor(meta), "config.yml");
 }
 
-/** #05 项目级配置路径（Settings 的 project 覆盖层同源：<cwd>/.cornfield/config.yml；
- * serve 装配时 agent 的 cwd = agentDir，default agent 的 meta.agentDir = 启动目录）。 */
+/** #05 项目级配置路径（Settings 的 project 覆盖层同源：<cwd>/.cornfield/config.yml）。
+ * 每个 agent 的配置根就是它自己的家 —— default 的家是 ~/cf-workspace，不是启动目录。 */
 function agentProjectConfigPathFor(meta: AgentMeta): string {
-	const cwd = meta.id === "default" ? process.cwd() : meta.agentDir;
-	return path.join(cwd, ".cornfield", "config.yml");
+	return path.join(agentHomeFor(meta), ".cornfield", "config.yml");
+}
+
+/** agent 的家（agentDir）；default 没有注册表条目时是固定的 ~/cf-workspace。 */
+function agentHomeFor(meta: AgentMeta): string {
+	return meta.id === "default" ? getDefaultAgentHome() : meta.agentDir;
 }
 
 async function readAgentConfigYaml(filePath: string): Promise<Record<string, unknown>> {

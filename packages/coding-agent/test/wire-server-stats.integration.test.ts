@@ -144,7 +144,8 @@ beforeAll(async () => {
 
 	// W3 D2：预置 default 根 CLI 会话 + hr registry agent 会话（serve 启动时加载 registry，必须在此 seed）
 	const home = isolatedHome;
-	const cliDir = path.join(home, ".cornfield", "agent", "sessions", "--work--demo--", "by-date", "2026-08-18");
+	// default Agent 的会话根在它的家里（~/cf-workspace/sessions），不是客户端目录。
+	const cliDir = path.join(home, "cf-workspace", "sessions", "--work--demo--", "by-date", "2026-08-18");
 	await fs.mkdir(cliDir, { recursive: true });
 	await Bun.write(
 		path.join(cliDir, "000001__cli00001.jsonl"),

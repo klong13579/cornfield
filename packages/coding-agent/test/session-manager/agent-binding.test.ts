@@ -17,7 +17,7 @@ import {
 	type SessionHeader,
 	SessionManager,
 } from "@cornfield/coding-agent/session/session-manager";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 
 import { makeAssistantMessage } from "./helpers";
 
@@ -31,22 +31,22 @@ function headerOf(entries: unknown[]): SessionHeader | undefined {
 describe("会话头的 Agent 归属：分支随行", () => {
 	let testAgentDir: string;
 	let cwd: string;
-	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+	const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+	const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(async () => {
 		testAgentDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cornfield-agent-binding-"));
-		setAgentDir(testAgentDir);
+		setDefaultAgentHome(testAgentDir);
 		cwd = path.join(testAgentDir, "cwd");
 		fs.mkdirSync(cwd, { recursive: true });
 	});
 
 	afterEach(async () => {
-		if (originalAgentDir) {
-			setAgentDir(originalAgentDir);
+		if (originalAgentHome) {
+			setDefaultAgentHome(originalAgentHome);
 		} else {
-			setAgentDir(fallbackAgentDir);
-			delete process.env.CORNFIELD_AGENT_DIR;
+			setDefaultAgentHome(fallbackAgentHome);
+			delete process.env.CORNFIELD_CLIENT_DIR;
 		}
 		await fsp.rm(testAgentDir, { recursive: true, force: true });
 	});

@@ -7,27 +7,27 @@ import {
 	loadEntriesFromFile,
 	SessionManager,
 } from "@cornfield/coding-agent/session/session-manager";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 
 describe("custom_message persistence", () => {
 	let testAgentDir: string;
 	let cwd: string;
-	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+	const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+	const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(() => {
 		testAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-custom-msg-persist-"));
 		cwd = path.join(testAgentDir, "cwd");
 		fs.mkdirSync(cwd, { recursive: true });
-		setAgentDir(testAgentDir);
+		setDefaultAgentHome(testAgentDir);
 	});
 
 	afterEach(() => {
-		if (originalAgentDir) {
-			setAgentDir(originalAgentDir);
+		if (originalAgentHome) {
+			setDefaultAgentHome(originalAgentHome);
 		} else {
-			setAgentDir(fallbackAgentDir);
-			delete process.env.CORNFIELD_AGENT_DIR;
+			setDefaultAgentHome(fallbackAgentHome);
+			delete process.env.CORNFIELD_CLIENT_DIR;
 		}
 		fs.rmSync(testAgentDir, { recursive: true, force: true });
 	});

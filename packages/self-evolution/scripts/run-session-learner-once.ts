@@ -7,7 +7,6 @@
  */
 import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
 import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
-import { getAgentDir } from "@cornfield/utils";
 import { DEFAULT_EVOLUTION_GLOBAL_STORE, resolveEvolutionProjectionDir } from "../src/paths";
 import { projectLearnings } from "../src/projection/learnings";
 import { extractSessionLearnings } from "../src/session-learner";
@@ -68,7 +67,7 @@ if (!trace) {
 	};
 }
 
-const authStorage = await discoverAuthStorage(getAgentDir());
+const authStorage = await discoverAuthStorage();
 const registry = new ModelRegistry(authStorage);
 const available = registry.getAvailable();
 const model =

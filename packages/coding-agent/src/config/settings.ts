@@ -15,9 +15,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
 	CONFIG_DIR_NAME,
-	getAgentDbPath,
-	getAgentDir,
-	getProjectDir,
+	getAgentStorageDbPath,
+	getDefaultAgentHome,
 	isEnoent,
 	logger,
 	procmgr,
@@ -163,8 +162,11 @@ export class Settings {
 	#persist: boolean;
 
 	private constructor(options: SettingsOptions = {}) {
-		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
-		this.#agentDir = path.normalize(options.agentDir ?? getAgentDir());
+		// Settings describes an **Agent's** config: both bases default to the default Agent's home
+		// (`~/cf-workspace`) — its own `config.yml` / `.cornfield/config.yml`, never the client dir.
+		// Client-scope state (credentials, registry, caches) lives in the client dir instead.
+		this.#cwd = path.normalize(options.cwd ?? getDefaultAgentHome());
+		this.#agentDir = path.normalize(options.agentDir ?? getDefaultAgentHome());
 		this.#configPath = options.inMemory ? null : path.join(this.#agentDir, "config.yml");
 		this.#persist = !options.inMemory;
 
@@ -604,7 +606,7 @@ export class Settings {
 	async #load(): Promise<Settings> {
 		if (this.#persist) {
 			// Open storage
-			this.#storage = await AgentStorage.open(getAgentDbPath(this.#agentDir));
+			this.#storage = await AgentStorage.open(getAgentStorageDbPath(this.#agentDir));
 
 			// Migrate from legacy formats if needed
 			await this.#migrateFromLegacy();

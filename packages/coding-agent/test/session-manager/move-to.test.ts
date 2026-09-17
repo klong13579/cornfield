@@ -9,7 +9,7 @@ import {
 	SessionManager,
 } from "@cornfield/coding-agent/session/session-manager";
 import { stripOuterDoubleQuotes } from "@cornfield/coding-agent/tools/path-utils";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 
 // -- helpers ----------------------------------------------------------------
 
@@ -65,12 +65,12 @@ describe("SessionManager.moveTo", () => {
 	let testAgentDir: string;
 	let cwdA: string;
 	let cwdB: string;
-	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+	const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+	const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(async () => {
 		testAgentDir = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-move-test-"));
-		setAgentDir(testAgentDir);
+		setDefaultAgentHome(testAgentDir);
 		cwdA = path.join(testAgentDir, "cwd-a");
 		cwdB = path.join(testAgentDir, "cwd-b");
 		fs.mkdirSync(cwdA, { recursive: true });
@@ -78,11 +78,11 @@ describe("SessionManager.moveTo", () => {
 	});
 
 	afterEach(async () => {
-		if (originalAgentDir) {
-			setAgentDir(originalAgentDir);
+		if (originalAgentHome) {
+			setDefaultAgentHome(originalAgentHome);
 		} else {
-			setAgentDir(fallbackAgentDir);
-			delete process.env.CORNFIELD_AGENT_DIR;
+			setDefaultAgentHome(fallbackAgentHome);
+			delete process.env.CORNFIELD_CLIENT_DIR;
 		}
 		await fsp.rm(testAgentDir, { recursive: true, force: true });
 	});

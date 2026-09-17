@@ -50,6 +50,7 @@ import { createWireCore } from "./server/wire-server";
 import type { AgentSession } from "./session/agent-session";
 import { resolveResumableSession, type SessionInfo, SessionManager } from "./session/session-manager";
 import { SessionStore } from "./session/session-store";
+import { assertDefaultAgentHome } from "./skeleton/default-home";
 import { resolvePromptInput } from "./system-prompt";
 import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog";
@@ -630,7 +631,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	}
 
 	if (parsedArgs.listModels !== undefined) {
-		await logger.time("settings:init:list-models", Settings.init, { cwd: getProjectDir() });
+		await logger.time("settings:init:list-models", Settings.init);
 		const refreshStrategy = parsedArgs.listModelsRefresh ? "online" : "online-if-uncached";
 		await modelRegistry.refresh(refreshStrategy);
 		const searchPattern = typeof parsedArgs.listModels === "string" ? parsedArgs.listModels : undefined;
@@ -671,7 +672,10 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	}
 
 	const cwd = getProjectDir();
-	await logger.time("settings:init", Settings.init, { cwd });
+	// 一个 Session 只属于一个家：注册表里 default 的路径与本进程解析出的家不一致就拒绝启动
+	// （不静默挑一个）。与 serve 同一条规则、同一个错误文本。
+	await assertDefaultAgentHome();
+	await logger.time("settings:init", Settings.init);
 	if (parsedArgs.mode === "rpc") {
 		applyRpcDefaultSettingOverrides();
 	}

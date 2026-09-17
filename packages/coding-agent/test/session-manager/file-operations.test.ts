@@ -10,7 +10,7 @@ import {
 	type SessionHeader,
 	SessionManager,
 } from "@cornfield/coding-agent/session/session-manager";
-import { getConfigRootDir, getSessionsDir, Snowflake, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, getSessionsDir, Snowflake, setDefaultAgentHome } from "@cornfield/utils";
 
 describe("loadEntriesFromFile", () => {
 	let tempDir: string;
@@ -205,8 +205,8 @@ describe("resolveResumableSession", () => {
 
 describe("SessionManager temp cwd session dirs", () => {
 	let testAgentDir: string;
-	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+	const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+	const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 	function expectedTempSessionDirName(tempCwd: string): string {
 		return `-tmp-${path.relative(os.tmpdir(), path.resolve(tempCwd)).replace(/[/\\:]/g, "-")}`;
@@ -221,15 +221,15 @@ describe("SessionManager temp cwd session dirs", () => {
 
 	beforeEach(() => {
 		testAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-session-dir-test-"));
-		setAgentDir(testAgentDir);
+		setDefaultAgentHome(testAgentDir);
 	});
 
 	afterEach(() => {
-		if (originalAgentDir) {
-			setAgentDir(originalAgentDir);
+		if (originalAgentHome) {
+			setDefaultAgentHome(originalAgentHome);
 		} else {
-			setAgentDir(fallbackAgentDir);
-			delete process.env.CORNFIELD_AGENT_DIR;
+			setDefaultAgentHome(fallbackAgentHome);
+			delete process.env.CORNFIELD_CLIENT_DIR;
 		}
 		fs.rmSync(testAgentDir, { recursive: true, force: true });
 	});
@@ -564,19 +564,19 @@ describe("SessionManager.list with hierarchical by-date layout", () => {
 		}
 
 		// listAll reads from the agent sessions root, not an arbitrary dir.
-		// We point setAgentDir at tempDir so sessions/ is the root.
-		const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-		setAgentDir(tempDir);
+		// We point setDefaultAgentHome at tempDir so sessions/ is the root.
+		const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+		setDefaultAgentHome(tempDir);
 		try {
 			const sessions = await SessionManager.listAll();
 			expect(sessions).toHaveLength(2);
 			expect(sessions.map(s => s.id).sort()).toEqual(["aaa11111", "bbb22222"].sort());
 		} finally {
-			if (originalAgentDir) {
-				setAgentDir(originalAgentDir);
+			if (originalAgentHome) {
+				setDefaultAgentHome(originalAgentHome);
 			} else {
-				setAgentDir(path.join(getConfigRootDir(), "agent"));
-				delete process.env.CORNFIELD_AGENT_DIR;
+				setDefaultAgentHome(path.join(getConfigRootDir(), "agent"));
+				delete process.env.CORNFIELD_CLIENT_DIR;
 			}
 		}
 	});

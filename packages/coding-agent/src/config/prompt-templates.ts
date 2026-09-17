@@ -256,7 +256,7 @@ async function loadTemplatesFromDir(
 export interface LoadPromptTemplatesOptions {
 	/** Working directory for project-local templates. Default: getProjectDir() */
 	cwd?: string;
-	/** Agent config directory for global templates. Default: from getPromptsDir() */
+	/** Agent home for global templates. Default: the default Agent's home */
 	agentDir?: string;
 }
 

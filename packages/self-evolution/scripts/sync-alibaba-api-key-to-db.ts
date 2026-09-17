@@ -8,7 +8,7 @@
  *   bun packages/self-evolution/scripts/sync-alibaba-api-key-to-db.ts --from-omp-pane omp-memory-verify
  */
 import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
-import { getAgentDir } from "@cornfield/utils";
+import { getDefaultAgentHome } from "@cornfield/utils";
 import { $ } from "bun";
 
 function maskKey(key: string): string {
@@ -43,8 +43,8 @@ if (!apiKey) {
 	process.exit(1);
 }
 
-const agentDir = getAgentDir();
-const authStorage = await discoverAuthStorage(agentDir);
+const agentDir = getDefaultAgentHome();
+const authStorage = await discoverAuthStorage();
 const before = await authStorage.peekApiKey("alibaba-coding-plan");
 
 await authStorage.set("alibaba-coding-plan", { type: "api_key", key: apiKey });

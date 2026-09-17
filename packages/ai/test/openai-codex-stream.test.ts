@@ -6,10 +6,10 @@ import {
 	streamOpenAICodexResponses,
 } from "@cornfield/ai/providers/openai-codex-responses";
 import type { Context, Model, ProviderSessionState } from "@cornfield/ai/types";
-import { getAgentDir, setAgentDir, TempDir } from "@cornfield/utils";
+import { getClientDir, setClientDir, TempDir } from "@cornfield/utils";
 
 const originalFetch = global.fetch;
-const originalAgentDir = getAgentDir();
+const originalAgentDir = getClientDir();
 const originalWebSocket = global.WebSocket;
 const originalCodexWebSocketRetryBudget = Bun.env.PI_CODEX_WEBSOCKET_RETRY_BUDGET;
 const originalCodexWebSocketRetryDelayMs = Bun.env.PI_CODEX_WEBSOCKET_RETRY_DELAY_MS;
@@ -28,7 +28,7 @@ function restoreEnv(name: string, value: string | undefined): void {
 afterEach(() => {
 	global.fetch = originalFetch;
 	global.WebSocket = originalWebSocket;
-	setAgentDir(originalAgentDir);
+	setClientDir(originalAgentDir);
 	restoreEnv("PI_CODEX_WEBSOCKET_RETRY_BUDGET", originalCodexWebSocketRetryBudget);
 	restoreEnv("PI_CODEX_WEBSOCKET_RETRY_DELAY_MS", originalCodexWebSocketRetryDelayMs);
 	restoreEnv("PI_CODEX_WEBSOCKET_IDLE_TIMEOUT_MS", originalCodexWebSocketIdleTimeoutMs);
@@ -40,7 +40,7 @@ afterEach(() => {
 describe("openai-codex streaming", () => {
 	it("streams SSE responses into AssistantMessageEventStream", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -151,7 +151,7 @@ describe("openai-codex streaming", () => {
 
 	it("includes service_tier in SSE payloads when requested", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -204,7 +204,7 @@ describe("openai-codex streaming", () => {
 
 	it("fails truncated SSE streams that never emit a terminal response event", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -268,7 +268,7 @@ describe("openai-codex streaming", () => {
 
 	it("surfaces 429 errors after retry budget checks without body reuse failures", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -326,7 +326,7 @@ describe("openai-codex streaming", () => {
 
 	it("retries transient model_error SSE events before surfacing an error", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -389,7 +389,7 @@ describe("openai-codex streaming", () => {
 
 	it("sets conversation_id/session_id headers and prompt_cache_key when sessionId is provided", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -489,7 +489,7 @@ describe("openai-codex streaming", () => {
 
 	it("rejects gpt-5.3-codex minimal reasoning effort instead of clamping", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -587,7 +587,7 @@ describe("openai-codex streaming", () => {
 
 	it("does not set conversation_id/session_id headers when sessionId is not provided", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -675,7 +675,7 @@ describe("openai-codex streaming", () => {
 
 	it("falls back to SSE when websocket connect fails", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
 			"utf8",
@@ -784,7 +784,7 @@ describe("openai-codex streaming", () => {
 
 	it("immediately falls back to SSE on fatal websocket connection errors", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -889,7 +889,7 @@ describe("openai-codex streaming", () => {
 
 	it("captures websocket handshake metadata and replays it on later SSE requests", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -1040,7 +1040,7 @@ describe("openai-codex streaming", () => {
 
 	it("includes service_tier in websocket payloads when requested", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -1176,7 +1176,7 @@ describe("openai-codex streaming", () => {
 
 	it("uses websocket v2 beta header when v2 mode is enabled", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 		Bun.env.PI_CODEX_WEBSOCKET_V2 = "1";
 
 		const payload = Buffer.from(
@@ -1307,7 +1307,7 @@ describe("openai-codex streaming", () => {
 
 	it("falls back to SSE when a prewarmed websocket never produces a first event", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 		Bun.env.PI_CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS = "10";
 		Bun.env.PI_CODEX_WEBSOCKET_RETRY_BUDGET = "0";
 
@@ -1421,7 +1421,7 @@ describe("openai-codex streaming", () => {
 
 	it("retries websocket stream closes before surfacing transport errors", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 		Bun.env.PI_CODEX_WEBSOCKET_RETRY_BUDGET = "1";
 		Bun.env.PI_CODEX_WEBSOCKET_RETRY_DELAY_MS = "1";
 
@@ -1570,7 +1570,7 @@ describe("openai-codex streaming", () => {
 
 	it("falls back to SSE when websocket becomes unavailable before stream start", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 		Bun.env.PI_CODEX_WEBSOCKET_RETRY_BUDGET = "0";
 		Bun.env.PI_CODEX_WEBSOCKET_RETRY_DELAY_MS = "1";
 
@@ -1685,7 +1685,7 @@ describe("openai-codex streaming", () => {
 
 	it("resets websocket append state after an aborted request closes the connection", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -1896,7 +1896,7 @@ describe("openai-codex streaming", () => {
 
 	it("resets websocket append state after websocket error events", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -2087,7 +2087,7 @@ describe("openai-codex streaming", () => {
 
 	it("falls back to SSE when websocket receives malformed JSON before completion", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -2189,7 +2189,7 @@ describe("openai-codex streaming", () => {
 
 	it("replays over SSE when websocket closes after buffered output without a terminal event", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -2310,7 +2310,7 @@ describe("openai-codex streaming", () => {
 
 	it("resets append state and stale turn headers when websocket requests diverge", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -2486,7 +2486,7 @@ describe("openai-codex streaming", () => {
 
 	it("reuses a prewarmed websocket connection across turns", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),
@@ -2656,7 +2656,7 @@ describe("openai-codex streaming", () => {
 
 	it("replays x-codex-turn-state on subsequent SSE requests", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
-		setAgentDir(tempDir.path());
+		setClientDir(tempDir.path());
 
 		const payload = Buffer.from(
 			JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acc_test" } }),

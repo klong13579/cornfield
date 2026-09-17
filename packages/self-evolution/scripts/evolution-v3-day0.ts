@@ -7,7 +7,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, isEnoent } from "@cornfield/utils";
+import { getDefaultAgentHome, isEnoent } from "@cornfield/utils";
 import { clearProjectEvolutionData } from "../src/clear-project-evolution";
 import { applyLearningsSeed, defaultLearningsSeedPath, readLearningsSeedFile } from "../src/learnings-seed";
 import { ensureMemorySummaryFromMemory } from "../src/memory/summary";
@@ -20,7 +20,7 @@ const cwdIdx = process.argv.indexOf("--cwd");
 const repoCwd = cwdIdx >= 0 ? path.resolve(process.argv[cwdIdx + 1] ?? process.cwd()) : process.cwd();
 const globalStore = process.argv.includes("--global-store");
 
-const agentDir = getAgentDir();
+const agentDir = getDefaultAgentHome();
 const memoryRoot = getMemoryRoot(agentDir, repoCwd, { globalStore });
 const evolutionDir = resolveEvolutionProjectionDir(repoCwd, globalStore);
 const memoryMdPath = path.join(memoryRoot, "MEMORY.md");

@@ -6,7 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir } from "@cornfield/utils";
+import { getClientDir } from "@cornfield/utils";
 
 export interface CustomShareResult {
 	/** URL to display/open (optional - script may handle everything itself) */
@@ -28,10 +28,10 @@ const SHARE_SCRIPT_CANDIDATES = ["share.ts", "share.js", "share.mjs"];
  * Get the path to the custom share script if it exists.
  */
 export function getCustomSharePath(): string | null {
-	const agentDir = getAgentDir();
+	const clientDir = getClientDir();
 
 	for (const candidate of SHARE_SCRIPT_CANDIDATES) {
-		const scriptPath = path.join(agentDir, candidate);
+		const scriptPath = path.join(clientDir, candidate);
 		if (fs.existsSync(scriptPath)) {
 			return scriptPath;
 		}

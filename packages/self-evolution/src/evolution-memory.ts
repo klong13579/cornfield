@@ -4,7 +4,7 @@
 import type { Database } from "bun:sqlite";
 import * as path from "node:path";
 import type { ExtensionCommandContext } from "@cornfield/coding-agent/extensibility/extensions";
-import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
+import { getDefaultAgentHome, isEnoent, logger } from "@cornfield/utils";
 import type { EmbeddingGenerator } from "./embedding";
 import { clearMemoryData, enqueueMemoryConsolidation } from "./memory/index";
 import { generateMemoryMd, loadSectionsFromDb } from "./memory/projection";
@@ -37,7 +37,7 @@ export async function runEvolutionMemorySubcommand(opts: RunEvolutionMemoryOptio
 	const parts = trimmed.split(/\s+/, 2);
 	const sub = parts[0]?.toLowerCase() || "stats";
 	const rest = parts.length > 1 ? parts.slice(1).join(" ").trim() : "";
-	const agentDir = getAgentDir();
+	const agentDir = getDefaultAgentHome();
 	const memoryRoot = getMemoryRoot(agentDir, opts.ctx.cwd, { globalStore: opts.globalStore });
 
 	switch (sub) {

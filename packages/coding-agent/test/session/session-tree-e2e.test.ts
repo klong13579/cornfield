@@ -26,7 +26,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IntercomBroker } from "@cornfield/gateway/src/intercom/broker-server";
-import { getAgentDir, isEnoent } from "@cornfield/utils";
+import { getDefaultAgentHome, isEnoent } from "@cornfield/utils";
 import { IntercomClient } from "../../src/intercom-extension/broker/client";
 import { createIntercomRegistrationProbe } from "../../src/intercom-extension/child-session-edge";
 import {
@@ -82,14 +82,14 @@ async function liveChildPids(): Promise<number[]> {
 /**
  * The Agent home *this* process runs as.
  *
- * Read at call time, not from `getAgentDir()` alone: that is a module-load-time
- * cache, and this file points `CORNFIELD_AGENT_DIR` at a temp dir in `beforeAll`.
+ * Read at call time, not from `getDefaultAgentHome()` alone: that is a module-load-time
+ * cache, and this file points `CORNFIELD_CLIENT_DIR` at a temp dir in `beforeAll`.
  * Handing the child the cached value would launch it as the developer's real
  * Agent — right settings, real intercom broker, and a `parentId` nobody in this
  * test is watching, so the child registers somewhere else entirely.
  */
 function ownAgentDir(): string {
-	return process.env.CORNFIELD_AGENT_DIR?.trim() || getAgentDir();
+	return process.env.CORNFIELD_CLIENT_DIR?.trim() || getDefaultAgentHome();
 }
 
 function makeSupervisor(): ChildSessionSupervisor {
@@ -126,8 +126,8 @@ describeE2E("Session tree end to end with a real broker and the real binary", ()
 
 	beforeAll(async () => {
 		runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-tree-"));
-		previousAgentDir = process.env.CORNFIELD_AGENT_DIR;
-		process.env.CORNFIELD_AGENT_DIR = path.join(runtimeDir, "agent");
+		previousAgentDir = process.env.CORNFIELD_CLIENT_DIR;
+		process.env.CORNFIELD_CLIENT_DIR = path.join(runtimeDir, "agent");
 
 		for (const name of ["config.yml", "models.yml", "auth.db"] as const) {
 			try {
@@ -174,7 +174,7 @@ describeE2E("Session tree end to end with a real broker and the real binary", ()
 		}
 		await parent?.disconnect().catch(() => {});
 		broker?.stop();
-		process.env.CORNFIELD_AGENT_DIR = previousAgentDir;
+		process.env.CORNFIELD_CLIENT_DIR = previousAgentDir;
 		await fs.rm(runtimeDir, { recursive: true, force: true }).catch(() => {});
 	});
 

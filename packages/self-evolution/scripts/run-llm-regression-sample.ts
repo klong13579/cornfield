@@ -9,7 +9,6 @@ import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
  * Usage:
  *   OMP_REGRESSION_REPLAY=llm bun packages/self-evolution/scripts/run-llm-regression-sample.ts
  */
-import { getAgentDir } from "@cornfield/utils";
 import { createRegressionReplayBackend } from "../src/regression/replay-backend";
 import { clearRegressionReplayRuntime, setRegressionReplayRuntime } from "../src/regression/replay-runtime";
 import { selectFixturesForSkill } from "../src/regression/select-fixtures";
@@ -31,7 +30,7 @@ const fixtureStore = new SqliteRegressionFixtureStore(db);
 const trialStore = new SqliteRegressionTrialStore(db);
 
 const settings = await Settings.init({ cwd });
-const authStorage = await discoverAuthStorage(getAgentDir());
+const authStorage = await discoverAuthStorage();
 const registry = new ModelRegistry(authStorage);
 const available = registry.getAvailable();
 const role = resolveRoleSelection(["smol", "default"], settings, available, registry);

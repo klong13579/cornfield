@@ -7,7 +7,7 @@
  */
 import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
 import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
-import { getAgentDir } from "@cornfield/utils";
+import { getDefaultAgentHome } from "@cornfield/utils";
 import { $ } from "bun";
 import { enqueueMemoryConsolidation } from "../src/memory/index";
 import { ensureMemorySummaryFromMemory } from "../src/memory/summary";
@@ -17,7 +17,7 @@ const cwdIdx = process.argv.indexOf("--cwd");
 const repoCwd = cwdIdx >= 0 ? (process.argv[cwdIdx + 1] ?? process.cwd()) : process.cwd();
 const runOmp = process.argv.includes("--run-omp");
 
-const agentDir = getAgentDir();
+const agentDir = getDefaultAgentHome();
 const memoryRoot = getMemoryRoot(agentDir, repoCwd);
 
 async function checkSummary(label: string): Promise<void> {
@@ -54,7 +54,7 @@ console.log("enqueue: Phase2 job dirtied for", repoCwd);
 await checkSummary("after refresh");
 
 if (runOmp) {
-	const authStorage = await discoverAuthStorage(agentDir);
+	const authStorage = await discoverAuthStorage();
 	const registry = new ModelRegistry(authStorage);
 	const available = registry.getAvailable();
 	const model = available.find(m => m.provider === "alibaba-coding-plan");

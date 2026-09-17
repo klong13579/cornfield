@@ -11,7 +11,7 @@ import { ModelRegistry } from "@cornfield/coding-agent/config/model-registry";
 import { Settings } from "@cornfield/coding-agent/config/settings";
 import { discoverAuthStorage } from "@cornfield/coding-agent/sdk";
 import type { AgentSession } from "@cornfield/coding-agent/session/agent-session";
-import { getAgentDir } from "@cornfield/utils";
+import { getDefaultAgentHome } from "@cornfield/utils";
 import { enqueueMemoryConsolidation, runMemoryMaintenanceOnce } from "../src/memory/index";
 import { getMemoryRoot } from "../src/paths";
 
@@ -26,9 +26,9 @@ function maskKey(key: string | undefined): string {
 	return `${key.slice(0, 8)}…${key.slice(-4)}`;
 }
 
-const agentDir = getAgentDir();
+const agentDir = getDefaultAgentHome();
 const settings = await Settings.init({ cwd: repoCwd, agentDir });
-const authStorage = await discoverAuthStorage(agentDir);
+const authStorage = await discoverAuthStorage();
 const registry = new ModelRegistry(authStorage);
 
 const available = registry.getAvailable();

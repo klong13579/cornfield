@@ -15,7 +15,7 @@ import { Settings } from "@cornfield/coding-agent/config/settings";
 import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { _resetToolNameWarningsForTest } from "@cornfield/coding-agent/tools/builtin-names";
 import { createReportToolIssueTool, getAutoQaDbPath } from "@cornfield/coding-agent/tools/report-tool-issue";
-import { getConfigRootDir, logger, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, logger, setClientDir } from "@cornfield/utils";
 
 interface Row {
 	id: number;
@@ -28,31 +28,31 @@ interface Row {
 	exported: number;
 }
 
-let testAgentDir = "";
-const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+let testClientDir = "";
+const originalClientDir = process.env.CORNFIELD_CLIENT_DIR;
+const fallbackClientDir = path.join(getConfigRootDir(), "agent");
 
 beforeEach(async () => {
-	testAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-autoqa-"));
-	setAgentDir(testAgentDir);
+	testClientDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-autoqa-"));
+	setClientDir(testClientDir);
 	_resetToolNameWarningsForTest();
 	vi.spyOn(logger, "warn").mockImplementation(() => {});
 });
 
 afterEach(async () => {
 	vi.restoreAllMocks();
-	if (originalAgentDir) {
-		setAgentDir(originalAgentDir);
+	if (originalClientDir) {
+		setClientDir(originalClientDir);
 	} else {
-		setAgentDir(fallbackAgentDir);
-		delete process.env.CORNFIELD_AGENT_DIR;
+		setClientDir(fallbackClientDir);
+		delete process.env.CORNFIELD_CLIENT_DIR;
 	}
-	await fs.rm(testAgentDir, { recursive: true, force: true });
+	await fs.rm(testClientDir, { recursive: true, force: true });
 });
 
 function createSession(sessionId: string | null): ToolSession {
 	return {
-		cwd: testAgentDir,
+		cwd: testClientDir,
 		hasUI: false,
 		getSessionFile: () => null,
 		getSessionSpawns: () => null,

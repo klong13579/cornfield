@@ -10,8 +10,8 @@
  *   3. 之后再不带 `persist` 改档 → 文件里仍是第 2 步写下的值（不是「写了一次就随便改」）。
  *
  * 落点也一并钉住（F6 要把两份 config 收成一份，先要看清今天写的是哪一份）：
- * default agent 的配置根是全局 agent 目录，即 `<HOME>/.cornfield/agent/config.yml`；
- * 同目录下的 `.cornfield/config.yml`（Settings 的项目覆盖层）不应被这条命令创建。
+ * default agent 的配置根是它的家，即 `<HOME>/cf-workspace/config.yml`（doc §12）；
+ * 家里的 `.cornfield/config.yml`（Settings 的项目覆盖层，存在时才是落点）不应被这条命令创建。
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -29,8 +29,8 @@ let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let info = { url: "", token: "" };
 
-/** default agent 的配置根：`Settings.init()` 的 agentDir（全局 agent 目录），不是 serve 的 cwd。 */
-const agentDir = (): string => path.join(isolatedHome, ".cornfield", "agent");
+/** default agent 的配置根：`Settings.init()` 的 agentDir（它的家），不是 serve 的 cwd。 */
+const agentDir = (): string => path.join(isolatedHome, "cf-workspace");
 /** Settings 的项目覆盖层（`<agentDir>/.cornfield/config.yml`）—— 本命令不该碰它。 */
 const projectConfigPath = (): string => path.join(agentDir(), ".cornfield", "config.yml");
 

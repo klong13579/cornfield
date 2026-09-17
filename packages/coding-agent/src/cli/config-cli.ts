@@ -5,7 +5,7 @@
  * Uses the settings schema as the source of truth for available settings.
  */
 
-import { APP_NAME, getAgentDir } from "@cornfield/utils";
+import { APP_NAME, getDefaultAgentHome } from "@cornfield/utils";
 import chalk from "chalk";
 import {
 	getDefault,
@@ -381,7 +381,7 @@ async function handleReset(key: string | undefined, flags: { json?: boolean }): 
 }
 
 function handlePath(): void {
-	console.log(getAgentDir());
+	console.log(getDefaultAgentHome());
 }
 
 // =============================================================================

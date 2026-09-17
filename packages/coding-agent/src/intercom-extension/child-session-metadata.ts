@@ -5,7 +5,7 @@
  * environment variables only — no handshake frame carries them: who its parent
  * is (the orchestrator edge, read back by `./index.ts`) and which Agent it must
  * run as (the config home the SDK boots from, read back by
- * `@cornfield/utils#getAgentDir`). The names and their meaning therefore live
+ * `@cornfield/utils#getDefaultAgentHome`). The names and their meaning therefore live
  * here, once, for every writer:
  *
  *   - `./project-agent.ts` — a child launched into a Herdr pane (shell prefix),
