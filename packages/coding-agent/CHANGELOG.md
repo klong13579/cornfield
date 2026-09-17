@@ -26,6 +26,7 @@
 
 ### Fixed
 
+- **serve 内建 default meta 的 `agentDir` 兜底从 `process.cwd()` 改成 `getDefaultAgentHome()`**（`src/server/wire-server.ts`、`test/wire-server-default-fallback.integration.test.ts`、`test/wire-server-git.integration.test.ts`）：serve 启动自建的 default 元数据以前随启动目录走 —— 你在哪个仓库里启 serve 就拿哪个路径作为 agentDir，在一个仓库里启、到另一个仓库里连，会读到不该读的会话与配置。兜底改为 `<HOME>/.cornfield/agents/default`（注册表赢的不变式保留：声明了 default 条目时 `loadMetasSafe()` 之后的 `registerMeta` 仍会覆盖内建那条；覆盖后的结果要么是注册表条目、要么是 default home，都是同一个识别身份）。**fixture 跟随**：`wire-server-git` 两个 describe 在隔离 HOME 里额外 seed 一份 `projects.json`，把临时 git 仓库声明为 Project —— 因为内建 agentDir 不再是仓库根，git 命令需要 `resolveWorkRoot` 解析到 `projectRoot = repo` 才能跑在仓库上，未绑定 Project 时回落到默认家（不是 git repo）会失败。回归 `wire-server-default-fallback` 两条双断言：`registry.json` 不含 default 时内建 `agentDir === <HOME>/.cornfield/agents/default` 且 ≠ `process.cwd()`；包含 default + hr 时 default 仍是 default home、列表里 hr 出现（证明 `loadMetasSafe()` 循环与 `registerMeta` 覆盖都走过）。
 - **模型可见性与停用名单按 agent，不再吃全局单例**（`src/config/model-registry.ts`, `src/session/agent-session.ts`, `src/server/wire-server.ts`, `src/sdk.ts`）：default agent 的 `disabledProviders: [narwal-plan]` 此前会让**所有** agent 的模型选择器都看不到 narwal-plan（列表与名单都读全局 `Settings.instance` / 模块级 `settings` 代理）。现在 `ModelRegistry.getAvailable(settings?)` / `#isModelAvailable(model, settings)` 接受调用方自己的 Settings（缺省仍是模块级 settings，非会话调用方行为不变），会话侧传自己的那份；停用名单也写进目标 agent 自己的配置，而不是写到 default 的 `config.yml`（写错人 + 读侧读不到）。
 
 - **骨架发的 `modelRoles` 是旧键**（`src/skeleton/assets/.cornfield/config.yml`）：活键是 `modelRoutes`，旧键只在读入迁移时被认一次（并会重写整个文件、丢掉注释）。新建的 agentDir 现在直接写活键。
