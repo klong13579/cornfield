@@ -8,6 +8,10 @@ Oh My Pi 是一个可进化的 AI 编程助手（terminal coding agent），同�
 处理用户消息并调用工具的 AI 助手。可以是终端模式（cornfield CLI）或网关模式（通过 AgentBridge 以 RPC 协议驱动）。Agent 的核心循环（message → LLM → tool calls → result → next turn）由 @cornfield/agent 实现。
 _Avoid_: Bot, assistant, chatbot
 
+### Agent Footprint
+一个 Agent 实例占用的全部系统资源：自身进程，加上它自行拉起的子进程（语言服务、MCP、Python 内核）。多实例场景（squad 等）的总开销是 Σ Agent Footprint，所以单位成本与实例数都是优化对象。度量看 phys_footprint，不看 RSS —— 同一进程实测 RSS 与 footprint 会朝相反方向变化。
+_Avoid_: 内存占用, memory usage, RSS
+
 ### Session
 Agent 与用户之间的一段有边界对话。以 JSONL 文件持久化，由 pi-coding-agent 的 session 模块管理。终端会话按日期/时间分层存储；网关会话以 conversationId 命名。Session 是自我演化的基本分析单元。
 _Avoid_: Chat, thread, conversation
