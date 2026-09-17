@@ -89,6 +89,28 @@ export type WireEditEntry = WireReplaceEditEntry | WirePatchEditEntry | WireHash
 export type ConfigScope = "global" | "project";
 
 /**
+ * 单个 prompt 源（`get_agent_prompt_sources` 的一项）。
+ *
+ * `exists` 是这一项的必报字段：缺失的源也在清单里 —— 这个视图的用处就是看出「该建哪个 /
+ * 哪个没了」，只列存在的等于把缺失本身藏起来。
+ */
+export interface AgentPromptSourceDto {
+	/** agentDir 内相对路径。 */
+	path: string;
+	/** 展示名。 */
+	title: string;
+	/** 它在运行时真实起的作用。 */
+	description: string;
+	/** 该文件此刻在 agentDir 里是否存在。 */
+	exists: boolean;
+}
+
+/** `get_agent_prompt_sources` 响应：目标 agentDir 的 prompt 源清单（按骨架的写出顺序，不是按存在与否过滤）。 */
+export interface AgentPromptSourcesDto {
+	sources: AgentPromptSourceDto[];
+}
+
+/**
  * Multiplex 命令 — P3 升级后每条命令均可带 `sessionId` 参数定向 agent。
  */
 export type MultiplexCommand =
@@ -142,7 +164,14 @@ export type MultiplexCommand =
 	| { id?: string; type: "get_available_thinking_levels"; sessionId?: string }
 	| { id?: string; type: "cycle_role_models"; sessionId?: string; roleOrder: string[] }
 	// Thinking
-	| { id?: string; type: "set_thinking_level"; sessionId?: string; level: ThinkingLevel }
+	/**
+	 * 设置会话的 thinking level。
+	 *
+	 * `persist` 缺省 = 只改本次会话（与随时切档同语义）；`persist:true` = 把生效档位一并写进目标
+	 * agent 的 `<agentDir>/config.yml`（`defaultThinkingLevel`），重启后仍是它。内核只在档位真的
+	 * 发生变化时写盘（见 `AgentSession#setThinkingLevel`），所以 persist:true 也可能什么都不写。
+	 */
+	| { id?: string; type: "set_thinking_level"; sessionId?: string; level: ThinkingLevel; persist?: boolean }
 	| { id?: string; type: "cycle_thinking_level"; sessionId?: string }
 	// P3：plan mode 状态与上下文
 	| { id?: string; type: "set_plan_mode"; sessionId?: string; enabled: boolean; planFilePath?: string }
@@ -562,6 +591,18 @@ export type WireExtensionCommand =
 	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown; scope?: ConfigScope }
 	/** 工具开关语义视图（get_config 的域化封装）：返回目标 agent 每个工具的 enabled 开关 + python 工具模式。 */
 	| { id?: string; type: "get_tool_switches"; sessionId?: string }
+	/**
+	 * 读目标 agent 的 prompt 源清单（AgentPromptSourcesDto）：agentDir 里哪些文件会进模型上下文。
+	 *
+	 * 清单来自 agentDir 文件的单一真相（`skeleton/agent-dir-files.ts` 的 `surface:"prompt"` 子集：
+	 * always-on 的 5 个 + 项目级人设 user.md + prompt-includes.json + .cornfield/SYSTEM.md），
+	 * 不是每个前端各抄一份会漂移的表。
+	 *
+	 * 每一项都报 `exists`（缺的那项仍在清单里）；只列存在的等于把缺失本身藏起来。
+	 * 不定向 attached session —— 工作面是 agentDir，`sessionId` 只用来定位 agent（与 get_config
+	 * 同一条定位逻辑，缺省 = 本连接焦点）。
+	 */
+	| { id?: string; type: "get_agent_prompt_sources"; sessionId?: string }
 	/**
 	 * 会话诊断（P5 会话诊断）：对一条历史会话触发异步诊断。
 	 * 流程：serve 派生独立 `cornfield --mode rpc` 子进程（默认配置模型）→ 子 agent 按

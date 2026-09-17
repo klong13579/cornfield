@@ -1,5 +1,5 @@
 /**
- * `omp agent` subcommand handlers.
+ * `cornfield agent` subcommand handlers.
  *
  * Pure functions (no Command class) so they can be unit-tested without
  * standing up the CLI parser. The Command class in `../commands/agent.ts`
@@ -25,7 +25,9 @@ import {
 	SKELETON_FILES,
 	unregisterAgent,
 } from "@cornfield/coding-agent/skeleton";
+import { APP_NAME } from "@cornfield/utils";
 import { migrateLegacyModelConfig } from "../config/model-routes";
+import { agentDirFilesWithRequirement } from "../skeleton/agent-dir-files";
 import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
@@ -107,7 +109,7 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	const { ensureWorkspace } = await import("../skeleton/workspace");
 	await ensureWorkspace(agentDir, { name: args.name });
 
-	// Persist the (name, path) mapping so `omp agent list` / `show` can find
+	// Persist the (name, path) mapping so `cornfield agent list` / `show` can find
 	// this agentDir regardless of where it lives (default `~/.cornfield/agents/`,
 	// custom `--dir`, nested account id like `ops/hr`).
 	// Runs after ensureWorkspace so the v2 cache fields are filled from the
@@ -156,7 +158,7 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 
 	// Step 2: scan the directory (default `~/.cornfield/agents/`, or `--dir` if given).
 	// This picks up legacy agentDirs created before the registry existed and entries
-	// the user dropped into the default location without going through `omp agent init`.
+	// the user dropped into the default location without going through `cornfield agent init`.
 	const root = path.resolve(args.dir ?? path.join(homeDir(), ".cornfield", "agents"));
 	let entries: import("node:fs").Dirent[];
 	try {
@@ -449,17 +451,13 @@ export interface ValidateResult {
 	};
 }
 
-const ALWAYS_ON: ReadonlyArray<string> = [
-	"AGENTS.md",
-	"mission.md",
-	"TOOLS.md",
-	"TODO.md",
-	"knowledge/external-workspaces.md",
-];
+// 三个校验集从 agentDir 文件的单一真相推导（`skeleton/agent-dir-files.ts`），
+// 而不是在这里再手抄一份会漂移的清单。元素与顺序即骨架的写出顺序。
+const ALWAYS_ON: ReadonlyArray<string> = agentDirFilesWithRequirement("always-on");
 
-const RUNTIME_HARD_DEPS: ReadonlyArray<string> = [".cornfield/config.yml"];
+const RUNTIME_HARD_DEPS: ReadonlyArray<string> = agentDirFilesWithRequirement("hard-dep");
 
-const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gitignore", ".cornfield/SYSTEM.md"];
+const RUNTIME_RECOMMENDED: ReadonlyArray<string> = agentDirFilesWithRequirement("recommended");
 
 export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResult> {
 	const agentDir = path.resolve(args.agentDir);
@@ -872,7 +870,7 @@ export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<Reco
 export function renderList(summaries: AgentSummary[], json: boolean): string {
 	if (json) return JSON.stringify(summaries, null, 2);
 	if (summaries.length === 0) {
-		return "No agents found. Run `omp agent init <name>` to create one.";
+		return `No agents found. Run \`${APP_NAME} agent init <name>\` to create one.`;
 	}
 	const colGap = 2;
 	const header: [string, string, string, string] = ["NAME", "AGENT_DIR", "STATUS", "REG"];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { WireCommand, WireCommandOfType } from "../src/commands";
+import type { ThinkingLevel } from "@cornfield/agent";
+import type { AgentPromptSourcesDto, WireCommand, WireCommandOfType } from "../src/commands";
 import type { WireSessionIndexEntry } from "../src/frames";
 import type {
 	EvolvedSkillDto,
@@ -348,6 +349,27 @@ const _projectSourceShape: _Equal<SessionProjectSourceDto, "session" | "cwd" | "
 const _projectListSourceShape: _Equal<ProjectListDto["currentProjectSource"], SessionProjectSourceDto | undefined> =
 	true;
 
+// ── F3：thinking 档位的写盘开关（看板选了不落盘 → 重启回退） ──
+
+// persist 可选（老客户端不带 = 只改会话，行为不变）；带了就真的落到 <agentDir>/config.yml。
+const _setThinkingShape: _Equal<
+	WireCommandOfType<"set_thinking_level">,
+	{ id?: string; type: "set_thinking_level"; sessionId?: string; level: ThinkingLevel; persist?: boolean }
+> = true;
+
+// ── F5：agentDir 的 prompt 源清单（单一真相） ──
+
+const _getAgentPromptSourcesShape: _Equal<
+	WireCommandOfType<"get_agent_prompt_sources">,
+	{ id?: string; type: "get_agent_prompt_sources"; sessionId?: string }
+> = true;
+
+// `exists` 是必报字段（不是可选）：缺的源也得报出「它不存在」，否则调用方无从发现缺失。
+const _agentPromptSourceShape: _Equal<
+	AgentPromptSourcesDto["sources"][number],
+	{ path: string; title: string; description: string; exists: boolean }
+> = true;
+
 // ── 运行时命令清单快照 ──
 
 const COMMAND_TYPES = [
@@ -470,6 +492,7 @@ const COMMAND_TYPES = [
 	"get_config",
 	"set_config",
 	"get_tool_switches",
+	"get_agent_prompt_sources",
 	// 模型控制中心（#02 全量目录 / #03 Provider 接入 / #05 配置作用域）
 	"get_model_catalog",
 	"get_providers",
@@ -585,6 +608,18 @@ describe("WireCommand shape lock", () => {
 		expect(bound.currentProjectSource).toBe("session");
 	});
 
+	it("get_agent_prompt_sources：缺的那项也留在清单里（exists 逐项必报）", () => {
+		const dto: AgentPromptSourcesDto = {
+			sources: [
+				{ path: "AGENTS.md", title: "硬约束与文件地图", description: "启动时无条件读。", exists: true },
+				{ path: "TODO.md", title: "当前任务看板", description: "随进展更新。", exists: false },
+			],
+		};
+		// 不存在的源没被裁掉 —— 调用方正是靠它看出「该建哪个」。
+		expect(dto.sources.map(source => source.exists)).toEqual([true, false]);
+		expect(dto.sources.map(source => source.path)).toEqual(["AGENTS.md", "TODO.md"]);
+	});
+
 	it("covers every type in the union at compile time", () => {
 		// 编译期 _noMissing/_noExtra 断言；运行时只验证清单自洽。
 		expect(COMMAND_TYPES).toContain("set_mcp_server");
@@ -596,5 +631,6 @@ describe("WireCommand shape lock", () => {
 		expect(COMMAND_TYPES).toContain("delete_project");
 		expect(COMMAND_TYPES).toContain("git_changes");
 		expect(COMMAND_TYPES).toContain("get_evolved_skills");
+		expect(COMMAND_TYPES).toContain("get_agent_prompt_sources");
 	});
 });

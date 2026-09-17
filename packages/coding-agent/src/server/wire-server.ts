@@ -61,6 +61,7 @@ import type { AgentSession } from "../session/agent-session";
 import { getDefaultSessionDirName } from "../session/session-manager";
 import type { SessionStore } from "../session/session-store";
 import { type ResolvedSessionWorkspace, resolveSessionWorkspace } from "../session/session-workspace";
+import { AGENT_DIR_PROMPT_FILES } from "../skeleton/agent-dir-files";
 import { resolveListenProvenance } from "../stt/listen-provenance";
 import type { ListenProvenance } from "../stt/listen-service";
 import {
@@ -1496,6 +1497,32 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					return;
 				}
+				// ── agentDir 的 prompt 源清单 ──
+				// 工作面是 agentDir（不是会话），所以与 get_config 同一层：只查注册表、不 attach。
+				// 清单本身来自 agentDir 文件的单一真相（skeleton/agent-dir-files.ts），前端不另抄一份。
+				case "get_agent_prompt_sources": {
+					const agentId = agentOf(ctx, command.sessionId);
+					const meta = registry.getMeta(agentId);
+					if (!meta) {
+						fail(`unknown agent: ${agentId}`);
+						return;
+					}
+					try {
+						// 逐项报 exists：缺的那一项也在这份清单里（不裁成「存在的那些」）。
+						const sources = await Promise.all(
+							AGENT_DIR_PROMPT_FILES.map(async file => ({
+								path: file.relPath,
+								title: file.title,
+								description: file.description,
+								exists: await Bun.file(path.join(meta.agentDir, file.relPath)).exists(),
+							})),
+						);
+						done({ sources });
+					} catch (err) {
+						fail(`get_agent_prompt_sources failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
 
 				default:
 					break;
@@ -2062,7 +2089,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 
 				// ── Thinking ──
 				case "set_thinking_level": {
-					session.setThinkingLevel(command.level);
+					// persist 缺省 = 只改本次会话（P1 行为不变）；persist:true 时内核把生效档位写进目标
+					// agent 的 <agentDir>/config.yml（defaultThinkingLevel），所以「看板上选的档位」重启后还在。
+					session.setThinkingLevel(command.level, command.persist === true);
 					sessionDone();
 					break;
 				}
