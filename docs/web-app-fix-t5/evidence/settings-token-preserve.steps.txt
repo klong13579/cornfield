@@ -1,0 +1,7 @@
+step 1 eval localStorage.setItem('cornfield.serve.connection', JSON.stringify({ wsUrl: 'ws://127.0.0.1:7891/ws', token: 't' + 'x'.repeat(31) })); 'seeded 32-char synthetic token' → "seeded 32-char synthetic token"
+step 2 eval JSON.parse(localStorage.getItem('cornfield.serve.connection')).token.length → 32
+
+──── 点「保存并重连」（Token 输入框保持空）——修复后不应把已存 token 清成空串 ────
+step 4 click @button=保存并重连 → ok
+step 5 wait 2000ms
+step 6 eval (() => { const c = JSON.parse(localStorage.getItem('cornfield.serve.connection')); return { tokenExists: typeof c.token === 'string' && c.token.length > 0, tokenLength: (c.token ?? '').length }; })() → {"tokenExists":true,"tokenLength":32}
