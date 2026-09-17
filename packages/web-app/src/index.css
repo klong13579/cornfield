@@ -620,12 +620,25 @@ details[open] > summary.chip {
 	cursor: pointer;
 	transition: all var(--ease);
 }
-.cbtn:hover {
+.cbtn:not(:disabled):hover {
 	background: var(--color-surface-3);
 	color: var(--color-ink);
 }
-.cbtn:active {
+.cbtn:not(:disabled):active {
 	transform: scale(0.95);
+}
+.cbtn:disabled {
+	opacity: 0.45;
+	color: var(--color-ink-faint);
+	cursor: not-allowed;
+	transform: none;
+}
+/* 原生输入控件禁用态：与可用态可见差异 + 非指针光标 */
+input:disabled,
+textarea:disabled,
+select:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 .link {
 	color: var(--color-ink-muted);
