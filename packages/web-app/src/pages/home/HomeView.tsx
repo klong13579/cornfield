@@ -8,9 +8,10 @@ import { attributionTextOf, sessionAttributionOf } from "../../lib/project-read-
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import { AGENT_SECTION_TITLE, composerPlaceholder, envSummaryText, shouldSubmitOnEnter } from "./home-logic";
 
 /**
- * Home 欢迎页（FR-9，EmptyState：Greeting → 快速会话 → Suggestions → 最近 Agent）。
+ * Home 欢迎页（FR-9，EmptyState：Greeting → 快速会话 → Suggestions → 已注册 Agent）。
  *
  * 快速会话不是「另一个聊天窗口」：它就是本连接当前焦点会话本身，只是把最近一轮搬到首页。
  * 发出去的消息由 serve 定向下拉的那个 Agent 服务，回复直接来自权威快照/流式帧 ——
@@ -30,6 +31,8 @@ const SUGGESTIONS = [
 
 // 人物配色
 const FACE_COLORS = ["#e4e4e7", "#d4d4d8", "#ececee"];
+
+const CONNECT_TIMEOUT_MS = 10_000;
 
 function timeGreeting(): string {
 	const h = new Date().getHours();
@@ -65,6 +68,8 @@ export function HomeView(): React.JSX.Element {
 	const [query, setQuery] = useState("");
 	const [userName, setUserName] = useState<string | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
+	const [connecting, setConnecting] = useState(false);
+	const [connectError, setConnectError] = useState<string | null>(null);
 
 	// 问候名与快速会话的对话区使用同一个焦点 Agent（不再逐个 agent 试读）
 	const agentId = activeAgentIdOf(view);
@@ -102,6 +107,13 @@ export function HomeView(): React.JSX.Element {
 		return () => clearTimeout(t);
 	}, []);
 
+	useEffect(() => {
+		if (view.connected) {
+			setConnectError(null);
+			setConnecting(false);
+		}
+	}, [view.connected]);
+
 	const exchange = useMemo(() => lastExchange(view), [view]);
 	const project = useMemo(() => attributionTextOf(sessionAttributionOf(view)), [view]);
 	const canSend = view.connected && !view.isStreaming && query.trim().length > 0;
@@ -121,7 +133,24 @@ export function HomeView(): React.JSX.Element {
 		setQuery("");
 	};
 
-	const recent = view.agents.slice(0, 3);
+	const agents = view.agents;
+
+	/** 断连态重试：进行中反馈 + 失败原因上屏。connect 在传输层失败时可能不 settle，用超时兜底。 */
+	const retry = async (): Promise<void> => {
+		if (connecting) return;
+		setConnecting(true);
+		setConnectError(null);
+		const timeout = new Promise<never>((_, reject) => {
+			setTimeout(() => reject(new Error("连接超时：serve 未响应，请确认它已启动后重试")), CONNECT_TIMEOUT_MS);
+		});
+		try {
+			await Promise.race([store.connect(), timeout]);
+		} catch (err) {
+			setConnectError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setConnecting(false);
+		}
+	};
 
 	return (
 		<div className="flex h-full min-h-0 flex-col items-center justify-center gap-7 overflow-y-auto px-8 py-12">
@@ -137,24 +166,24 @@ export function HomeView(): React.JSX.Element {
 					</div>
 					<div className="mt-2 flex items-center justify-center gap-2 text-[14px] text-ink-subtle">
 						<span className="conn-dot" />
-						{view.env
-							? `${view.env.repos} · ${view.env.branch} · ${view.env.activeAgentCount} agent 运行中 · ${view.env.pendingCronCount} 定时任务待执行`
-							: view.connected
-								? "本地 serve"
-								: "未连接"}
+						{view.env ? envSummaryText(view.env) : view.connected ? "本地 serve" : "未连接"}
 					</div>
 					{!view.connected && (
-						<div className="mt-3 flex items-center justify-center gap-3 text-[12px] text-ink-faint">
-							<button
-								type="button"
-								onClick={() => void store.connect()}
-								className="rounded border border-hairline bg-surface-2 px-3 py-1.5 text-ink-muted transition-colors hover:border-hairline-strong hover:text-ink"
-							>
-								重试
-							</button>
-							<Link to="/settings" className="text-ink-muted underline-offset-2 hover:underline">
-								去设置
-							</Link>
+						<div className="mt-3 flex flex-col items-center justify-center gap-2 text-[12px] text-ink-faint">
+							<div className="flex items-center justify-center gap-3">
+								<button
+									type="button"
+									onClick={() => void retry()}
+									disabled={connecting}
+									className="rounded border border-hairline bg-surface-2 px-3 py-1.5 text-ink-muted transition-colors hover:border-hairline-strong hover:text-ink disabled:opacity-60"
+								>
+									{connecting ? "连接中…" : "重试"}
+								</button>
+								<Link to="/settings" className="text-ink-muted underline-offset-2 hover:underline">
+									去设置
+								</Link>
+							</div>
+							{connectError && <span className="text-danger">{connectError}</span>}
 						</div>
 					)}
 				</div>
@@ -234,10 +263,10 @@ export function HomeView(): React.JSX.Element {
 							value={query}
 							onChange={e => setQuery(e.target.value)}
 							onKeyDown={e => {
-								if (e.key === "Enter") send();
+								if (shouldSubmitOnEnter(e.key, e.nativeEvent.isComposing)) send();
 							}}
 							disabled={!view.connected || view.isStreaming}
-							placeholder={agent ? `给 ${agent.name} 发一条指令…` : "给研发助手发一条指令…"}
+							placeholder={composerPlaceholder(agent?.name)}
 							className="flex-1 border-none bg-transparent py-1.5 text-[14px] text-ink outline-none placeholder:text-ink-faint disabled:opacity-60"
 						/>
 						<button
@@ -278,15 +307,14 @@ export function HomeView(): React.JSX.Element {
 					))}
 				</div>
 
-				{/* 最近活跃 */}
-				{recent.length > 0 && (
+				{/* 已注册 Agent：点击进入该 agent 会话（attach + switch）。没有「活跃」数据，不冒充「最近活跃」。 */}
+				{agents.length > 0 && (
 					<div className="w-full">
 						<div className="mb-2.5 text-center text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-							最近活跃
+							{AGENT_SECTION_TITLE}
 						</div>
-						<div className="flex gap-2.5">
-							{/* 最近活跃 agent：点击进入该 agent 会话（attach + switch） */}
-							{recent.map((item, i) => (
+						<div className="flex flex-wrap justify-center gap-2.5">
+							{agents.map((item, i) => (
 								<button
 									type="button"
 									key={item.id}
@@ -302,12 +330,7 @@ export function HomeView(): React.JSX.Element {
 									>
 										{item.face}
 									</span>
-									<span className="min-w-0">
-										<span className="block text-[13px] font-medium text-ink">{item.name}</span>
-										<span className="block truncate text-[11px] text-ink-faint">
-											{item.lastAction ?? "—"}
-										</span>
-									</span>
+									<span className="min-w-0 truncate text-[13px] font-medium text-ink">{item.name}</span>
 									<span
 										className={`ml-auto shrink-0 ${item.status === "online" ? "conn-dot" : "conn-dot warn animate-pulse"}`}
 									/>
