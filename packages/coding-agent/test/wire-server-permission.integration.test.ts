@@ -1,15 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PiClient } from "@cornfield/client";
 import type { WireServerEvent } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { type IsolatedServeHandle, startIsolatedServe } from "./wait-for-serve";
 
 /**
  * 审批 shell e2e — 真 serve 子进程 + pi-client（P2-W1-4 的 inject 触发路径）。
  * 不触发 LLM：inject_permission 是 mock 审批源（测试通道），只验
  *   inject → permission_request push（广播）→ permission_respond → inject response 回 choice。
+ *
+ * serve 走夹具的隔离 HOME（`startIsolatedServe`）：真 HOME 的 registry.json 里有 `default` 时
+ * 工作根会被换掉。cwd 与改动前一致（仍是进程 cwd），改的只有 HOME。
  */
 
-let proc: ReturnType<typeof Bun.spawn> | undefined;
+let served: IsolatedServeHandle | undefined;
 const serveInfo: { url: string; token: string } = { url: "", token: "" };
 
 function nextPermissionRequest(client: PiClient): Promise<Extract<WireServerEvent, { type: "permission_request" }>> {
@@ -24,24 +27,13 @@ function nextPermissionRequest(client: PiClient): Promise<Extract<WireServerEven
 }
 
 beforeAll(async () => {
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
-	const port = 57000 + Math.floor(Math.random() * 10_000);
-	proc = Bun.spawn(["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
-		stdout: "pipe",
-		stderr: "pipe",
-		env: { ...process.env, PI_NO_TITLE: "1" },
-	});
-	const info = await waitForServe(proc, port);
-	serveInfo.url = info.url;
-	serveInfo.token = info.token;
+	served = await startIsolatedServe({ cwd: process.cwd() });
+	serveInfo.url = served.url;
+	serveInfo.token = served.token;
 }, 90_000);
 
 afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
+	await served?.stop();
 });
 
 describe("审批 shell e2e（真 serve + pi-client，inject 触发）", () => {

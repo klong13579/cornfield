@@ -14,18 +14,17 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { type IsolatedServeHandle, pickFreePort, startIsolatedServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
 
 let sessionDir: string;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
+let served: IsolatedServeHandle | undefined;
 let url = "";
-/** gateway 不可用场景：指向从不绑定的死端口。 */
-let downProc: ReturnType<typeof Bun.spawn> | undefined;
+/** gateway 不可用场景：指向当下没人监听的端口。 */
+let downServed: IsolatedServeHandle | undefined;
 let downUrl = "";
 let wirePort = 0;
-let deadPort = 0;
 let mockWire: ReturnType<typeof Bun.serve> | undefined;
 /** mock 收到的命令（断言转发参数用）。 */
 const receivedCommands: Array<Record<string, unknown>> = [];
@@ -174,62 +173,31 @@ function startMockWire(): void {
 	wirePort = mockWire.port ?? 0;
 }
 
-/** 起一个 serve（CORNFIELD_GATEWAY_WIRE_PORT 定向到给定端口）。 */
-async function spawnServe(
-	wirePortOverride: number,
-	servePortBase: number,
-	servePortRange = 1500,
-): Promise<{ proc: ReturnType<typeof Bun.spawn>; url: string }> {
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const servePort = servePortBase + Math.floor(Math.random() * servePortRange);
-	const proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(servePort),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-			"--session-dir",
-			sessionDir,
-		],
-		{
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, PI_NO_TITLE: "1", CORNFIELD_GATEWAY_WIRE_PORT: String(wirePortOverride) },
-		},
-	);
-	const url = await waitForServe(proc, servePort);
-	return { proc: proc as ReturnType<typeof Bun.spawn>, url: url.url };
+/** 起一个 serve（CORNFIELD_GATEWAY_WIRE_PORT 定向到给定端口；HOME 由夹具隔离）。 */
+async function spawnServe(wirePortOverride: number): Promise<IsolatedServeHandle> {
+	return startIsolatedServe({
+		cwd: process.cwd(),
+		args: ["--session-dir", sessionDir],
+		env: { CORNFIELD_GATEWAY_WIRE_PORT: String(wirePortOverride) },
+	});
 }
 
 beforeAll(async () => {
 	startMockWire();
 	sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-cron-proxy-"));
-	// 主实例：mock gateway 可达 → 转发穿透用例
-	const main = await spawnServe(wirePort, 48500, 1500);
-	proc = main.proc;
-	url = main.url;
-	// down 实例：定向到从不绑定的死端口 → gateway unreachable 用例；
-	// serve port 用独立段（48500+1500 已被主实例占用范围，避免随机撞端口）。
-	deadPort = 53000 + Math.floor(Math.random() * 1000);
-	const down = await spawnServe(deadPort, 51000, 1000);
-	downProc = down.proc;
-	downUrl = down.url;
+	// 主实例：mock gateway 可达 → 转发穿透用例（serve 端口由夹具现挑空闲的，不再手排端口段）
+	served = await spawnServe(wirePort);
+	url = served.url;
+	// down 实例：定向到当下没人监听的端口 → gateway unreachable 用例
+	const deadPort = await pickFreePort();
+	downServed = await spawnServe(deadPort);
+	downUrl = downServed.url;
 }, 45_000);
 
 afterAll(async () => {
 	if (mockWire) mockWire.stop();
-	if (downProc) {
-		downProc.kill();
-		await downProc.exited;
-	}
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
+	await downServed?.stop();
+	await served?.stop();
 	await fs.rm(sessionDir, { recursive: true, force: true });
 });
 
