@@ -1,0 +1,38 @@
+[
+	{
+		"mark": "打开工作台 → Agent 选择菜单（ComposerBar 的 agent 下拉）"
+	},
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "(() => { const b = [...document.querySelectorAll('main button')].find(x => /@/.test(x.textContent || '')); if (!b) return 'no-agent-button'; b.click(); return (b.textContent || '').trim().replace(/\\s+/g, ' '); })()"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"shot": "agent-menu"
+	},
+	{
+		"mark": "菜单每行的 footer 文本（技能 / 定时）——改动前含 cronCount 那半句"
+	},
+	{
+		"eval": "(() => { const spans = [...document.querySelectorAll('span')].filter(s => s.children.length === 0 && /(技能|定时)/.test(s.textContent || '')); return spans.map(s => s.textContent.trim()); })()"
+	},
+	{
+		"mark": "菜单整行按钮文本（同一行的全部可见文本）"
+	},
+	{
+		"eval": "(() => { const rows = [...document.querySelectorAll('button')].filter(b => /技能|定时/.test(b.textContent || '')); return rows.map(b => (b.textContent || '').trim().replace(/\\s+/g, ' ')); })()"
+	},
+	{
+		"mark": "菜单容器 innerText（含工作区分组标题）"
+	},
+	{
+		"eval": "(() => { const el = [...document.querySelectorAll('div')].find(d => /CODING|WORKER/.test(d.innerText || '') && /技能|定时/.test(d.innerText || '')); return el ? el.innerText.replace(/\\n+/g, ' | ') : 'menu-not-found'; })()"
+	}
+]

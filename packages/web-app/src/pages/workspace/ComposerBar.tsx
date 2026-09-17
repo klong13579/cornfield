@@ -1,4 +1,4 @@
-import type { ImageContentDto } from "@cornfield/wire";
+import type { AgentInfoDto, ImageContentDto } from "@cornfield/wire";
 import { ChevronDown, Mic, Paperclip, Send, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -237,6 +237,52 @@ function statusLabel(s: string): string {
 		default:
 			return "状态未知";
 	}
+}
+
+/**
+ * Agent 选择菜单的一行（纯展示，从 ComposerBar 提出，静态渲染可断言）。
+ * footer 只渲染**有数据源**的 skillsCount：`cronCount` 在服务端无数据源（调度器在 gateway
+ * 进程，serve 的 list_agents 拿不到），已从渲染里删除且不留占位 —— 缺值渲染看着像"功能坏了"，
+ * 而事实是这项数据不存在（票 10，依据 docs/web-app-fix-t6）。
+ */
+export function AgentMenuItem({
+	agent,
+	selected,
+	stopped,
+	onSelect,
+}: {
+	agent: AgentInfoDto;
+	selected: boolean;
+	stopped: boolean;
+	onSelect: () => void;
+}): React.JSX.Element {
+	return (
+		<button
+			type="button"
+			className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-3 ${selected ? "bg-accent-dim" : ""} ${stopped ? "opacity-60" : ""}`}
+			onClick={onSelect}
+		>
+			<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-2 text-[9px] font-semibold">
+				{agent.face}
+			</span>
+			<span className="min-w-0 flex-1">
+				<span className="flex items-center gap-1.5 text-ink">
+					@{agent.name}
+					<span
+						className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(agent.status)}`}
+						title={statusLabel(agent.status)}
+					/>
+					{stopped && (
+						<span className="rounded bg-danger/10 px-1 py-px text-[9px] font-medium text-danger">已停用</span>
+					)}
+				</span>
+				<span className="text-[10px] text-ink-faint">{agent.skillsCount ?? 0} 技能</span>
+			</span>
+			<span className="ml-auto shrink-0 text-[10px] text-ink-faint">
+				{agent.kind === "coding" ? "CODING" : "WORKER"}
+			</span>
+		</button>
+	);
 }
 
 /**
@@ -578,46 +624,20 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 											</div>
 											{view.agents
 												.filter(a => a.workspace === ws)
-												.map(a => {
-													const stopped = isAccountStopped(a.id);
-													return (
-														<button
-															key={a.id}
-															type="button"
-															className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-3 ${a.id === agentId ? "bg-accent-dim" : ""} ${stopped ? "opacity-60" : ""}`}
-															onClick={() => {
-																setAgentId(a.id);
-																setBlockedMsg(null);
-																store.focusAgent(a.id); // attach + 切 active：后续 prompt 默认发往该 agent
-																setShowAgentMenu(false);
-															}}
-														>
-															<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-2 text-[9px] font-semibold">
-																{a.face}
-															</span>
-															<span className="min-w-0 flex-1">
-																<span className="flex items-center gap-1.5 text-ink">
-																	@{a.name}
-																	<span
-																		className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(a.status)}`}
-																		title={statusLabel(a.status)}
-																	/>
-																	{stopped && (
-																		<span className="rounded bg-danger/10 px-1 py-px text-[9px] font-medium text-danger">
-																			已停用
-																		</span>
-																	)}
-																</span>
-																<span className="text-[10px] text-ink-faint">
-																	{a.skillsCount ?? 0} 技能 · {a.cronCount ?? 0} 定时
-																</span>
-															</span>
-															<span className="ml-auto shrink-0 text-[10px] text-ink-faint">
-																{a.kind === "coding" ? "CODING" : "WORKER"}
-															</span>
-														</button>
-													);
-												})}
+												.map(a => (
+													<AgentMenuItem
+														key={a.id}
+														agent={a}
+														selected={a.id === agentId}
+														stopped={isAccountStopped(a.id)}
+														onSelect={() => {
+															setAgentId(a.id);
+															setBlockedMsg(null);
+															store.focusAgent(a.id); // attach + 切 active：后续 prompt 默认发往该 agent
+															setShowAgentMenu(false);
+														}}
+													/>
+												))}
 										</div>
 									))}
 								</div>
