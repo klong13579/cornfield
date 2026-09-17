@@ -52,8 +52,16 @@ function waitForOutput(
 const port = await freePort();
 const wsUrl = `ws://127.0.0.1:${port}/ws`;
 
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
+
 const serve = spawn("bun", [cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
-	env: { ...process.env, PI_NO_TITLE: "1" },
+	env: { ...process.env, PI_NO_TITLE: "1", CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT },
 	stdio: ["ignore", "pipe", "pipe"],
 });
 

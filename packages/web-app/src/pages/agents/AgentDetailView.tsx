@@ -7,7 +7,7 @@ import type {
 } from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
+import type { AgentPromptSourceDto, GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
 import { SCOPE_LABELS } from "../../lib/scope-display";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -24,6 +24,7 @@ import { ModelPicker } from "./ModelPicker";
 /**
  * Agent 详情（FR-2）—— 7 tab：Skills / 钉钉 / 模型 / 工具 / 画像 / 文件 / Prompts。
  * 数据源：Skills 读 serve get_skills（与「技能」页同一份结果）、画像读 mission.md+user.md、
+ * Prompts 读 get_agent_prompt_sources（agentDir 的 prompt 面，serve 侧单一真相）+ fs_read 读正文、
  * 模型接 get_available_models/set_model 真命令、画像实时建模待连接器路径（缺口 B5）。
  */
 
@@ -866,84 +867,219 @@ function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Prompts tab：聚合 agent 的各类 prompt 配置源
+// Prompts tab：agentDir 的 prompt 源（清单来自 serve，不再自己抄一份）
+//
+// 这份清单的真源是 `get_agent_prompt_sources`（serve 侧 `skeleton/agent-dir-files.ts` 的
+// prompt 面）。这里曾经硬编码 7 项并且已经漂移：`.omp/SYSTEM.md` 是旧路径、
+// `AGENTS-personal.md` / `CONTEXT.md` 全仓只有它提过；真正 always-on 的
+// `TOOLS.md` / `TODO.md` / `knowledge/external-workspaces.md` 反而没有入口。
+// 现在只渲染 serve 给的（`title` + `description`），正文按 `path` 用 fs_read 读。
+//
+// 三种「没有正文」不许互相顶替（与右栏 Artifacts/Changes 同一套写法）：
+//   不存在 —— 清单里 `exists:false`：serve 逐项报的事实（缺的项就留在这份清单里，不裁掉）
+//   读失败 —— 清单说存在，但 fs_read 报错（读的瞬间被删/超限/…）：原文照显，不写成「不存在」
+//   未读   —— 还没点过任何一项，不是「这份文件是空的」
+// 另有两态在清单层：未连接（没问过）与加载中，见 {@link PromptSourcesState}。
 // ─────────────────────────────────────────────────────────────────────
 
 const FS_MAX_READ_HINT = ">128KB 仅显示前段";
 
-interface PromptSource {
-	path: string;
-	title: string;
-	desc: string;
+/**
+ * 清单的读取状态。
+ *
+ * 「未连接」与「加载中」各自有名字：把「没问过」渲染成一份空清单，用户会据此以为这个
+ * agentDir 什么都没有。
+ */
+type PromptSourcesState =
+	| { status: "disconnected" }
+	| { status: "loading" }
+	| { status: "ready"; sources: AgentPromptSourceDto[] }
+	| { status: "error"; error: string };
+
+/**
+ * 一次点开的读取结果 —— 同时是「选中的是哪一项」（单一事实，不与另一个 selectedPath 字段
+ * 并行存在：两个字段说同一件事，迟早会不一致）。
+ */
+type PromptReadState =
+	/** 清单已报它不存在：**不去读一个已知不存在的文件**，直接把那个事实说出来。 */
+	| { path: string; kind: "missing" }
+	| { path: string; kind: "loading" }
+	| { path: string; kind: "text"; text: string; truncated: boolean }
+	| { path: string; kind: "error"; error: string };
+
+/** Prompts tab 的全部状态 + 它属于哪个 agent（换 agent 时整份作废，见 {@link currentPromptsLoad}）。 */
+export interface PromptsLoad {
+	agentId: string;
+	sources: PromptSourcesState;
+	read: PromptReadState | null;
 }
 
-const PROMPT_SOURCES: PromptSource[] = [
-	{ path: "mission.md", title: "mission.md", desc: "agent 使命/人格定义（工作方式与长期目标）" },
-	{ path: "user.md", title: "user.md", desc: "用户身份声明（草稿/权威版本之一）" },
-	{ path: ".omp/SYSTEM.md", title: ".omp/SYSTEM.md", desc: "Gateway Agent 系统提示词（IM 场景纪律）" },
-	{ path: "AGENTS.md", title: "AGENTS.md", desc: "仓库级 agent 指南（项目规则/约定）" },
-	{ path: "AGENTS-personal.md", title: "AGENTS-personal.md", desc: "个人版 agent 指南（若存在）" },
-	{ path: "CONTEXT.md", title: "CONTEXT.md", desc: "长期上下文/背景注入" },
-	{ path: "prompt-includes.json", title: "prompt-includes.json", desc: "系统提示注入清单（插件/技能白名单）" },
-];
+function freshPromptsLoad(agentId: string): PromptsLoad {
+	return { agentId, sources: { status: "loading" }, read: null };
+}
 
-function PromptsView({ agentId }: { agentId: string }): React.JSX.Element {
-	const store = useSessionStore();
-	const [selectedPath, setSelectedPath] = useState<string | null>(null);
-	const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
+/**
+ * 「这份状态算不算本次 agent 的」：
+ *
+ * `agentId` 一变，手上那份（上一个 agent 的清单与正文）就不是本次的结果了 —— 而拉取是异步的，
+ * 上一次的答复可能晚一步才回来。所以归属判定放在**渲染时**（不是等 effect 把状态清掉）：
+ * 不是本次 agent 的，一律当作「还在加载」；上一次的答复回来时也不是无条件覆盖，
+ * 而是先对一下 agentId。
+ */
+export function currentPromptsLoad(load: PromptsLoad, agentId: string): PromptsLoad {
+	return load.agentId === agentId ? load : freshPromptsLoad(agentId);
+}
 
-	const open = async (path: string): Promise<void> => {
-		setSelectedPath(path);
-		setLoading(true);
-		setError(null);
-		// 文件不存在是常态（如 AGENTS-personal.md 可能没有）——失败标记为不可用而非报错
-		try {
-			const result = await store.fsRead(agentId, path);
-			setContent(result);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-			setContent(null);
-		}
-		setLoading(false);
-	};
+function errorTextOf(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
 
+/**
+ * Prompts tab 的展示层（纯 props）。
+ *
+ * 纯 props 是为了能把「不存在 / 读失败 / 未读 / 未连接 / 加载中」五种画面静态渲染出来逐个
+ * 钉住 —— 这几种「没有」在屏幕上长得像，混掉一个就是一个假结论。
+ */
+export function PromptSourcesView({
+	sources,
+	read,
+	onOpen,
+}: {
+	sources: PromptSourcesState;
+	/** 当前选中的项 + 它的读取结果（{@link PromptReadState}）。 */
+	read: PromptReadState | null;
+	onOpen: (source: AgentPromptSourceDto) => void;
+}): React.JSX.Element {
 	return (
 		<div className="grid min-h-0 grid-cols-[minmax(220px,320px)_1fr] gap-4">
 			<div className="rounded-lg border border-hairline bg-surface py-1">
-				{PROMPT_SOURCES.map(s => (
-					<button
-						key={s.path}
-						type="button"
-						className={`flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-2 ${selectedPath === s.path ? "bg-accent-dim" : ""}`}
-						onClick={() => void open(s.path)}
-					>
-						<span className="font-mono text-[12.5px] font-medium text-ink">{s.title}</span>
-						<span className="text-[11px] leading-snug text-ink-faint">{s.desc}</span>
-					</button>
-				))}
+				{sources.status === "disconnected" && (
+					<div className="flex flex-col gap-1 px-3 py-6">
+						<div className="text-[12px] text-ink-faint">未连接——读不到 prompt 源清单</div>
+						<div className="text-[11px] leading-relaxed text-ink-subtle">
+							连上 serve 后这里会列出这个 agentDir 的 prompt 源
+						</div>
+					</div>
+				)}
+				{sources.status === "loading" && <div className="px-3 py-6 text-[12px] text-ink-faint">加载中…</div>}
+				{sources.status === "error" && (
+					<div className="px-3 py-3 text-[12px] text-danger">清单读取失败：{sources.error}</div>
+				)}
+				{sources.status === "ready" && sources.sources.length === 0 && (
+					<div className="px-3 py-6 text-[12px] text-ink-faint">serve 报这个 agentDir 一份 prompt 源都没有</div>
+				)}
+				{sources.status === "ready" &&
+					sources.sources.map(s => (
+						<button
+							key={s.path}
+							type="button"
+							data-prompt-path={s.path}
+							className={`flex w-full cursor-pointer flex-col gap-1 px-3 py-2.5 text-left transition-colors hover:bg-surface-2 ${read?.path === s.path ? "bg-accent-dim" : ""}`}
+							onClick={() => onOpen(s)}
+						>
+							<span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+								<span className="text-[12.5px] font-medium text-ink">{s.title}</span>
+								<span className="font-mono text-[10.5px] text-ink-subtle">{s.path}</span>
+								{!s.exists && <span className="badge fail">不存在</span>}
+							</span>
+							<span className="text-[11px] leading-snug text-ink-faint">{s.description}</span>
+						</button>
+					))}
 			</div>
 			<div className="min-h-0 overflow-auto rounded-lg border border-hairline bg-surface px-4 py-3">
-				{loading && <div className="py-8 text-center text-[12px] text-ink-faint">加载中…</div>}
-				{!loading && selectedPath && content && (
+				{read === null && (
+					<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧浏览 agent 的各份 prompt 配置</div>
+				)}
+				{read?.kind === "loading" && <div className="py-8 text-center text-[12px] text-ink-faint">加载中…</div>}
+				{read?.kind === "missing" && (
+					<div className="flex flex-col gap-1 py-8 text-center">
+						<div className="font-mono text-[12px] text-ink-muted">{read.path}</div>
+						<div className="text-[12px] text-ink-faint">该文件不存在（serve 报 exists=false）</div>
+						<div className="px-6 text-[11px] leading-relaxed text-ink-subtle">
+							它没有内容可读；「不存在」与「读了但没读到」不是一回事
+						</div>
+					</div>
+				)}
+				{read?.kind === "error" && (
+					<div className="flex flex-col gap-1 py-8 text-center">
+						<div className="font-mono text-[12px] text-ink-muted">{read.path}</div>
+						<div className="text-[12px] text-danger">读取失败：{read.error}</div>
+					</div>
+				)}
+				{read?.kind === "text" && (
 					<>
 						<div className="mb-2 flex items-center gap-2">
-							<span className="truncate font-mono text-[12px] font-medium text-ink">{selectedPath}</span>
-							{content.truncated && <span className="badge fail">{FS_MAX_READ_HINT}</span>}
+							<span className="truncate font-mono text-[12px] font-medium text-ink">{read.path}</span>
+							{read.truncated && <span className="badge fail">{FS_MAX_READ_HINT}</span>}
 						</div>
 						<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
-							{content.text}
+							{read.text}
 						</pre>
 					</>
-				)}
-				{!loading && selectedPath && error && (
-					<div className="py-8 text-center text-[12px] text-ink-faint">该文件不存在或不可读（{error}）</div>
-				)}
-				{!loading && !selectedPath && (
-					<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧浏览 agent 的各份 prompt 配置</div>
 				)}
 			</div>
 		</div>
 	);
+}
+
+function PromptsView({ agentId }: { agentId: string }): React.JSX.Element {
+	const view = useSession();
+	const store = useSessionStore();
+	const [load, setLoad] = useState<PromptsLoad>(() => freshPromptsLoad(agentId));
+
+	// 换 agent：整份作废（**渲染时**判定，不等 effect）—— 上一个 agent 的清单与正文都不许
+	// 当成本次的结果渲染出去。
+	const current = currentPromptsLoad(load, agentId);
+	const sources: PromptSourcesState = view.connected ? current.sources : { status: "disconnected" };
+
+	useEffect(() => {
+		let cancelled = false;
+		if (!view.connected) return;
+		setLoad(freshPromptsLoad(agentId));
+		store
+			.fetchAgentPromptSources(agentId)
+			.then(list => {
+				if (cancelled) return;
+				setLoad(prev =>
+					prev.agentId === agentId ? { ...prev, sources: { status: "ready", sources: list } } : prev,
+				);
+			})
+			.catch((err: unknown) => {
+				if (cancelled) return;
+				setLoad(prev =>
+					prev.agentId === agentId ? { ...prev, sources: { status: "error", error: errorTextOf(err) } } : prev,
+				);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, store, view.connected]);
+
+	/** 点开一项：清单已报不存在的，直接说「不存在」，不去读一个已知不存在的文件。 */
+	const open = (source: AgentPromptSourceDto): void => {
+		setLoad(prev => ({
+			...prev,
+			read: source.exists ? { path: source.path, kind: "loading" } : { path: source.path, kind: "missing" },
+		}));
+		if (!source.exists) return;
+		store
+			.fsRead(agentId, source.path)
+			.then(({ text, truncated }) => {
+				// 回来时还停在同一项上才落：中途换了 agent / 点了别的项，这次答复已经不是它的了。
+				setLoad(prev =>
+					prev.agentId === agentId && prev.read?.path === source.path
+						? { ...prev, read: { path: source.path, kind: "text", text, truncated } }
+						: prev,
+				);
+			})
+			.catch((err: unknown) => {
+				setLoad(prev =>
+					prev.agentId === agentId && prev.read?.path === source.path
+						? { ...prev, read: { path: source.path, kind: "error", error: errorTextOf(err) } }
+						: prev,
+				);
+			});
+	};
+
+	return <PromptSourcesView sources={sources} read={current.read} onOpen={open} />;
 }
