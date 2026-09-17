@@ -1,0 +1,1084 @@
+CornField · AI Agent 控制台
+
+已停用
+钉钉已停用
+mcode
+minimax-m3
+WORKER
+默认工作区
+Skills5
+钉钉
+模型配置
+工具开关
+用户画像
+文件
+Prompts
+academic-verify
+Verify a research claim or academic citation by tracing it through publication → methodology → raw data → independent replication. Routes through perplexity-research for the actual web lookup, then formats results as a citation-checked brain page. Use when a book/article/conversation cites a study and you want to confirm the claim is real, replicated, and accurately characterized.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/academic-verify/SKILL.md
+agent-reach
+MUST USE when user wants to research/search/look up/find anything on the internet — e.g. "research this topic", "do a deep dive on X", "search the web for X", "see what people say about X", "look this up". Also MUST USE when user mentions any platform or shares any URL/link: Twitter/X, Reddit, Facebook, Instagram, YouTube, GitHub, Bilibili, XiaoHongShu, Xiaoyuzhou Podcast, LinkedIn/jobs/recruiting, V2EX, Xueqiu (stocks), RSS. 15 platforms, multi-backend routing (OpenCLI / per-platform CLIs / APIs). Zero config for 6 channels. Run `agent-reach doctor --json` to see which backend serves each platform right now. NOT for: writing reports/analysis/translation (this skill only FETCHES internet content); posting/commenting/liking (write operations); platforms that already have a dedicated skill installed (prefer that skill).
+指纹 7f7da09f
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/agent-reach/SKILL.md
+archify
+Create polished, validated architecture, workflow, sequence, data-flow, and lifecycle/state diagrams as explorable standalone HTML with inline SVG, dark/light themes, optional trace motion, and PNG/JPEG/WebP/SVG/WebM export. Accept plain-language requirements or pasted Mermaid flowchart, sequenceDiagram, and stateDiagram input; inspect repository evidence when the diagram must reflect real code. Use when the user asks to visualize system architecture, infrastructure, cloud/security/network topology, technical workflows, API call sequences, request lifecycles, data pipelines, ETL/ELT, data lineage, state machines, or to convert/beautify Mermaid.
+指纹 5bf0cac8
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/archify/SKILL.md
+archive-crawler
+Universal archivist for personal file archives (Dropbox/B2/Gmail-takeout/local-mount/hard-drive-dump). Filters for high-value content (the user's own writing, ideas, relationships) and surfaces it interactively. REFUSES TO RUN without an explicit gbrain.yml `archive-crawler.scan_paths:` allow-list.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/archive-crawler/SKILL.md
+article-enrichment
+Transform raw article text dumps in the brain into structured pages with executive summary, verbatim quotes, key insights, why-it-matters, and cross-references. Replaces walls-of-text with quotable, actionable brain pages.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/article-enrichment/SKILL.md
+ask-matt
+Ask which skill or flow fits your situation. A router over the skills in this repo.
+指纹 b25d86fb
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/ask-matt/SKILL.md
+book-mirror
+Take any book (EPUB/PDF), produce a personalized chapter-by-chapter analysis with two-column tables. Left column preserves the chapter content; right column maps every idea to the reader's actual life using brain context. Output is a single brain page at media/books/<slug>-personalized.md plus an optional PDF via brain-pdf.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/book-mirror/SKILL.md
+brain-ops
+Brain knowledge base operations. The core read/write cycle: brain-first lookup, read-enrich-write loop, source attribution, ambient enrichment, back-linking. Read this before any brain interaction.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/brain-ops/SKILL.md
+brain-pdf
+Generate a publication-quality PDF from any brain page via the gstack make-pdf binary. Strips YAML frontmatter, sanitizes emoji, applies running headers and page numbers. Brain page is always the source of truth; PDF is a rendering.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/brain-pdf/SKILL.md
+briefing
+Compile daily briefing with meeting context, active deals, and citation tracking
+指纹 a661804c
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/briefing/SKILL.md
+browser-skill
+Use when the user asks to perform browser automation tasks against their logged-in browser: visit and read pages, fill forms, scrape data, click through a flow, regression-test a PR's UI, validate a deployed page. Requires the bsk CLI installed and the browser-skill extension loaded.
+指纹 c3d933f6
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/browser-skill/SKILL.md
+citation-fixer
+Audit and fix citation formatting across brain pages. Ensures every fact has an inline [Source: ...] citation matching the standard format. Extended in v0.25.1: scans for broken tweet/post references that lack actual URLs and resolves them via the host's X / Twitter API integration.
+v1.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/citation-fixer/SKILL.md
+claude-md-management:claude-md-improver
+Audit and improve CLAUDE.md files in repositories. Use when user asks to check, audit, update, improve, or fix CLAUDE.md files. Scans for all CLAUDE.md files, evaluates quality against templates, outputs quality report, then makes targeted updates. Also use when the user mentions "CLAUDE.md maintenance" or "project memory optimization".
+指纹 b06c7420
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/claude-md-management/1.0.0/skills/claude-md-improver/SKILL.md
+code-review
+Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".
+指纹 47f4e52c
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/code-review/SKILL.md
+codebase-design
+Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.
+指纹 d08f136b
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/codebase-design/SKILL.md
+concept-synthesis
+Deduplicate and synthesize raw concept stubs into a tiered intellectual map (T1 Canon to T4 Riff), tracing idea evolution across sources over time. Transforms thousands of raw concept pages into a curated intellectual fingerprint.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/concept-synthesis/SKILL.md
+cron-scheduler
+Schedule management with staggering, quiet hours, and wake-up override. Validates schedules, prevents collisions, and gates delivery during quiet hours.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/cron-scheduler/SKILL.md
+cross-modal-review
+Quality gate via second model. Spawn a different AI model to review work before committing. Includes refusal routing: if one model refuses, switch silently to the next. Extended in v0.25.1 with structured review-mode gating (when to invoke vs not) and a Codex code-review handoff for the diff-review case.
+v1.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/cross-modal-review/SKILL.md
+daily-task-manager
+Task lifecycle management. Add, complete, defer, remove, and review tasks. Maintains a running task list as a brain page.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/daily-task-manager/SKILL.md
+daily-task-prep
+Morning preparation. Calendar lookahead, meeting context loading, open threads from yesterday, active task review. Extends briefing with actionable prep.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/daily-task-prep/SKILL.md
+data-research
+Structured data research: search sources, extract structured data, archive raw sources, maintain canonical tracker pages, deduplicate. Parameterized via YAML recipes for investor updates, donations, company updates, or any email-to-structured-data pipeline.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/data-research/SKILL.md
+design-taste-frontend
+Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated. Real design systems when applicable, audit-first on redesigns, strict pre-flight check.
+指纹 aa194351
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/taste-skill/SKILL.md
+diagnosing-bugs
+Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+指纹 d59674f0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/diagnosing-bugs/SKILL.md
+dingtalk-aisearch
+AI搜问：人员语义搜索、跨源内容定位与行为回溯。Use when 按姓名/工号/部门/职责/上下级找人，或在目标对象未知时按主题、语义、来源或行为发现相关内容。搜索结果用于候选定位；命中后需要读取、修改或验证原对象时切换到对象所属产品。完整手机号精确反查走 dingtalk-contact。命令前缀：dws aisearch。
+指纹 3579619f
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-aisearch/SKILL.md
+dingtalk-aitable
+钉钉 AI 表格（多维表）。Use when 用户说 AI表格/多维表/数据表/base/table/应用模式/App 页面/Widget/建表/查记录/写数据/字段/记录增删改查/记录评论/评论回复/SQL/PostgreSQL/SELECT/JOIN/跨表关联查询/筛选/排序/公式/模板搜索/批量导入CSV或JSON/导出/仪表盘/图表/上传附件到表格/按字段类型建表/数据源/创建数据源/更新数据源配置/触发数据源同步/按任务 ID 查询同步状态/获取数据源配置/列出数据源可用来源/获取数据源可同步字段/审批数据同步。不做电子表格单元格读写或单元格批注（走 dingtalk-misc）、文档编辑（走 dingtalk-doc）；听记待办入表先用 dingtalk-minutes 提取，再由本 skill 写入。命令前缀：dws aitable。
+指纹 9c0d486a
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-aitable/SKILL.md
+dingtalk-calendar
+钉钉日历与会议室。Use when 用户说 约会议/查日程/订会议室/查闲忙/加参会人/改期/取消会议/今天的日程/本周日程/共同空闲。不做视频会议发起/邀请入会/会中控制（走 dingtalk-misc）、AI 听记（走 dingtalk-minutes）、待办任务（走 dingtalk-todo）。命令前缀：dws calendar。
+指纹 f42f6fe6
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-calendar/SKILL.md
+dingtalk-chat
+钉钉群聊与消息。Use when 收发/搜索消息、建群、群治理、Bot/Webhook、文件，或仅限 IM 的消息谓词筛选。跨源主题/行为轨迹走 dingtalk-aisearch；DING/班级群走 dingtalk-misc；邮件走 dingtalk-mail。
+指纹 8911f4c1
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-chat/SKILL.md
+dingtalk-contact
+钉钉通讯录精确查询。Use when 已有 userId 后查详情、部门、职位或邮箱，按完整手机号反查用户，或查询自己、部门成员及角色。姓名模糊搜索、工号、职责、上下级走 dingtalk-aisearch，拿到 userId 后用本 skill 补详情。命令前缀：dws contact。
+指纹 15fa86c7
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-contact/SKILL.md
+dingtalk-doc
+钉钉在线文字文档（adoc）内容：查找、创建、读取编辑、块、评论、媒体/附件、白板卡片容器、导入导出、版本、模板、权限、分享及 Markdown/JSONML。不做白板图形/原生 .md/电子表格（dingtalk-misc）、文档空间与钉盘存储（dingtalk-drive）、知识库组织（dingtalk-wiki）、AI 表格（dingtalk-aitable）。命令前缀：dws doc。
+指纹 07c4c918
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-doc/SKILL.md
+dingtalk-drive
+钉钉文件管理（存储层，覆盖钉盘与文档空间）。Use when 用户说 钉盘/文档空间/我的文档中的普通文件或文件夹、查找/上传/下载/复制/移动/重命名/删除/回收站/权限/评论/元信息，或本地与钉盘文件夹比较、拉取、推送、双向同步；也承接在线文档节点的存储管理。文档正文编辑与导出走 dingtalk-doc；明确的知识库空间及空间内节点组织走 dingtalk-wiki。命令前缀：dws drive。
+指纹 9e4f8703
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-drive/SKILL.md
+dingtalk-event
+钉钉个人 IM、OA 审批、VoIP 通话邀请、待办与互动卡片回调事件长连接监听。Use when 用户说监听消息/@我/某人/某群/全部消息、已读/撤回/reaction、群成员加入/群成员退出/群状态变化，监听审批任务创建/完成/转交、审批实例发起/抄送/终止/完成、VoIP 通话邀请、待办创建/更新/删除，或互动卡片回调。命令前缀：dws event。
+指纹 7d524470
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-event/SKILL.md
+dingtalk-mail
+钉钉邮箱读写、搜索、回复与转发。Use when 用户说发邮件/查邮件/回邮件/转发邮件/未读邮件/邮件搜索/邮箱附件。一句话发邮件时先用 dingtalk-contact 解析并确认收件人，再由本 skill 发送；不做钉钉消息（走 dingtalk-chat）、紧急通知（走 dingtalk-misc）。命令前缀：dws mail。
+指纹 664f31a0
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-mail/SKILL.md
+dingtalk-minutes
+钉钉 AI 听记。Use when 查询或修改听记摘要、完整逐字稿、关键词、标签、行动项、录音、上传、思维导图、发言人洞察、ASR 热词/识别词配置或分享权限。写文档走 dingtalk-doc；建待办走 dingtalk-todo；日程走 dingtalk-calendar。命令前缀：dws minutes。
+指纹 153cf6e6
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-minutes/SKILL.md
+dingtalk-misc
+长尾产品集合技能，覆盖低频钉钉产品：OA审批查询与处理/法务智能合同/考勤/直播/DING紧急消息/开放平台应用与MCP开发/Agoal目标管理/日志日报周报/电子表格/开放平台文档搜索与OpenAPI逃生舱/独立及文档内嵌白板/钉钉招聘/DWS技能市场安装/组织大脑Hrbrain/原生Markdown/原生HTML/PAT行为授权/多组织profile。Use when 用户提到上述任一产品，尤其是 Agoal/目标管理/战略解码/经营合约及字段配置/计分卡/OKR/目标规则与周期/个人目标/目标模板/周月报规则提交统计/按时/迟交/未提交/跟催，或查询/创建合同台账、批量导入合同、按听记起草合同、发起合同审查、归档合同、管理合同项目/相对方/账款，或查待审批/同意拒绝转交撤销审批/打卡/排班/日报周报内容填报/独立白板带内容创建/白板节点读写/单元格读写/招聘职位/JD/创建职位/搜索安装技能/开发者后台应用/企业内部应用/查应用状态或能否删除/应用管理成员及角色汇总/应用版本历史/企业内部应用机器人配置、消息模式或在线状态/本机机器人连接器/Stream连接/MCP服务或工具/发布或调试MCP/获取或调用已发布MCP/把OpenAPI、Swagger、Postman、curl或HTTP接口做成MCP或给Agent使用/未封装OpenAPI/llms.txt/dws api/人才池/员工档案/职业历程/绩效/原生.md文件/Markdown版本比较/本地草稿diff/Markdown评论/原生.html文件/新建HTML页面/PAT授权/切换组织/跨组织/profile 等相关操作。周报/月报内容填报属于 report；规则级按时、迟交、未提交统计与人员跟催属于 Agoal；带审批人、抄送人或审批流的日报、周报、简报提交属于 OA 审批。未来审批任务或实例变化的实时监听不属于本 skill，应使用 dingtalk-event。命中后由本 skill 的「产品索引表」定位具体子产品和命令前缀，再按对应子产品说明执行。
+指纹 975c8d63
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-misc/SKILL.md
+dingtalk-shared
+钉钉(DingTalk) MultiSkill 的轻量共享入口。Use when 用户泛称 DWS/钉钉操作但未明确产品、请求跨产品编排、需要 URL 类型预检或产品边界消歧。清晰的单产品操作优先使用对应 dingtalk-* 子 skill；本 skill 只提供全局执行契约和按需 reference 导航，不承载产品命令全集。
+指纹 7c3f6231
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-shared/SKILL.md
+dingtalk-todo
+钉钉待办 / TODO。Use when 用户说 创建待办/TODO/任务提醒/指派任务/标记完成/查待办/紧急待办/循环待办/批量建待办/逾期待办。不做日报周报（走 dingtalk-misc）、审批（走 dingtalk-misc）、日程（走 dingtalk-calendar）。命令前缀：dws todo。
+指纹 f3a83a0c
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-todo/SKILL.md
+dingtalk-weekly-digest
+When the user asks for a weekly DingTalk summary (每周钉钉总结/钉钉总结/拉上周钉钉记录做总结/生成钉钉周总结), pull every conversation for the last complete week and distill them into <out-dir>/dingtalk-<YYYY-MM-DD>~<YYYY-MM-DD>.md. Skip if the user only wants one specific conversation, a quick chat history lookup, or a summary of a different source.
+vv1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/dingtalk-weekly-digest/SKILL.md
+dingtalk-wiki
+钉钉知识库与空间管理。Use when 用户明确说 知识库/wiki/创建、查找或列出知识库/命名的团队知识空间/个人知识库/知识库成员/库内节点创建、列表、搜索、复制、移动、删除或知识库动态。仅说“文档空间/我的文档”不触发：普通存储管理与全局文件搜索走 dingtalk-drive；节点正文读写走 dingtalk-doc。命令前缀：dws wiki。
+指纹 adf71ee0
+全局
+Claude Code · claude:user
+启用
+已加载
+/Users/sz-0203015357/.claude/skills/dingtalk-wiki/SKILL.md
+domain-modeling
+Build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, or when another skill needs to maintain the domain model.
+指纹 1ea55dcf
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/domain-modeling/SKILL.md
+domain-pulse
+域脉搏——聚合本域的信息流（群聊话题、周会节点、文档动态），回答"最近大家在忙什么/关注什么"。触发词："刷新域脉搏"、"最近大家在忙什么"、"本周热点"、"XX 在关注什么"、生成周会前上下文。
+指纹 592f9783
+Agent
+CornField · native:project
+启用
+已加载
+/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/mcode/.cornfield/skills/domain-pulse/SKILL.md
+doubao
+When the user wants to query Doubao (豆包) web AI assistant — ask a question, test a prompt, or retrieve information from doubao.com. Use to submit prompts to Doubao and fetch the AI response. Skip if the user wants to test a local model, use a different AI service, or when the query can be answered directly without external tools.
+指纹 850dab85
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/doubao/SKILL.md
+dtc-publish
+在 devops.narwaltech.com 上执行 dtc 应用（app_id=601，gitlab.narwaltech.com/marketing/dtc） 的「构建并发布」到测试环境。Use when the user says 发布dtc / dtc发布 / dtc构建 / 构建并发布 dtc / 帮我执行dtc的构建发布，或给出 devops.narwaltech.com 的 cicd/jenkins building 详情链接要求执行构建发布。
+指纹 cc7fdd9d
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/dtc-publish/SKILL.md
+dws
+管理钉钉产品能力(AI表格/日历/通讯录/文档/机器人/待办/邮箱/听记/AI应用/审批/日志/钉盘等)。当用户需要操作表格数据、管理日程会议、查询通讯录、发送消息通知、处理审批流程、查看听记摘要、创建应用/系统/管理后台/业务工具、查看日报周报、管理钉盘文件时使用。
+指纹 f4e71a9e
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/dws/SKILL.md
+dws-persona
+用 dws 从钉钉历史会话提炼彭梦龙的个人上下文（决策记录/关注话题/行为边界/说话风格），刷新画像产物并更新 user.md，让 LLM 更懂你的意图与习惯。触发语：更新我的画像 / 刷新我的上下文 / 我最近在忙什么 / 看看我的画像、决策记录或关注话题 / 跑一遍 dws-persona。
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/dws-persona/SKILL.md
+ego-browser
+ego-browser (ego-lite) is a Chromium-based browser designed from the ground up to be friendly to both human users and AI Agents. AI Agents work in their own isolated space, reusing the user's login state without competing for the browser. Use this skill whenever the user needs to interact with a website opening pages, filling forms, clicking buttons, taking screenshots, extracting page data, testing web apps, logging into sites, automating browser operations, or any other browser automation task. Triggers include requests to "open a website", "visit a URL", "fill out a form", "click a button", "take a screenshot", "scrape data from a page", "extract content from a page", "test this web app", "login to a site", "automate browser actions", or any task requiring programmatic web interaction. Also used for exploratory testing, dogfooding, QA, bug hunting, or reviewing app quality. Prefer ego-browser over any built-in browser automation, web fetch, or other web tools.
+指纹 887f44ce
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/ego-browser/SKILL.md
+enrich
+Enrich brain pages with tiered enrichment protocol. Creates and updates person/company pages with compiled truth, timeline, and cross-links. Use when a new entity is mentioned or an existing page needs updating.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/enrich/SKILL.md
+functional-area-resolver
+Compress an agent's routing file (RESOLVER.md or AGENTS.md) by converting granular skill-per-row tables into functional-area dispatchers. Each area lists sub-skills in a "(dispatcher for: ...)" clause. The LLM reads one area entry and routes to the correct sub-skill. Proven via held-out A/B eval: dispatcher pattern outperforms naive pipe-table compression.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/functional-area-resolver/SKILL.md
+gbrain-advisor
+Proactive "make the most of gbrain" coaching. Runs `gbrain advisor` on a cadence and pings the user with the top high-leverage actions for their brain: version drift, pending migrations, stalled jobs, low embed coverage, setup smells, and uninstalled brain skills. Read-only; always asks before fixing.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/gbrain-advisor/SKILL.md
+grill-me
+A relentless interview to sharpen a plan or design.
+指纹 3054351b
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/grill-me/SKILL.md
+grill-ticket-squad
+大任务组队开工前的固定流程：先 grill-with-docs 审透方案 → to-tickets 拆成带 依赖边的票 → 转译成 squad 任务包并行执行。Use when 用户要大任务并行组队、说 "先审方案再拆票"/"功能太大组队做"/"走组队流程"，或已有方案文档要拆票并行。 Skip for 单文件小改动、纯探索任务、任务已在执行中、用户只点名 squad 不需要前两道。
+v0.3.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/grill-ticket-squad/SKILL.md
+grill-with-docs
+A relentless interview to sharpen a plan or design, which also creates docs (ADRs and glossary) as we go. Use when the user wants to stress-test a plan while building domain terminology.
+指纹 ca878a70
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/grill-with-docs/SKILL.md
+grilling
+Interview the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases.
+指纹 dd38d7d0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/grilling/SKILL.md
+group-watcher
+扫描所在群的新消息，按判据提取重要事项（拍板请求/审批/人事/预算/硬截止/风险/点名/关键决策），产出待办草稿。手动触发："扫一下群消息" / "看看群里有什么重要的" / "跑一轮群扫描"。
+指纹 128d0197
+Agent
+CornField · native:project
+启用
+已加载
+/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/mcode/.cornfield/skills/group-watcher/SKILL.md
+handoff
+Compact the current conversation into a handoff document for another agent to pick up.
+指纹 91fd8793
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/handoff/SKILL.md
+herdr
+Control Herdr, a terminal multiplexer for coding agents. Use only when the user explicitly mentions Herdr or asks to use Herdr to inspect or control panes, tabs, workspaces, commands, or another agent. Do not use merely because a task could benefit from a background terminal, delegation, or parallel work. Requires HERDR_ENV=1.
+指纹 ece5e728
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/herdr/SKILL.md
+idea-ingest
+Ingest links, articles, tweets, and ideas into the brain. Fetch content, save to brain with analysis, create author people page, and cross-link. Use when the user shares a link or says "read this", "save this", "think about this".
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/idea-ingest/SKILL.md
+idea-lineage
+Trace one idea's evolution through the brain: first mention, best articulation, related concepts, reversals, contradictions, abandoned branches, and the current live version. Use for single-idea conceptual lineage, not broad concept-map synthesis or structured entity metrics.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/idea-lineage/SKILL.md
+implement
+Implement a piece of work based on a spec or set of tickets.
+指纹 6d3fd9e8
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/implement/SKILL.md
+implement-spec
+Implement a specification in code.
+指纹 f703b5f4
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/implement-spec/SKILL.md
+improve-codebase-architecture
+Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.
+指纹 55086008
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/improve-codebase-architecture/SKILL.md
+ingest
+Route content to specialized ingestion skills. Detects input type and delegates.
+指纹 dc40ecc0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/ingest/SKILL.md
+internal-auth-capture
+When the user wants to test whether internal websites can be auto-logged-in using existing session tokens, extract auth tokens from browser profiles, or capture login credentials for intranet sites. Follow a systematic sequence to test, capture, and persist auth tokens. Skip for public websites or sites where the user has no credentials.
+指纹 def4e9e5
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/internal-auth-capture/SKILL.md
+lint
+When the user asks to check knowledge base health, scan for stale content, or verify external link validity. Customize the checks below to match this agent's domain and data sources.
+指纹 eb80c9ea
+Agent
+CornField · native:project
+启用
+已加载
+/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/mcode/.cornfield/skills/lint/SKILL.md
+maintain
+Brain health checks: back-link enforcement, citation audit, filing validation, stale info detection, orphan pages, and benchmarks. Use when asked to check brain health, run maintenance, or audit quality.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/maintain/SKILL.md
+me-context
+用户本人的上下文画像（钉钉数据驱动）：决策记录/风格测量/人物关系图/关注话题/决策边界。agent 为用户代办业务（管理/跟进/起草/判断）时按需查询——了解他的偏好、边界、决策习惯与关键人物关系，再行动。只读画像；不发送消息，不代替用户做业务决策。
+指纹 b561c413
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/me-context/SKILL.md
+media-ingest
+Ingest video, audio, PDF, book, screenshot, and GitHub repo content into the brain. Multi-format handling with entity extraction and backlink propagation. Covers video-ingest, youtube-ingest, and book-ingest subtypes.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/media-ingest/SKILL.md
+meeting-ingestion
+Ingest meeting transcripts into brain pages with attendee enrichment, entity propagation, and timeline merge. A meeting is NOT fully ingested until the enrich skill has processed every entity.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/meeting-ingestion/SKILL.md
+minion-orchestrator
+Unified Minions skill for both deterministic shell jobs and LLM subagent orchestration. Replaces the older `gbrain-jobs` routing intent. Use when: submitting gbrain jobs, shell/background tasks, spawning subagents, checking progress, steering running work, pausing/resuming, parallel fan-out. One durable, observable, steerable queue interface.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/minion-orchestrator/SKILL.md
+people-profile
+提问者画像——识别消息发送者身份，按人增强意图理解。收到消息时先判断"这人是谁、什么角色、常问什么"，再回答。触发：任何带身份歧义的问题、需要理解提问意图时。
+指纹 fc9351e0
+Agent
+CornField · native:project
+启用
+已加载
+/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/mcode/.cornfield/skills/people-profile/SKILL.md
+perplexity-research
+Brain-augmented web research. Sends brain context about a topic to Perplexity, which searches the web with citations and returns what is NEW vs what the brain already knows. Use for entity enrichment, current-state checks, deal monitoring, and freshness deltas. NOT for simple URL fetches (use web_fetch) or brain-only queries (use gbrain query).
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/perplexity-research/SKILL.md
+pi-intercom
+Streamline session-to-session coordination with pi-intercom. Send messages, delegate tasks, and coordinate work across multiple pi sessions on the same machine. Use for planner-worker workflows, cross-session context sharing, and real-time collaboration between sessions.
+指纹 e1fbc7f1
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/pi-intercom/SKILL.md
+project-todo
+Maintain the project task board at <projectRoot>/TODO.md. Use when the user adds (增加/添加/记录/新增/加 todo, add a todo, add todo, new todo, track this), marks done (完成待办, 这条做完了, done, finish), removes (删掉待办, 移除待办, remove todo), or asks to attach topic context (带 topic / 建个 topic / 这个转 topic / 继续 <名字> / <名字> 进度如何). Skip if the user is just reading or brainstorming.
+指纹 4f604578
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/project-todo/SKILL.md
+prompt-optimizer
+诊断和优化 agent prompt 文件结构 — 基于 Karpathy 单文件风格和 Anthropic Context Engineering 最佳实践
+指纹 bbd86d24
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/prompt-optimizer/SKILL.md
+prototype
+Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.
+指纹 b4427bea
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/prototype/SKILL.md
+query
+Answer questions using the brain's knowledge with 3-layer search, synthesis, and citation propagation. Use when the user asks a question, wants a lookup, or needs information from the brain.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/query/SKILL.md
+redesign-existing-projects
+Upgrades existing websites and apps to premium quality. Audits current design, identifies generic AI patterns, and applies high-end design standards without breaking functionality. Works with any CSS framework or vanilla CSS.
+指纹 98ad3e5b
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/redesign-skill/SKILL.md
+remember:remember
+Save session state for clean continuation next session.
+指纹 c6d3d0cd
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/remember/0.5.0/skills/remember/SKILL.md
+repo-architecture
+Where new brain files go. Decision protocol for filing brain pages by primary subject, not by format or source. Reference for all brain-writing skills.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/repo-architecture/SKILL.md
+reports
+Save and load timestamped reports. Keyword routing for fast lookup. Cron jobs save output as reports; the agent or user queries them by keyword.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/reports/SKILL.md
+research
+Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+指纹 985569f1
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/research/SKILL.md
+resolving-merge-conflicts
+Use when you need to resolve an in-progress git merge/rebase conflict.
+指纹 9d8114f8
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/resolving-merge-conflicts/SKILL.md
+retrieval-reflex
+When/what to retrieve — open the brain page for a salient entity before answering from memory.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/retrieval-reflex/SKILL.md
+session-diagnosis-data
+Extract structured data from OMP session JSONL for diagnosis. Provides diagnose.py with 6 dimension filters (meta, performance, turns, reasoning, tools, output) and summary mode. Called by session diagnosis sub-skills, not used directly by users.
+指纹 bdf95d95
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-diagnosis-data/SKILL.md
+session-diagnosis-orchestrator
+Diagnose agent session failures across 6 dimensions. This skill is ONLY loadable via the explicit /skill command — e.g. `/skill session-diagnosis-orchestrator`. Do NOT load, suggest, or auto-trigger this skill based on any keyword, question, or context. If the user describes a session problem ("诊断会话", "为什么失败", "答非所问", etc.) but does not invoke /skill explicitly, answer directly without loading this skill.
+指纹 138a6442
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-diagnosis-orchestrator/SKILL.md
+session-intent-diagnose
+Diagnose intent understanding - did the agent correctly understand what the user asked? Analyzes user input vs agent actions (tool calls, responses) to detect misunderstandings, ambiguous inputs, missing context, and identifies request patterns, abort causes, and systematic improvement areas. Called by session-diagnosis-orchestrator. Not used directly by users.
+指纹 5d0d942e
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-intent-diagnose/SKILL.md
+session-meta-check
+Diagnose session metadata and lifecycle issues — aborted sessions, context window overflow, compaction events, model changes. Called by session-diagnosis-orchestrator. Not used directly by users.
+指纹 8e60da32
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-meta-check/SKILL.md
+session-output-audit
+Diagnose LLM output quality — answer relevance, factual accuracy, format compliance, output truncation, repetition. Called by session-diagnosis-orchestrator. Not used directly by users.
+指纹 e8f67f02
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-output-audit/SKILL.md
+session-performance-audit
+Diagnose session performance and resource issues — token usage, context window pressure, compaction frequency, timing bottlenecks. Called by session-diagnosis-orchestrator. Not used directly by users.
+指纹 05f55b4d
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-performance-audit/SKILL.md
+session-reasoning-audit
+Diagnose agent reasoning and planning — thinking chain coherence, task decomposition, tool call ordering, loop detection, hallucination. Called by session-diagnosis-orchestrator. Not used directly by users.
+指纹 f8563a8a
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-reasoning-audit/SKILL.md
+session-tool-trace-audit
+Diagnose tool call chain issues — wrong tool selection, parameter construction errors, API failures, timeout, result parsing failures. Called by session-diagnosis-orchestrator. Not used directly by users.
+指纹 9f842bfa
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/session-tool-trace-audit/SKILL.md
+setup-matt-pocock-skills
+Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.
+指纹 2bcd89e9
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/setup-matt-pocock-skills/SKILL.md
+signal-detector
+Always-on ambient signal capture. Fires on every inbound message to detect original thinking and entity mentions. Spawn as a cheap sub-agent in parallel, never block the main response.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/signal-detector/SKILL.md
+skill-creator
+Create new skills following the GBrain conformance standard. Generates SKILL.md with frontmatter, Contract, Phases, Output Format, and Anti-Patterns. Checks MECE against existing skills. Updates manifest and resolver.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/skill-creator/SKILL.md
+skillify
+The meta skill. Turn any raw feature into a properly-skilled, tested, resolvable unit of agent capability. Cross-modal eval is the recommended Phase 3 quality gate: 3 frontier models from different providers critique the output, you iterate to quality, THEN write tests that lock in the proven-good behavior.
+v1.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/skillify/SKILL.md
+skillpack-check
+Run `gbrain skillpack-check` to produce an agent-readable JSON health report for the gbrain install. Wraps `gbrain doctor` + `gbrain apply-migrations --list` so a host agent (your OpenClaw's morning-briefing, any OpenClaw cron) can see at a glance whether the skillpack needs attention. Use when the user asks "is gbrain healthy?", when a cron fires a morning check, or proactively when something seems off (jobs not running, brain not updating, autopilot silent).
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/skillpack-check/SKILL.md
+skillpack-harvest
+Lift a proven skill from a host repo (e.g. your OpenClaw fork) back into gbrain's bundle so other clients can scaffold it. Editorial workflow: the CLI does the file copy + privacy lint; this skill drives the judgment-heavy genericization (scrub real names, generalize triggers, lift fork-specific conventions to references).
+v0.33.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/skillpack-harvest/SKILL.md
+soul-audit
+6-phase interactive interview that generates the agent's identity (SOUL.md), user profile (USER.md), access control (ACCESS_POLICY.md), and operational cadence (HEARTBEAT.md). Re-runnable anytime to update any section.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/soul-audit/SKILL.md
+squad-programming
+squad — 一个父当 coordinator、N 个 worker 在隔离 worktree 里并行，全部经 gate 验收后才交接。 Use when 用户说 squad / 把任务拆开同时做 / 并行开发 / 组队编程 / 大任务并行执行。 Skip for 单文件小改动、需要手工 review 的探索性任务。
+v0.8.7
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/squad-programming/SKILL.md
+strategic-reading
+Read a book, article, transcript, or case study through the lens of a specific strategic problem you're facing. Produces an applied playbook that maps the source onto the problem and gives short/medium/long-term recommendations. NOT for general book summaries.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/strategic-reading/SKILL.md
+superpowers:brainstorming
+You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.
+指纹 bba47904
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/brainstorming/SKILL.md
+superpowers:dispatching-parallel-agents
+Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies
+指纹 76806091
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/dispatching-parallel-agents/SKILL.md
+superpowers:executing-plans
+Use when you have a written implementation plan to execute in a separate session with review checkpoints
+指纹 a711f83f
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/executing-plans/SKILL.md
+superpowers:finishing-a-development-branch
+Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup
+指纹 dd2f82c6
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/finishing-a-development-branch/SKILL.md
+superpowers:receiving-code-review
+Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation
+指纹 c9382e92
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/receiving-code-review/SKILL.md
+superpowers:requesting-code-review
+Use when completing tasks, implementing major features, or before merging to verify work meets requirements
+指纹 a5ff6858
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/requesting-code-review/SKILL.md
+superpowers:subagent-driven-development
+Use when executing implementation plans with independent tasks in the current session
+指纹 081ad386
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/subagent-driven-development/SKILL.md
+superpowers:systematic-debugging
+Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+指纹 4999cb85
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/systematic-debugging/SKILL.md
+superpowers:test-driven-development
+Use when implementing any feature or bugfix, before writing implementation code
+指纹 7dee67b4
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/test-driven-development/SKILL.md
+superpowers:using-git-worktrees
+Use when starting feature work that needs isolation from current workspace or before executing implementation plans - creates isolated git worktrees with smart directory selection and safety verification
+指纹 de9dcde3
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/using-git-worktrees/SKILL.md
+superpowers:using-superpowers
+Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions
+指纹 316e2938
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/using-superpowers/SKILL.md
+superpowers:verification-before-completion
+Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always
+指纹 ea52d15a
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/verification-before-completion/SKILL.md
+superpowers:writing-plans
+Use when you have a spec or requirements for a multi-step task, before touching code
+指纹 90056bad
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/writing-plans/SKILL.md
+superpowers:writing-skills
+Use when creating new skills, editing existing skills, or verifying skills work before deployment
+指纹 38ba6489
+全局
+Claude Code Marketplace · claude-plugins:user
+启用
+已加载
+/Users/sz-0203015357/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/writing-skills/SKILL.md
+task-query
+从钉钉多维表查任务（谁的任务、什么截止、什么状态）。触发词："本周/本周五/X月X日前 到节点/到期/截止的任务"、"XX负责什么任务"、"任务进度"、"项目计划"。
+指纹 7b7b4842
+Agent
+CornField · native:project
+启用
+已加载
+/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/mcode/.cornfield/skills/task-query/SKILL.md
+tdd
+Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
+指纹 180d256c
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/tdd/SKILL.md
+testing
+Skill validation framework PLUS daily test-suite health and regression intelligence. Validates skill conformance (frontmatter, manifest coverage, resolver coverage). Runs the project test suite in tiered phases (unit / evals / integration / system health), classifies failures, and produces a regression-aware report.
+v1.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/testing/SKILL.md
+to-questionnaire
+Turn a decision you can't fully answer into a questionnaire for someone else to fill in.
+指纹 b5eb9298
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/to-questionnaire/SKILL.md
+to-spec
+Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.
+指纹 43ad9cf3
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/to-spec/SKILL.md
+to-tickets
+Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
+指纹 5c9fba69
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/to-tickets/SKILL.md
+transcript-correction
+model-invoked. Trigger phrasing: "When the user wants to correct STT proper noun errors (修正转录/纠正专有名词/修复转写中的名词错误), or has run STT on a Chinese audio file and the output contains garbled proper nouns (公司名/产品名/技术名/模型名). Skip if the user only needs a comparison document without correction."
+指纹 7c0f1ac8
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/transcript-correction/SKILL.md
+triage
+Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.
+指纹 623a2ed6
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/triage/SKILL.md
+validate-agent
+Validate an agentDir structure for completeness, file format, and MECE ownership compliance. Use this when the user asks to "validate an agent", "check agent", "audit agent", or when they run `omp agent validate --dir <path>`.
+指纹 e3a18128
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/validate-agent/SKILL.md
+view-gateway-sessions
+Tail a gateway agent's session JSONL — IM conversation, cron task run, or scheduler exec diagnostic. Use when the user asks to view, debug, trace, or read a session, conversation, cron run, or exec failure of a gateway account. Skip for direct `cat <file>`, for `omp agent show` identity queries, or for tasks already known by cron slug (`omp gateway cron logs <slug>` handles those).
+指纹 55162f49
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/view-gateway-sessions/SKILL.md
+voice-note-ingest
+Ingest a voice note with exact-phrasing preservation (never paraphrased). Routes content to originals/, concepts/, people/, companies/, ideas/, personal/, or voice-notes/ based on a decision tree. The user's exact words are the signal.
+v0.1.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/voice-note-ingest/SKILL.md
+wait-what
+Stop. That last message did not land: re-pitch it.
+指纹 032f9c01
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/wait-what/SKILL.md
+wayfinder
+Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.
+指纹 fee6e1d0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/wayfinder/SKILL.md
+webhook-transforms
+Generic framework for converting external events (SMS, meetings, social mentions) into brain-ingestible signals. Define a transform function, register a webhook URL, and incoming events get processed through the brain pipeline.
+v1.0.0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/webhook-transforms/SKILL.md
+wizard
+Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.
+指纹 bdf31d48
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/wizard/SKILL.md
+writing-for-agents
+Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.
+指纹 551adca9
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/writing-for-agents/SKILL.md
+writing-great-skills
+Reference for writing and editing skills well — the vocabulary and principles that make a skill predictable.
+指纹 b2fadff7
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/writing-great-skills/SKILL.md
+wukong-knowledge-audit
+对钉钉知识库进行系统性诊断审计，支持轻量级审计和深度审计两种模式， 输出文档健康度评估、分类规划和知识地图索引文档。 Use when user mentions "审计知识库", "知识库体检", "盘一盘文档", "文档太乱了", "帮我理一理文档", "哪些文档过期了", "建个文档索引", "生成知识地图", or asks to "诊断文档质量", "规划目录结构", "看看哪些文档该清理了". Distinct from wukong-doc-technical-solution (文档内容生成，非结构诊断) and 通用 doc search (单次检索，无诊断分析). Do NOT use for 重写文档正文, 删除文档, 移动文档到指定文件夹, 批量修改文档权限.
+指纹 be1448c0
+全局
+CornField · native:user
+启用
+已加载
+/Users/sz-0203015357/.cornfield/agent/skills/wukong-knowledge-audit/SKILL.md
+已停用（settings skills.ignoredSkills）
+gitnexus-cli
+—
+版本未知
+全局
+native · native:user
+读不到
+可发现
+/Users/sz-0203015357/.cornfield/agent/skills/gitnexus-cli/SKILL.md
+原因：settings.disabledExtensions；磁盘上找不到它的 SKILL.md
+gitnexus-guide
+—
+版本未知
+全局
+native · native:user
+读不到
+可发现
+/Users/sz-0203015357/.cornfield/agent/skills/gitnexus-guide/SKILL.md
+原因：settings.disabledExtensions；磁盘上找不到它的 SKILL.md
+131 个本次会话加载的技能 · 停用 2 · 受阻/错误 0—— 数据来自 get_skills（agentDir /Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/mcode）；启用/停用在「技能」页操作。
+← 返回 Agent 列表

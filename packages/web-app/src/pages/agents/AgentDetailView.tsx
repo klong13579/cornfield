@@ -7,7 +7,12 @@ import type {
 } from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { AgentPromptSourceDto, GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
+import type {
+	AgentPromptSourceDto,
+	GatewayAccountPatchDto,
+	GatewayGroupInfo,
+	GatewayStatusDto,
+} from "../../lib/pi-client-api";
 import { SCOPE_LABELS } from "../../lib/scope-display";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
@@ -19,6 +24,7 @@ import {
 } from "../skills/skill-display";
 import { FileExplorer } from "../workspace/FileExplorer";
 import { KindBadge } from "./AgentsView";
+import { agentStatusDisplay } from "./agent-status";
 import { ModelPicker } from "./ModelPicker";
 
 /**
@@ -50,6 +56,27 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	const [hostTools, setHostToolsState] = useState<HostToolDefinitionDto[]>(() => store.getHostTools());
 	const [newHostName, setNewHostName] = useState("");
 	const [newHostDesc, setNewHostDesc] = useState("");
+	// gateway 运行状态（与列表页同源）：头部用它套用「账号停用」覆盖，与列表卡片同一判定。
+	const [gwStatus, setGwStatus] = useState<GatewayStatusDto | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		const load = async (): Promise<void> => {
+			try {
+				const s = await store.gatewayStatus();
+				if (!cancelled) setGwStatus(s);
+			} catch {
+				// gateway 未运行 → 保持 serve 快照兜底（与列表页 isAccountStopped 的 null 分支一致）
+			}
+		};
+		if (view.connected) void load();
+		const t = setInterval(() => {
+			if (view.connected) void load();
+		}, 15_000);
+		return () => {
+			cancelled = true;
+			clearInterval(t);
+		};
+	}, [store, view.connected]);
 
 	const registerHostTool = () => {
 		const name = newHostName.trim();
@@ -73,7 +100,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	const agent = view.agents.find(a => a.id === agentId);
 	const name = agent?.name ?? (view.agents.length === 0 ? "等待 Agent 注册表" : "未知 Agent");
 	// 当前模型（裸 id，与「模型配置」tab 的 Provider/Model 两个下拉同源：AgentDetailView → ModelPicker）。
-	const currentModel = agent?.model ?? view.model ?? "";
+	const currentModel = agent?.model ?? "—";
 
 	return (
 		<div className="px-10 pt-8 pb-12">
@@ -82,9 +109,9 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 				<div className="mb-8">
 					<div className="mb-2.5 flex items-center gap-2 text-[12px] text-ink-subtle">
 						<span
-							className={`h-2 w-2 rounded-full ${agent?.status === "busy" ? "bg-warning animate-pulse" : agent?.status === "idle" || agent?.status === "online" ? "bg-success" : "bg-ink-faint"}`}
+							className={`h-2 w-2 rounded-full ${agent ? agentStatusDisplay(agent, gwStatus).dotClass : "bg-ink-faint"}`}
 						/>
-						{agent ? `${statusText(agent.status)} · 最近活跃 ${agent.lastAction ?? "—"}` : "会话未注册"}
+						{agent ? agentStatusDisplay(agent, gwStatus).label : "会话未注册"}
 						{agent?.dingtalk?.enabled && (
 							<span
 								className="badge done"
@@ -119,7 +146,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 						{agent && <KindBadge kind={agent.kind} />}
 					</div>
 					<div className="mt-2 text-[15px] text-ink-subtle">
-						{agent ? `${agent.workspace} · 最近活跃 ${agent.lastAction ?? "—"}` : "等待 Agent 注册表推送"}
+						{agent ? agent.workspace : "等待 Agent 注册表推送"}
 					</div>
 				</div>
 
@@ -245,21 +272,6 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	);
 }
 
-function statusText(status?: string): string {
-	switch (status) {
-		case "online":
-			return "运行中";
-		case "busy":
-			return "执行中";
-		case "idle":
-			return "空闲";
-		case "stopped":
-			return "已停用";
-		default:
-			return "状态未知";
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────
 // 钉钉 tab：agent 绑定的机器人配置（gateway.json channels.dingtalk.accounts）
 // 可编辑白名单：enabled/robotName/agentDir/deniedTools/hideThinkingBlock。
@@ -281,7 +293,7 @@ const DYNAMIC_TOOL_OPTIONS = [
 	"render_mermaid",
 ];
 
-function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
+export function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const agent = view.agents.find(a => a.id === agentId);
@@ -410,6 +422,7 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 								type="button"
 								role="switch"
 								aria-checked={enabled}
+								aria-label={`启用钉钉账号：${enabled ? "开" : "关"}`}
 								className={`toggle shrink-0 ${enabled ? "on" : ""}`}
 								onClick={() => setEnabledDraft(!enabled)}
 							/>
@@ -448,6 +461,7 @@ function DingtalkView({ agentId }: { agentId: string }): React.JSX.Element {
 							type="button"
 							role="switch"
 							aria-checked={hideThinking}
+							aria-label={`隐藏思考块：${hideThinking ? "开" : "关"}`}
 							className={`toggle shrink-0 ${hideThinking ? "on" : ""}`}
 							onClick={() => setHideThinkingDraft(!hideThinking)}
 						/>
