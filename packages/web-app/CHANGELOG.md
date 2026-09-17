@@ -17,6 +17,10 @@
 
 ### Fixed
 
+- **Prompts tab 不再自备一份会漂移的源清单**（`src/pages/agents/AgentDetailView.tsx`, `src/state/pi-client-adapter.ts`, `src/pages/agents/AgentDetailView.prompt-sources.render.test.ts`, `test/pi-client-adapter-prompt-sources.test.ts`）：前端硬编码的 7 项里，`.omp/SYSTEM.md` 是旧路径（实际是 `.cornfield/SYSTEM.md`），`AGENTS-personal.md` / `CONTEXT.md` 全仓只有它提过（根本不存在），而真正 always-on 的 `TOOLS.md` / `TODO.md` / `knowledge/external-workspaces.md` 反而没入口。现在读 serve 的 `get_agent_prompt_sources`（8 项真源），逐项标存在性：清单说不在 → 「该文件不存在」（不去读一个已知不存在的文件）；清单说在但读失败 → 「读取失败：<服务端原文>」；没点过 → 「未读」。换 agent 时整份回到加载中（不作旧答复上屏）。
+
+- **gateway 请求不再写死 `127.0.0.1:7892`**（`src/state/pi-client-adapter.ts`, `test/pi-client-adapter-gateway-wire.test.ts`, e2e 各 spec）：浏览器读不到 `CORNFIELD_GATEWAY_WIRE_PORT`，所以这个端口由 **serve 在握手里报**（`hello_ack.gatewayWirePort`），前端照用；没拿到就快速报「gateway 端口未知：待 serve 上报」并**不发请求**（不回落到一个猜的端口），断开后作废。后果：用隔离 HOME 跑 e2e 时页面仍连真实运营中的 gateway 这件事结束了 —— 现在 e2e harness 把端口指到一个没人监听的口，并断言到 7892 的请求数为 0。
+
 - **Agent 详情的模型配置首屏不再空**（`src/pages/agents/AgentDetailView.tsx`, `src/pages/agents/ModelPicker.tsx`, `src/pages/agents/ModelPicker.render.test.ts`）：Provider 下拉此前写死 `anthropic` —— 它不在自己的选项里（React 受控 select 的 selectedIndex 直接是 -1），Model 下拉又被那个 provider 过滤成 **0 个 option**，于是首屏既选不了也看不到当前模型。现在 provider 由当前模型在真目录里反查（唯一命中才算知道，目录未到 / 不在可用列表 / 同名模型分属多 provider 都明说「未知」，不编一个出来），Model 下拉恒 ≥1 个选项，未连接 / 加载中 / 读取失败 / 确实没有四态分开。
 
 - **右栏「读不到」不再渲染成「没有」**（`src/pages/workspace/ArtifactsPanel.tsx`, `ChangesPanel.tsx`, `RightPanel.tsx`, `src/pages/workspace/ArtifactsPanel.render.test.ts`, `test/session-git-changes-state.test.ts`）：产物 tab 在未连接时说「暂无产物」（把「读不到清单」说成「没有产物」），读取态从三档扩到五档（未连接 / 身份未挂载 / 加载中 / 已就绪 / 失败），并补上改动卡片「既没读到清单也没报错」这一支（此前那一帧只有组头、一句话都不说）。
