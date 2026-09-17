@@ -4,23 +4,36 @@
 
 import type { DingtalkAgentConfigDto } from "../frames";
 
+/** Agent 类别（元数据，仅 UI 分组，内核不分派差异）。 */
 export type AgentKind = "coding" | "worker";
+
+/**
+ * Agent 状态 —— **是「本连接视角」的投影，不是进程状态**：
+ * - `online`：本连接焦点（active）
+ * - `busy`：attached 且 phase 在 streaming/executing_tool/compacting/retrying
+ * - `idle`：已 attached 但非焦点
+ * - `stopped`：未 attached（只有元数据，没有会话实例）
+ * 「运行中/空闲」这类 UI 文案由此推导，含义是「连接焦点」而非「agent 进程在跑」。
+ */
 export type AgentStatus = "online" | "busy" | "idle" | "stopped";
 
 export interface AgentInfoDto {
 	id: string;
 	name: string;
 	face: string;
+	/** 工作区分组键（适配层从 wire `role` 取值，= workspace.json `domain`；无则「默认工作区」）。 */
 	workspace: string;
 	kind: AgentKind;
 	status: AgentStatus;
+	/** 【无数据源】最近活跃时间 —— 适配层不填充，恒 undefined；界面按缺省渲染（不显示或「—」）。 */
 	lastAction?: string;
 	model?: string;
 	skillsCount?: number;
+	/** 【无数据源】定时任务数 —— 调度器在 gateway 进程，serve 的 list_agents 拿不到；恒 undefined。 */
 	cronCount?: number;
 	/** 已 lazy attach 到本进程（注册表 attached）。 */
 	attached?: boolean;
-	/** 本连接焦点 agent（真；多连接时可能为其它连接的焦点）。 */
+	/** 本连接焦点 agent（真；多连接时可能为其它连接的焦点）。**不是进程状态。** */
 	active?: boolean;
 	/** 运行阶段（attached 时有值）。 */
 	phase?: "idle" | "streaming" | "compacting" | "retrying" | "executing_tool";
