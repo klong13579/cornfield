@@ -57,8 +57,9 @@ test("project：命令面 → 落盘 → 失败即 ok:false 且请求 id 不丢"
 		const handle = await waitForServe(proc, port);
 		const ws = await connect(handle.url);
 
-		// 还没声明过 = 明确空集（不是「读不到」）
-		expect(await request(ws, { type: "list_projects" })).toEqual({ projects: [] });
+		// 还没声明过 = 明确空集（不是「读不到」）。`currentProjectSource` 是 T27 加的权威归属来源字段，
+		// 这里一并钉住它：空集时必须明说「没有来源」，而不是缺字段。
+		expect(await request(ws, { type: "list_projects" })).toEqual({ projects: [], currentProjectSource: "none" });
 
 		// 声明：答复是存储里那一份（root 归一），并且真的落了盘
 		const created = (await request(ws, {
@@ -86,6 +87,7 @@ test("project：命令面 → 落盘 → 失败即 ok:false 且请求 id 不丢"
 		// 读面看得见它（写面与读面是同一份事实）
 		expect(await request(ws, { type: "list_projects" })).toEqual({
 			projects: [{ projectId: "dtc", root: rootA, name: "米克原子 DTC", defaultAgentId: "hr" }],
+			currentProjectSource: "none",
 		});
 
 		// 更新同一条（换 root、去掉 defaultAgentId）：答复里不该再带那个键
@@ -131,6 +133,7 @@ test("project：命令面 → 落盘 → 失败即 ok:false 且请求 id 不丢"
 		expect(await Bun.file(storeFile).text()).toBe(before);
 		expect((await request(ws, { type: "list_projects" })) as unknown).toEqual({
 			projects: [{ projectId: "dtc", root: path.join(isolatedHome, "repos", "dtc-2"), name: "DTC" }],
+			currentProjectSource: "none",
 		});
 
 		// 删一个本来就不在的 Project = 错误（不是一次成功的空删除）
@@ -141,7 +144,7 @@ test("project：命令面 → 落盘 → 失败即 ok:false 且请求 id 不丢"
 
 		// 真删：答复 projectId，盘上不再有它
 		expect(await request(ws, { type: "delete_project", projectId: "dtc" })).toEqual({ projectId: "dtc" });
-		expect(await request(ws, { type: "list_projects" })).toEqual({ projects: [] });
+		expect(await request(ws, { type: "list_projects" })).toEqual({ projects: [], currentProjectSource: "none" });
 		expect(await Bun.file(storeFile).text()).not.toContain("dtc");
 
 		// 存储坏了：读面与写面都 ok:false（不当成「没声明过」）
