@@ -8,11 +8,24 @@
  *
  * Generated from ~/.cornfield/agent/models.yml providers.narwal-plan —— 保持与用户实测
  * 元数据一致。新增/变更模型时同步更新此处或依赖 discovery 裸条目（元数据为占位值）。
+ *
+ * Two APIs are in play. Most ids are served by `/v1/chat/completions`, but the
+ * gateway's gpt-6-astra / gpt-5.6-luna / gpt-5.6-terra upstreams refuse
+ * function tools on that endpoint whenever reasoning is engaged — including
+ * when `reasoning_effort` is omitted altogether (measured 2026-09-17: any
+ * non-empty `tools` → 400 "Function tools with reasoning_effort are not
+ * supported … use /v1/responses"; the same request over `/v1/responses` →
+ * 200). Those entries declare `api: "openai-responses"`. `compat` is typed per
+ * API and only exists for the completions transport, so they carry none —
+ * the responses transport reads the base URL for its compatibility decisions.
  */
 import { Effort } from "../model-thinking";
 import type { Model } from "../types";
 
-export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] = [
+/** APIs this catalog spans; see the file docstring for when each applies. */
+export type NarwalPlanApi = "openai-completions" | "openai-responses";
+
+export const NARWAL_PLAN_STATIC_MODELS: readonly Model<NarwalPlanApi>[] = [
 	{
 		id: "glm-5.2",
 		name: "GLM 5.2",
@@ -702,9 +715,12 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 		},
 	},
 	{
+		// Responses API only — see the file docstring. `gpt-5.6-sol` (next) sits on
+		// the same upstream family but still accepts tools on chat/completions
+		// (measured 2026-09-17: 200), so it keeps the completions transport.
 		id: "gpt-5.6-luna",
 		name: "GPT 5.6 Luna",
-		api: "openai-completions",
+		api: "openai-responses",
 		provider: "narwal-plan",
 		baseUrl: "https://coder.narwal.com/v1",
 		reasoning: true,
@@ -722,14 +738,12 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 			minLevel: Effort.Minimal,
 			maxLevel: Effort.High,
 		},
-		compat: {
-			supportsDeveloperRole: false,
-		},
 	},
 	{
+		// Responses API only — see the file docstring.
 		id: "gpt-5.6-terra",
 		name: "GPT 5.6 Terra",
-		api: "openai-completions",
+		api: "openai-responses",
 		provider: "narwal-plan",
 		baseUrl: "https://coder.narwal.com/v1",
 		reasoning: true,
@@ -746,9 +760,6 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 			mode: "effort",
 			minLevel: Effort.Minimal,
 			maxLevel: Effort.High,
-		},
-		compat: {
-			supportsDeveloperRole: false,
 		},
 	},
 	{
@@ -777,14 +788,15 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 		},
 	},
 	{
-		// Measured 2026-09-15 against coder.narwal.com/v1/chat/completions: the gateway
-		// rejects minimal/none (400 "Unsupported value ... Supported values are: 'low',
-		// 'medium', 'high', 'xhigh', and 'max'"), accepts image parts, and returns tool
-		// calls. The gateway publishes no pricing for this id, so cost stays 0 until a
-		// source exists — the catalog must not invent one.
+		// Responses API only — see the file docstring. The effort ladder was
+		// measured 2026-09-15 on chat/completions (low/medium/high/xhigh accepted,
+		// minimal/none rejected as "Unsupported value"); the 2026-09-17 measurement
+		// that moved this id off that endpoint found the same ladder over
+		// /v1/responses. The gateway publishes no pricing for this id, so cost stays
+		// 0 until a source exists — the catalog must not invent one.
 		id: "gpt-6-astra",
 		name: "GPT 6 Astra",
-		api: "openai-completions",
+		api: "openai-responses",
 		provider: "narwal-plan",
 		baseUrl: "https://coder.narwal.com/v1",
 		reasoning: true,
@@ -801,9 +813,6 @@ export const NARWAL_PLAN_STATIC_MODELS: readonly Model<"openai-completions">[] =
 			mode: "effort",
 			minLevel: Effort.Low,
 			maxLevel: Effort.XHigh,
-		},
-		compat: {
-			supportsDeveloperRole: false,
 		},
 	},
 	{

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`narwal-plan/gpt-6-astra`（及同族的 `gpt-5.6-luna` / `gpt-5.6-terra`）在 `chat/completions` 上带工具必 400 —— 三个 id 改走 `/v1/responses`**（`src/provider-models/narwal-plan.ts`、`src/provider-models/openai-compat.ts`、`src/models.json` 重新生成、新增 `test/narwal-plan-responses-routing.test.ts` + 扩写 `test/narwal-plan-provider.test.ts`）：网关这三个 id 的上游拒绝「function tools + reasoning」组合，且**不发 `reasoning_effort` 也一样 400**（实测 2026-09-17 直打 `coder.narwal.com/v1`：任何非空 `tools` → 400「Function tools with reasoning_effort are not supported … use /v1/responses」；照它的提示改 `reasoning_effort: none` 反而回「Unsupported value … Supported values are: 'low', 'medium', 'high', and 'xhigh'」）—— agent 每一轮都带工具，所以这三个 id 在原来那条通路上没有任何可用请求形态。修法：种子把这三个 id 声明为 `api: "openai-responses"`（同族 `gpt-5.5` / `gpt-5.6-sol` 同日实测 200，不动；`gpt-5.4` 上游整体不支持，另有其事），`NARWAL_PLAN_STATIC_MODELS` 类型放宽为 `Model<NarwalPlanApi>` 并贯穿 `narwalPlanModelManagerOptions`（discovery 只给裸 id，未种子 id 仍留在 completions）；`compat` 是按 API 的条件类型、只有 completions 有，故这三个条目不再携带它（responses 通路的兼容决策走 baseUrl）。同一条请求在 `/v1/responses` 实测 200，含 harness 实际会发的 `store:false` / `include:["reasoning.encrypted_content"]` / `reasoning:{effort,summary}` 与扁平工具 schema。
+	症状是**间歇性**的，容易误判成回归：`gpt-6-astra` 是别名，后面挂着多个后端，其中仍有允许 tools 的（10 次同请求 9 次 400、1 次 200，且那次响应自称 `gpt-5.6-luna`）。定位依据：会话日志里该模型有 1349 条成功回合、跨度 2026-09-15 14:16 → 09-16 16:58（+08，其中大量 `stopReason=toolUse`），`packages/ai` 自 09-15 起无提交，全机第一条 astra 400 是 09-17 17:11 —— 变的是网关，不是本仓。
+	重跑 `bun run generate-models`：除这三个条目（api + 去掉 compat）外带入 137 处其它 provider 的上游漂移（amazon-bedrock 98 changed / openrouter 39 changed，另新增 270 个键、多为 bedrock apac 条目），属生成文件常态。
+	验收（2026-09-17 真 transport 两轮工具对话，各 id 逐个跑）：`gpt-6-astra` 与 `gpt-5.6-luna` 首轮拿到 tool call、回灌 tool_result 后正常收尾（astra 8 次采样 7 次 200，唯一失败是上游 `service_unavailable_error`/`server_is_overloaded` 过载）；`gpt-5.6-terra` 的上游目前不稳（同一形状时而 200、时而 `server_error`，不带工具也复现），与本次换通路无关，但意味着该 id 暂不可用 —— 两个通路都挂（completions 策绝 tools，responses 后端抽风），留着 responses 至少单轮工具可用。重试策略关掉时（`config.yml retry.enabled: false`）这类上游过载会直接落到会话上。
+
 ## [1.2.4] - 2026-09-15
 
 ### Fixed

@@ -11,7 +11,7 @@ import {
 import { toFireworksPublicModelId } from "../utils/fireworks-model-id";
 import { getGitHubCopilotBaseUrl, OPENCODE_HEADERS, parseGitHubCopilotApiKey } from "../utils/oauth/github-copilot";
 import { createBundledReferenceMap, createReferenceResolver } from "./bundled-references";
-import { NARWAL_PLAN_STATIC_MODELS } from "./narwal-plan";
+import { NARWAL_PLAN_STATIC_MODELS, type NarwalPlanApi } from "./narwal-plan";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
@@ -1166,7 +1166,7 @@ export interface NarwalPlanModelManagerConfig {
 
 export function narwalPlanModelManagerOptions(
 	config?: NarwalPlanModelManagerConfig,
-): ModelManagerOptions<"openai-completions"> {
+): ModelManagerOptions<NarwalPlanApi> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? "https://coder.narwal.com/v1";
 	// Seed metadata comes from NARWAL_PLAN_STATIC_MODELS (user-verified costs / context
@@ -1181,7 +1181,10 @@ export function narwalPlanModelManagerOptions(
 			category: inferProbeCategory(m.id),
 		})),
 		fetchDynamicModels: () =>
-			fetchOpenAICompatibleModels({
+			fetchOpenAICompatibleModels<NarwalPlanApi>({
+				// Discovery is a bare id list (`GET /v1/models`), so this api value only
+				// seeds ids the catalog does not know; seeded entries take their api
+				// from the reference below (see NARWAL_PLAN_STATIC_MODELS).
 				api: "openai-completions",
 				provider: "narwal-plan",
 				baseUrl,

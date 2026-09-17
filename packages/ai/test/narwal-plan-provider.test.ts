@@ -64,6 +64,7 @@ describe("narwal-plan provider support", () => {
 		expect(getBundledProviders()).toContain("narwal-plan");
 		const models = getBundledModels("narwal-plan") as {
 			id: string;
+			api?: string;
 			contextWindow?: number;
 			maxTokens?: number;
 			reasoning?: boolean;
@@ -73,10 +74,22 @@ describe("narwal-plan provider support", () => {
 
 		const minimaxM3 = models.find(m => m.id === "minimax-m3");
 		expect(minimaxM3).toBeDefined();
+		expect(minimaxM3?.api).toBe("openai-completions");
 		expect(minimaxM3?.contextWindow).toBe(1_000_000);
 		expect(minimaxM3?.maxTokens).toBe(131_072);
 		expect(minimaxM3?.reasoning).toBe(true);
 		expect(minimaxM3?.thinking?.mode).toBe("effort");
+	});
+
+	it("bundles the responses-only ids as such (guards the regenerated models.json)", () => {
+		// The gateway refuses function tools on chat/completions for these ids, so a
+		// stale models.json that still says `openai-completions` breaks every agent
+		// turn on them. The seed is the source of truth; this asserts the generated
+		// catalog was rebuilt from it.
+		const models = getBundledModels("narwal-plan") as { id: string; api?: string }[];
+		for (const id of ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra"]) {
+			expect(models.find(m => m.id === id)?.api).toBe("openai-responses");
+		}
 	});
 
 	it("builds model manager options with narwal defaults", () => {
@@ -108,6 +121,8 @@ describe("narwal-plan provider support", () => {
 		expect(discovered).toBeDefined();
 		expect(discovered?.contextWindow).toBe(1_000_000);
 		expect(discovered?.maxTokens).toBe(384_000);
+		// An unseeded id keeps the discovery default api; only seeded ids override it.
+		expect(discovered?.api).toBe("openai-completions");
 	});
 
 	it("prefers gateway limits over seed limits but keeps seed cost metadata", async () => {
@@ -133,7 +148,9 @@ describe("narwal-plan provider support", () => {
 		// resolves as `reasoning: false` with text-only input and no thinking ladder —
 		// which is how gpt-6-astra shipped unusable-thinking until it was seeded.
 		// Effort ladder measured 2026-09-15 against /v1/chat/completions: low..max are
-		// accepted, `minimal` and `none` are 400 ("Unsupported value").
+		// accepted, `minimal` and `none` are 400 ("Unsupported value"). The transport
+		// moved to /v1/responses on 2026-09-17 for the same ladder (tools are refused
+		// on chat/completions for this id); the ladder itself is unchanged.
 		global.fetch = gatewayModelsFetch([
 			{
 				id: "gpt-6-astra",
@@ -157,6 +174,9 @@ describe("narwal-plan provider support", () => {
 			expect(astra).toBeDefined();
 			expect(astra?.reasoning).toBe(true);
 			expect(astra?.input).toEqual(["text", "image"]);
+			// The gateway refuses function tools on chat/completions for this upstream,
+			// so the seed routes it through /v1/responses and the merge must keep that.
+			expect(astra?.api).toBe("openai-responses");
 			// minimal is absent: the upstream rejects it, and the harness default medium
 			// must survive unclamped rather than being pinned down to low.
 			expect(getSupportedEfforts(astra!)).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
