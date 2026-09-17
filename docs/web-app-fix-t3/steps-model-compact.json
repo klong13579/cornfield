@@ -1,0 +1,68 @@
+[
+	{
+		"mark": "模型下拉：点开"
+	},
+	{
+		"click": "@button=deepseek-v4-flash"
+	},
+	{
+		"wait": 1000
+	},
+	{
+		"shot": "model-menu"
+	},
+	{
+		"eval": "[...document.querySelectorAll('span')].filter(s => s.textContent === '当前').length"
+	},
+	{
+		"eval": "!!document.querySelector('input[placeholder*=\"过滤模型\"]')"
+	},
+	{
+		"eval": "(() => { const input = document.querySelector('input[placeholder*=\"过滤模型\"]'); return input ? input.placeholder : 'no-filter-input'; })()"
+	},
+	{
+		"mark": "模型下拉：过滤词过滤"
+	},
+	{
+		"eval": "(() => { const input = document.querySelector('input[placeholder*=\"过滤模型\"]'); if (!input) return 'no-input'; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; setter.call(input, 'deepseek'); input.dispatchEvent(new Event('input', { bubbles: true })); return 'filtered-by-deepseek'; })()"
+	},
+	{
+		"wait": 500
+	},
+	{
+		"shot": "model-menu-filtered"
+	},
+	{
+		"eval": "[...document.querySelectorAll('span')].filter(s => s.textContent === '当前').length"
+	},
+	{
+		"mark": "关闭模型下拉"
+	},
+	{
+		"press": [
+			"body",
+			"Escape"
+		]
+	},
+	{
+		"wait": 500
+	},
+	{
+		"mark": "compact：点一下（应只 arming，不发 compact 帧）"
+	},
+	{
+		"click": "@button=compact"
+	},
+	{
+		"wait": 700
+	},
+	{
+		"shot": "compact-arm"
+	},
+	{
+		"eval": "document.body.innerText.includes('会压缩上下文')"
+	},
+	{
+		"eval": "[...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(t => t === '确认' || t === '取消')"
+	}
+]
