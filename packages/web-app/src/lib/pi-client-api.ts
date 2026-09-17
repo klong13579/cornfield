@@ -443,9 +443,9 @@ export interface PiClient {
 	retryFrom(entryId: string, message?: string): Promise<void>;
 	setModel(modelId: string, provider?: string, sessionId?: string): Promise<void>;
 	setThinkingLevel(level: string, sessionId?: string): Promise<void>;
-	/** 读目标 agent 的 config.yml 域（per-agent）。 */
+	/** 读目标 agent 的配置合并视图（per-agent）。 */
 	getConfig(sessionId: string, key?: string): Promise<{ config: unknown }>;
-	/** 写目标 agent 的 config.yml 域并持久化（per-agent）。 */
+	/** 写目标 agent 生效层的配置并持久化（per-agent）。 */
 	setConfig(sessionId: string, key: string, value: unknown): Promise<{ ok: boolean; key: string; value: unknown }>;
 	/** 工具开关语义视图（per-agent）。 */
 	getToolSwitches(sessionId: string): Promise<ToolSwitchesDto>;
@@ -456,7 +456,7 @@ export interface PiClient {
 
 	/**
 	 * 停用/恢复 provider（modelId 缺省）或单个模型（provider/modelId 精确 pattern）。
-	 * 写 settings（~/.cornfield/agent/config.yml）并即时生效；返回最新停用名单供 UI 同步。
+	 * 写目标 agent 的停用名单并即时生效（落生效层：有项目级 .cornfield/config.yml 就写它，否则写该 agent 的 config.yml）；返回最新名单供 UI 同步。
 	 */
 	setModelDisabled(
 		provider: string,

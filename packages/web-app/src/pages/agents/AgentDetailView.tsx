@@ -170,7 +170,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 				{tab === "tools" && (
 					<div className="flex flex-col gap-8">
 						<section>
-							<h4 className="mb-3 section-title text-ink-faint">内核工具开关（写该 agent 的 config.yml）</h4>
+							<h4 className="mb-3 section-title text-ink-faint">内核工具开关（写该 agent 生效的那层配置）</h4>
 							<ToolSwitchesView agentId={agentId} />
 						</section>
 						<section>
@@ -552,7 +552,7 @@ const PYTHON_MODES: Array<{ value: ToolSwitchesDto["pythonToolMode"]; label: str
 	{ value: "ipy-only", label: "ipy-only — 仅 Python" },
 ];
 
-/** 内核工具开关（get_tool_switches 真读 + set_config 写回该 agent 的 config.yml）。 */
+/** 内核工具开关（get_tool_switches 真读合并视图 + set_config 写回生效层）。 */
 function ToolSwitchesView({ agentId }: { agentId: string }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
@@ -654,7 +654,8 @@ function ToolSwitchesView({ agentId }: { agentId: string }): React.JSX.Element {
 				))}
 			</div>
 			<div className="mt-3 text-[11px] text-ink-faint">
-				开关状态来自该 agent 的 config.yml（未配置项显示内核默认）；切换立即写回配置文件，新建会话生效。
+				开关状态来自该 agent 的配置合并视图（未配置项显示内核默认）；切换写回生效层：有项目级 .cornfield/config.yml
+				就写它，否则写该 agent 的 config.yml。新建会话生效。
 			</div>
 		</div>
 	);

@@ -336,13 +336,13 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "permission_respond", requestId, choice }).then(() => undefined);
 	}
 
-	/** 读目标 agent 的 config.yml 域（get_config；per-agent，sessionId 必传）。 */
+	/** 读目标 agent 的配置合并视图（get_config；per-agent，sessionId 必传）。 */
 	getConfig(sessionId: string, key?: string): Promise<{ config: unknown }> {
 		const command = { type: "get_config", sessionId, ...(key ? { key } : {}) } as never;
 		return this.#req<{ config: unknown }>(command);
 	}
 
-	/** 写目标 agent 的 config.yml 域并持久化（set_config；per-agent）。 */
+	/** 写目标 agent 生效层的配置并持久化（set_config；per-agent）。 */
 	setConfig(sessionId: string, key: string, value: unknown): Promise<{ ok: boolean; key: string; value: unknown }> {
 		const command = { type: "set_config", sessionId, key, value } as never;
 		return this.#req<{ ok: boolean; key: string; value: unknown }>(command);

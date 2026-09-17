@@ -635,12 +635,12 @@ export class SessionStore {
 		void this.#client.permissionRespond(requestId, choice).catch(() => undefined);
 	}
 
-	/** 读目标 agent 的 config.yml 域（per-agent）。 */
+	/** 读目标 agent 的配置合并视图（per-agent）。 */
 	getConfig(agentId: string, key?: string): Promise<{ config: unknown }> {
 		return this.#client.getConfig(agentId, key);
 	}
 
-	/** 写目标 agent 的 config.yml 域并持久化（per-agent；同步更新该 agent 的配置视图）。 */
+	/** 写目标 agent 生效层的配置并持久化（per-agent；同步更新该 agent 的配置视图）。 */
 	setConfig(agentId: string, key: string, value: unknown): Promise<{ ok: boolean }> {
 		return this.#client.setConfig(agentId, key, value);
 	}

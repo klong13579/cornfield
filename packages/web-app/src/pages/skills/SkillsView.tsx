@@ -786,7 +786,7 @@ function SkillRowView({
 				type="button"
 				onClick={onToggle}
 				disabled={busy}
-				title="停用该技能（写该 Agent 的 config.yml skills.ignoredSkills）"
+				title="停用该技能（写该 Agent 生效层的 config.yml：skills.ignoredSkills）"
 				aria-label={`${row.name} 启停开关（当前已启用）`}
 				className="mt-0.5 flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-success/40 px-0.5 transition-colors hover:bg-success/60 disabled:cursor-not-allowed"
 			>
