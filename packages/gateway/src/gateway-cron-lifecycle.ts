@@ -20,7 +20,7 @@ import { computeInactivityBudgetMs } from "./scheduler/executor";
 import { SchedulerFileStore } from "./scheduler/file-store";
 import { JsonFileStorage } from "./scheduler/json-file-storage";
 import testRunCompletionTemplate from "./scheduler/prompts/test-run-completion.md" with { type: "text" };
-import type { SchedulerStorage } from "./scheduler/types";
+import type { ScheduledTask, SchedulerStorage } from "./scheduler/types";
 import { DEFAULT_SCHEDULER_CONFIG, getSchedulerDir } from "./scheduler/types";
 import { cronSessionPath } from "./session-paths";
 import type { DingTalkConfig, GatewayConfig, OutboundMessage } from "./types";
