@@ -19,13 +19,19 @@
  *   - `reconcile` re-scans the default location and prunes entries
  *     whose path no longer exists.
  *
- * Concurrency: this is an interactive CLI, so a plain read-modify-write
- * is acceptable. If two `init` calls race the last writer wins.
+ * Concurrency: every read-modify-write runs under a file lock on registry.json.
+ *
+ * The old note here said a plain read-modify-write was fine because "this is an
+ * interactive CLI". That is false now: `cornfield serve` handles commands frame by
+ * frame (two clients can create an agent at the same moment) and the gateway
+ * registers accounts on startup. Unlocked, the later writer silently drops the
+ * earlier entry — both agentDirs exist on disk while one is missing from the list.
  */
 
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { withFileLock } from "../config/file-lock";
 
 const REGISTRY_DIR_NAME = "agent";
 const REGISTRY_FILE_NAME = "registry.json";
@@ -97,50 +103,60 @@ export async function saveRegistry(reg: Registry): Promise<void> {
 	await Bun.write(p, JSON.stringify(reg, null, 2));
 }
 
+/**
+ * registry.json 的 read-modify-write 一律在文件锁里跑。
+ *
+ * 锁放在注册表自己身上，而不是每个调用方各串一次：知道这条不变式的是这个文件 ——
+ * CLI、serve 的 wire 命令、gateway 的账号注册都是它的写方。
+ */
 /** Add or update an entry. Returns the new entry. */
 export async function registerAgent(name: string, agentDir: string, template = "default"): Promise<AgentEntry> {
-	const reg = await loadRegistry();
-	const resolved = path.resolve(agentDir);
-	// Best-effort cache fill from the workspace declaration (v2). Read-only:
-	// creating/updating `.cornfield/workspace.json` is the caller's job (ensureWorkspace),
-	// so the gateway account path stays side-effect free on registration.
-	let displayName: string | undefined;
-	let workspaceVersion: number | undefined;
-	let workspaceUpdatedAt: string | undefined;
-	try {
-		const { loadWorkspace } = await import("./workspace");
-		const decl = await loadWorkspace(resolved);
-		if (decl) {
-			displayName = decl.name;
-			workspaceVersion = decl.schemaVersion;
-			workspaceUpdatedAt = decl.updatedAt;
+	return withFileLock(registryPath(), async () => {
+		const reg = await loadRegistry();
+		const resolved = path.resolve(agentDir);
+		// Best-effort cache fill from the workspace declaration (v2). Read-only:
+		// creating/updating `.cornfield/workspace.json` is the caller's job (ensureWorkspace),
+		// so the gateway account path stays side-effect free on registration.
+		let displayName: string | undefined;
+		let workspaceVersion: number | undefined;
+		let workspaceUpdatedAt: string | undefined;
+		try {
+			const { loadWorkspace } = await import("./workspace");
+			const decl = await loadWorkspace(resolved);
+			if (decl) {
+				displayName = decl.name;
+				workspaceVersion = decl.schemaVersion;
+				workspaceUpdatedAt = decl.updatedAt;
+			}
+		} catch {
+			// Declarations are optional; fall back to registry-only entry.
 		}
-	} catch {
-		// Declarations are optional; fall back to registry-only entry.
-	}
-	const entry: AgentEntry = {
-		path: resolved,
-		registeredAt: new Date().toISOString(),
-		template,
-	};
-	if (displayName !== undefined) entry.displayName = displayName;
-	if (workspaceVersion !== undefined) entry.workspaceVersion = workspaceVersion;
-	if (workspaceUpdatedAt !== undefined) entry.workspaceUpdatedAt = workspaceUpdatedAt;
-	reg.agents[name] = entry;
-	// Writing v2 entries: bump the file version so legacy v1 registries are
-	// migrated on the next write (their entries are preserved unchanged).
-	reg.version = REGISTRY_VERSION;
-	await saveRegistry(reg);
-	return entry;
+		const entry: AgentEntry = {
+			path: resolved,
+			registeredAt: new Date().toISOString(),
+			template,
+		};
+		if (displayName !== undefined) entry.displayName = displayName;
+		if (workspaceVersion !== undefined) entry.workspaceVersion = workspaceVersion;
+		if (workspaceUpdatedAt !== undefined) entry.workspaceUpdatedAt = workspaceUpdatedAt;
+		reg.agents[name] = entry;
+		// Writing v2 entries: bump the file version so legacy v1 registries are
+		// migrated on the next write (their entries are preserved unchanged).
+		reg.version = REGISTRY_VERSION;
+		await saveRegistry(reg);
+		return entry;
+	});
 }
 
 /** Remove an entry. Returns true if it existed. */
 export async function unregisterAgent(name: string): Promise<boolean> {
-	const reg = await loadRegistry();
-	if (!(name in reg.agents)) return false;
-	delete reg.agents[name];
-	await saveRegistry(reg);
-	return true;
+	return withFileLock(registryPath(), async () => {
+		const reg = await loadRegistry();
+		if (!(name in reg.agents)) return false;
+		delete reg.agents[name];
+		await saveRegistry(reg);
+		return true;
+	});
 }
 
 /** Look up a single agent by name. Returns undefined if not registered. */
@@ -175,23 +191,25 @@ export async function findStaleEntries(): Promise<string[]> {
 
 /** Prune stale entries from the registry. Returns the names that were removed. */
 export async function pruneStaleEntries(): Promise<string[]> {
-	const reg = await loadRegistry();
-	const removed: string[] = [];
-	for (const [name, entry] of Object.entries(reg.agents)) {
-		let alive = false;
-		try {
-			const stat = await fs.stat(entry.path);
-			alive = stat.isDirectory();
-		} catch {
-			alive = false;
+	return withFileLock(registryPath(), async () => {
+		const reg = await loadRegistry();
+		const removed: string[] = [];
+		for (const [name, entry] of Object.entries(reg.agents)) {
+			let alive = false;
+			try {
+				const stat = await fs.stat(entry.path);
+				alive = stat.isDirectory();
+			} catch {
+				alive = false;
+			}
+			if (!alive) {
+				delete reg.agents[name];
+				removed.push(name);
+			}
 		}
-		if (!alive) {
-			delete reg.agents[name];
-			removed.push(name);
-		}
-	}
-	if (removed.length > 0) await saveRegistry(reg);
-	return removed;
+		if (removed.length > 0) await saveRegistry(reg);
+		return removed;
+	});
 }
 
 /** Registry file path (for diagnostics). Resolved lazily. */
