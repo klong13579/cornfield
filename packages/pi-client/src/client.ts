@@ -29,7 +29,12 @@ export type PiConnectionStatus = "disconnected" | "connecting" | "handshaking" |
  */
 export type PiClientEventKind =
 	| { type: "status"; status: PiConnectionStatus; attempt?: number }
-	| { type: "hello_ack"; connectionId: string; protocolVersion: number }
+	/**
+	 * 握手应答。`gatewayWirePort` 是 serve 在握手里报的 gateway wire 端口（它自己用的那个值），
+	 * 透传给调用方：浏览器读不到 `CORNFIELD_GATEWAY_WIRE_PORT`，所以前端该连哪个端口只能由握手告诉它。
+	 * 老的 serve / stdio 握手不报时该字段缺席（**不补一个缺省端口**——猜一个就是连错人）。
+	 */
+	| { type: "hello_ack"; connectionId: string; protocolVersion: number; gatewayWirePort?: number }
 	| { type: "push"; event: WireServerEvent }
 	| { type: "error"; error: Error };
 
@@ -385,7 +390,12 @@ export class PiClient {
 				this.#reconnectAttempt = 0;
 				this.#setStatus("open");
 				this.#startHeartbeat();
-				this.#emit({ type: "hello_ack", connectionId: frame.connectionId, protocolVersion: frame.protocolVersion });
+				this.#emit({
+					type: "hello_ack",
+					connectionId: frame.connectionId,
+					protocolVersion: frame.protocolVersion,
+					...(frame.gatewayWirePort === undefined ? {} : { gatewayWirePort: frame.gatewayWirePort }),
+				});
 				resolveOpen();
 				return;
 			}
