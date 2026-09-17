@@ -23,20 +23,19 @@
  *   <home>/work/extra/             ← workspace.json 的 attachedRoots（不属于任何 Project）
  *   <home>/outside/                ← 边界外（secret.txt + 越界写入的落点）
  *   <home>/agents/ops/             ← agent "ops" 的 agentDir（不在任何 Project root 下）
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见 ./wire-serve-fixture 的说明）；
+ * 本文件的种子（registry / projects / workspace.json / 两个 git 仓库 / symlink）走它的 `seed` 钩子 ——
+ * serve 启动即读注册表，晚于 spawn 写只剩竞态；serve 的 cwd 也取自同一个隔离 HOME。
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as net from "node:net";
-import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@cornfield/client";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
-let home: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let serveInfo: { url: string; token: string } = { url: "", token: "" };
+let fixture: ServeFixture | undefined;
 
 let projectRoot: string;
 let agentDir: string;
@@ -57,17 +56,7 @@ async function runGit(cwd: string, args: string[]): Promise<void> {
 	if (code !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${stderr.trim()}`);
 }
 
-async function pickFreePort(): Promise<number> {
-	return new Promise(resolve => {
-		const srv = net.createServer();
-		srv.listen(0, "127.0.0.1", () => {
-			const port = (srv.address() as net.AddressInfo).port;
-			srv.close(() => resolve(port));
-		});
-	});
-}
-
-async function writeRegistry(): Promise<void> {
+async function writeRegistry(home: string): Promise<void> {
 	const registryDir = path.join(home, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
@@ -110,11 +99,11 @@ async function writeAgentWorkspace(dir: string, name: string, attachedRoots?: st
 	);
 }
 
-beforeAll(async () => {
-	home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-ws-boundary-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = home;
-
+/**
+ * 预置隔离 HOME（夹具的 `seed` 钩子，在 spawn **之前**跑）：注册表 / projects.json / 各
+ * agentDir 的 workspace.json 都是 serve 启动期读的，晚于 spawn 写只剩 fs watcher 的竞态。
+ */
+async function seedBoundaryHome(home: string): Promise<void> {
 	projectRoot = path.join(home, "work", "project");
 	agentDir = path.join(projectRoot, ".agent");
 	extraRoot = path.join(home, "work", "extra");
@@ -156,34 +145,20 @@ beforeAll(async () => {
 	// 声明文件在、但读不出来的 agent（损坏 JSON）——它不是「没声明过」，是「声明读不出」。
 	await fs.mkdir(path.join(badDir, ".cornfield"), { recursive: true });
 	await fs.writeFile(path.join(badDir, ".cornfield", "workspace.json"), '{ "schemaVersion": 2, "id":\n');
-	await writeRegistry();
+	await writeRegistry(home);
 
 	// ── 符号链接逃逸的两条路（读穿已存在的链接 / 往链接里新建）──
 	await fs.symlink(outsideDir, path.join(projectRoot, "link-out"), "dir");
 	await fs.symlink(outsideDir, path.join(opsDir, "link-out"), "dir");
+}
 
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = await pickFreePort();
-	proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		{
-			// serve 的 cwd = 隔离 HOME（非 git 目录）→ default agent 的 agentDir = 这个目录，未绑定。
-			cwd: home,
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, HOME: home, PI_NO_TITLE: "1" },
-		},
-	);
-	serveInfo = await waitForServe(proc, port);
+beforeAll(async () => {
+	fixture = await spawnServeFixture({
+		homePrefix: "omp-ws-boundary-",
+		// serve 的 cwd = 隔离 HOME（非 git 目录）→ default agent 的 agentDir = 这个目录，未绑定。
+		cwd: home => home,
+		seed: seedBoundaryHome,
+	});
 
 	// 两个可用的注册 agent 都 attach（fs_* 的会话面判定需要会话；serve 启动时也会预挂载，幂等）。
 	// “bad”（声明读不出的那个）故意不 attach：它连 attach 都过不去，见 F 组。
@@ -192,19 +167,14 @@ beforeAll(async () => {
 			await client.request({ type: "attach", sessionId: agentId } as never);
 		}
 	});
-}, 120_000);
+}, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	if (home) await fs.rm(home, { recursive: true, force: true });
+	await fixture?.dispose();
 });
 
 async function withClient<T>(fn: (client: PiClient) => Promise<T>): Promise<T> {
-	const client = new PiClient({ url: serveInfo.url, token: serveInfo.token, autoReconnect: false });
+	const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 	await client.connect();
 	try {
 		return await fn(client);
@@ -215,7 +185,7 @@ async function withClient<T>(fn: (client: PiClient) => Promise<T>): Promise<T> {
 
 /** /preview 的 HTTP 根（与 WS 同端口）。两段都要逐段编码：附件地址里含 NUL，原样放进 URL 会坏掉。 */
 function previewUrl(agentId: string, rel: string): string {
-	const base = serveInfo.url.replace(/^ws:/, "http:").replace(/\/ws$/, "");
+	const base = fixture!.url.replace(/^ws:/, "http:").replace(/\/ws$/, "");
 	const path = rel.split("/").map(encodeURIComponent).join("/");
 	return `${base}/preview/${encodeURIComponent(agentId)}/${path}`;
 }
