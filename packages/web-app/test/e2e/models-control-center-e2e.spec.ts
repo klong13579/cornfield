@@ -294,27 +294,33 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		expect(projectConfig).toContain("modelRoutes");
 		expect(projectConfig).toContain(TARGET_MODEL);
 
-		// 快捷隐藏（#05 补充）：模型选择区两步确认隐藏 provider → 写全局停用名单，选择器分组消失。
+		// 快捷隐藏（#05 补充）：模型选择区两步确认隐藏 provider → 写入**生效的那一层**，选择器分组消失。
 		// 放在最后：隐藏后该 provider 不再可用，不影响前面的目录/角色断言
 		const hiddenProvider = "alibaba-coding-plan";
 		await page.getByRole("button", { name: `隐藏 ${hiddenProvider}` }).click();
 		await page.getByRole("button", { name: `确认隐藏 ${hiddenProvider}？` }).click();
 		await expect(page.getByText(`已隐藏 provider「${hiddenProvider}」`)).toBeVisible({ timeout: 15_000 });
 		await expect(page.getByRole("button", { name: `隐藏 ${hiddenProvider}` })).toHaveCount(0);
-		// Settings 落盘是 100ms debounce 后台写，不能读后即断言——轮询直到写盘完成
-		const globalConfigPath = path.join(isoHome, ".cornfield", "agent", "config.yml");
+		// 落点跟随读侧优先级（F6）：serve cwd 里已经有项目级 `<cwd>/.cornfield/config.yml`（上面第 E 步写的），
+		// 所以停用名单落**项目层**，不是全局层——写进读侧不看的那一层就是「写进去、读不到」。
+		// Settings 落盘是 100ms debounce 后台写，不能读后即断言：轮询直到写盘完成。
+		const effectiveConfigPath = path.join(isoHome, ".cornfield", "config.yml");
 		await expect
 			.poll(
 				async () => {
 					try {
-						return await fsp.readFile(globalConfigPath, "utf8");
+						return await fsp.readFile(effectiveConfigPath, "utf8");
 					} catch {
 						return ""; // debounce 未落盘
 					}
 				},
 				{ timeout: 10_000 },
 			)
-			.toContain(hiddenProvider); // disabledProviders 已落盘全局配置
+			.toContain(hiddenProvider); // disabledProviders 已落盘生效层（项目级）
+		// 全局层一个字节都不该多出这条：一层写、一层读，不是两份。
+		const globalConfigPath = path.join(isoHome, ".cornfield", "agent", "config.yml");
+		const globalConfig = await fsp.readFile(globalConfigPath, "utf8").catch(() => "");
+		expect(globalConfig).not.toContain(hiddenProvider);
 
 		await page.screenshot({ path: "test-results/mcc-final.png", fullPage: true });
 	} catch (err) {
