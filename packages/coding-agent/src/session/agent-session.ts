@@ -57,7 +57,7 @@ import { killTree, MacOSPowerAssertion } from "@cornfield/natives";
 import {
 	abortableSleep,
 	getAgentDbPath,
-	getAgentDir,
+	getClientDir,
 	isEnoent,
 	isRecord,
 	logger,
@@ -2402,7 +2402,7 @@ export class AgentSession {
 	}
 
 	resolveRoleModel(role: string): Model | undefined {
-		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(), this.model).model;
+		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(this.settings), this.model).model;
 	}
 
 	/**
@@ -2411,7 +2411,7 @@ export class AgentSession {
 	 * from role configuration (e.g., "anthropic/claude-sonnet-4-5:xhigh").
 	 */
 	resolveRoleModelWithThinking(role: string): ResolvedModelRoleValue {
-		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(), this.model);
+		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(this.settings), this.model);
 	}
 
 	get promptTemplates(): ReadonlyArray<PromptTemplate> {
@@ -2840,6 +2840,7 @@ export class AgentSession {
 			mode: "print",
 			hasUI: false,
 			cwd: this.sessionManager.getCwd(),
+			configRoot: this.settings.getCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.#modelRegistry,
 			model: this.model ?? undefined,
@@ -3649,7 +3650,7 @@ export class AgentSession {
 		roleOrder: readonly string[],
 		options?: { temporary?: boolean },
 	): Promise<RoleModelCycleResult | undefined> {
-		const availableModels = this.#modelRegistry.getAvailable();
+		const availableModels = this.#modelRegistry.getAvailable(this.settings);
 		if (availableModels.length === 0) return undefined;
 
 		const currentModel = this.model;
@@ -3759,7 +3760,7 @@ export class AgentSession {
 
 	async #cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
 		const previousEditMode = this.#resolveActiveEditMode();
-		const availableModels = this.#modelRegistry.getAvailable();
+		const availableModels = this.#modelRegistry.getAvailable(this.settings);
 		if (availableModels.length <= 1) return undefined;
 
 		const currentModel = this.model;
@@ -3790,8 +3791,12 @@ export class AgentSession {
 	/**
 	 * Get all available models with valid API keys.
 	 */
+	/**
+	 * 本会话（＝本 agent）可用的模型：停用名单取自**本会话自己的 Settings**，
+	 * 不吃全局单例——一个 agent 的停用名单不该让别的 agent 也看不见那些模型。
+	 */
 	getAvailableModels(): Model[] {
-		return this.#modelRegistry.getAvailable();
+		return this.#modelRegistry.getAvailable(this.settings);
 	}
 
 	// =========================================================================
@@ -4081,7 +4086,7 @@ export class AgentSession {
 	 * models.json），写后 offline 重载使覆盖立即生效。 */
 	async setProviderBaseUrl(providerId: string, baseUrl: string | null): Promise<ProviderStatusDto> {
 		this.#requireKnownProvider(providerId);
-		const configPath = path.join(getAgentDir(), "models.yml");
+		const configPath = path.join(getClientDir(), "models.yml");
 		const config = await readModelsYml(configPath);
 		if (baseUrl === null || baseUrl.trim() === "") {
 			const providers = isRecord(config.providers) ? (config.providers as Record<string, unknown>) : undefined;
@@ -4243,7 +4248,8 @@ export class AgentSession {
 				})
 				.catch(() => undefined);
 			if (persist && effectiveLevel !== undefined && effectiveLevel !== ThinkingLevel.Off) {
-				this.settings.set("defaultThinkingLevel", effectiveLevel);
+				// 落点跟随读侧优先级：配置看板的 thinking 与工具开关/模型路由写同一份配置。
+				this.settings.setEffective("defaultThinkingLevel", effectiveLevel);
 			}
 		}
 	}
@@ -5719,11 +5725,15 @@ export class AgentSession {
 
 	/**
 	 * Toggle auto-compaction setting.
+	 *
+	 * 走 `setEffective`（落点跟随读侧优先级）：这两个键立刻就会被 `autoCompactionEnabled`
+	 * 从合并视图里读回来，写进读侧不看的那一层就是「写进去、读不到」。default Agent 的家
+	 * （`~/.cornfield/agents/default`）自带一个 project 层（`.cornfield/config.yml`），所以这条不再是理论问题。
 	 */
 	setAutoCompactionEnabled(enabled: boolean): void {
-		this.settings.set("compaction.enabled", enabled);
+		this.settings.setEffective("compaction.enabled", enabled);
 		if (enabled && this.settings.get("compaction.strategy") === "off") {
-			this.settings.set("compaction.strategy", "context-full");
+			this.settings.setEffective("compaction.strategy", "context-full");
 		}
 	}
 
@@ -6218,7 +6228,8 @@ export class AgentSession {
 	 * Toggle auto-retry setting.
 	 */
 	setAutoRetryEnabled(enabled: boolean): void {
-		this.settings.set("retry.enabled", enabled);
+		// 同 setAutoCompactionEnabled：会被读回来的配置走 setEffective（落点跟随读侧）。
+		this.settings.setEffective("retry.enabled", enabled);
 	}
 
 	// =========================================================================
@@ -7679,7 +7690,7 @@ async function writeModelsYml(configPath: string, config: Record<string, unknown
 
 /** 读 providers.<id>.baseUrl 自定义覆盖（models.yml 用户配置；未覆盖 undefined）。 */
 async function readProviderBaseUrlOverride(providerId: string): Promise<string | undefined> {
-	const config = await readModelsYml(path.join(getAgentDir(), "models.yml"));
+	const config = await readModelsYml(path.join(getClientDir(), "models.yml"));
 	if (!isRecord(config.providers)) return undefined;
 	const entry = (config.providers as Record<string, unknown>)[providerId];
 	if (!isRecord(entry)) return undefined;

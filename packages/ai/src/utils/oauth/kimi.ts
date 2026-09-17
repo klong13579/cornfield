@@ -6,7 +6,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $env, abortableSleep, getAgentDir, isEnoent } from "@cornfield/utils";
+import { $env, abortableSleep, getClientDir, isEnoent } from "@cornfield/utils";
 import packageJson from "../../../package.json" with { type: "json" };
 import type { OAuthController, OAuthCredentials } from "./types";
 
@@ -55,7 +55,7 @@ function getDeviceModel(): string {
 }
 
 async function getDeviceId(): Promise<string> {
-	const deviceIdPath = path.join(getAgentDir(), DEVICE_ID_FILENAME);
+	const deviceIdPath = path.join(getClientDir(), DEVICE_ID_FILENAME);
 	try {
 		const existing = await Bun.file(deviceIdPath).text();
 		const trimmed = existing.trim();

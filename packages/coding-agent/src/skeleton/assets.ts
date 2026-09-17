@@ -4,7 +4,7 @@
  * Each asset is statically imported via Bun's `with { type: "text" }` so the content
  * is bundled at build time — no runtime file reads, no string-literal duplication.
  *
- * Asset layout mirrors the agentDir layout per `packages/coding-agent/docs/agent-design-v1.md` §2:
+ * Asset layout mirrors the agentDir layout per `docs/gateway/agent-bridge.md`（Agent Design V1）§2:
  *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
  *   - 1 project-level user persona: user.md (overrides / supplements the user-level ~/.cornfield/user.md)
  *   - runtime files: prompt-includes.json, .gitignore, .cornfield/config.yml, .cornfield/SYSTEM.md
@@ -39,7 +39,7 @@ export interface SkeletonFile {
  * All content-bearing files the skeleton creates.
  * Order is preserved for deterministic output; .gitkeep stubs are generated programmatically in `ensure.ts`.
  *
- * Layout mirrors the agentDir layout per `packages/coding-agent/docs/agent-design-v1.md` §2:
+ * Layout mirrors the agentDir layout per `docs/gateway/agent-bridge.md`（Agent Design V1）§2:
  *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
  *     (loaded into <context> via prompt-includes.json; see `loadProjectContextFiles`)
  *   - 1 project-level user persona: user.md

@@ -100,11 +100,6 @@ function assistantMessage(stopReason: string): string {
 	});
 }
 
-/** 与 self-evolution paths.encodeProjectPathForGlobalMemory 同规则。 */
-function encodeProjectPath(cwd: string): string {
-	return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-}
-
 // ── 共享 WS 客户端（三个来源只有这一份实现）──
 
 async function connect(wsUrl: string): Promise<WebSocket> {
@@ -279,13 +274,16 @@ async function seedHome(home: string): Promise<void> {
 		}),
 	);
 
-	// ── get_memory：user 区 ~/.cornfield/user.md + project 区 canonical evolution 目录 ──
+	// ── get_memory：user 区 ~/.cornfield/user.md + project 区 canonical 记忆根（配置项目根下的 .cornfield/memory）──
 	await fs.mkdir(path.join(home, ".cornfield"), { recursive: true });
 	await Bun.write(
 		path.join(home, ".cornfield", "user.md"),
 		"# 测试用户画像\n\n- name: 测试用户\n- note: seed content for wire e2e\n",
 	);
-	const memoryRoot = path.join(home, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot));
+	// default Agent 的**配置/记忆项目根**是它的家（`getDefaultAgentHome()` = <隔离 HOME>/.cornfield/agents/default），
+	// 不是 serve 的 cwd。家落在 `~/.cornfield` 里 ⇒ 解析器当它是系统路径（`isSystemPath`），canonical 根是
+	// `<配置项目根>/.cornfield/memory`（扁平），不是 `self-evolution/memory/<encoded>`。
+	const memoryRoot = path.join(home, ".cornfield", "agents", "default", ".cornfield", "memory");
 	await fs.mkdir(memoryRoot, { recursive: true });
 	await Bun.write(path.join(memoryRoot, "MEMORY.md"), "# Memory Report\n\n## project\n\n- 项目记忆 seed\n");
 	await Bun.write(path.join(memoryRoot, "memory_summary.md"), "# Memory Summary\n\n- summary seed\n");
@@ -452,10 +450,10 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 			expect(result.user?.path.endsWith("user.md")).toBe(true);
 			expect(result.user?.content).toContain("测试用户画像");
 
-			// project 区：canonical evolution 目录（self-evolution/memory）优先；
-			// 有效 cwd 经 resolveServeProjectRoot 归一到 repo 根。memoryRoot 应指向 seed 的 canonical 目录。
+			// project 区：canonical 根 = 配置项目根（default 的家）下的 `.cornfield/memory`；
+			// 记忆的项目根是配置项目根，与会话干活的 repo 无关（票 24 A′）。
 			expect(result.project?.memoryRoot).toBe(
-				path.join(fixture!.home, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot)),
+				path.join(fixture!.home, ".cornfield", "agents", "default", ".cornfield", "memory"),
 			);
 			expect(result.project?.memoryMd?.content).toContain("项目记忆 seed");
 			expect(result.project?.summaryMd?.content).toContain("summary seed");

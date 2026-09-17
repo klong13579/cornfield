@@ -9,11 +9,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	type AgentEntry,
 	findAgent,
 	findStaleEntries,
 	listRegistered,
 	loadRegistry,
 	pruneStaleEntries,
+	REGISTRY_FILE_PATH,
 	registerAgent,
 	saveRegistry,
 	unregisterAgent,
@@ -115,5 +117,53 @@ describe("agentDir registry", () => {
 		await registerAgent("ops/hr", "/tmp/ops/hr");
 		const found = await findAgent("ops/hr");
 		expect(found?.path).toBe(path.resolve("/tmp/ops/hr"));
+	});
+
+	it("重写条目时不丢掉本版本不认识的键（default 条目的 domain 就是这么没的）", async () => {
+		await saveRegistry({
+			version: 2,
+			agents: {
+				default: {
+					path: "/tmp/cf-workspace",
+					registeredAt: "2026-09-07T11:30:00.000Z",
+					template: "default",
+					domain: "default",
+				} as AgentEntry,
+			},
+		});
+
+		await registerAgent("default", "/tmp/cf-workspace");
+
+		const raw = JSON.parse(await Bun.file(REGISTRY_FILE_PATH()).text()) as {
+			agents: Record<string, Record<string, unknown>>;
+		};
+		// 未知字段原样活着；已知字段照旧被刷新
+		expect(raw.agents.default?.domain).toBe("default");
+		expect(raw.agents.default?.path).toBe(path.resolve("/tmp/cf-workspace"));
+	});
+
+	it("已知的缓存字段仍按本轮声明读数重算：读不到就清，不留上一轮的旧值", async () => {
+		// 盘上带着上一次的缓存，而 agentDir 里并没有声明文件
+		const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "registry-cache-"));
+		try {
+			await saveRegistry({
+				version: 2,
+				agents: {
+					hr: {
+						path: agentDir,
+						registeredAt: "2026-01-01T00:00:00.000Z",
+						template: "default",
+						displayName: "旧名字",
+						workspaceVersion: 2,
+					},
+				},
+			});
+
+			const entry = await registerAgent("hr", agentDir);
+			expect(entry.displayName).toBeUndefined();
+			expect(entry.workspaceVersion).toBeUndefined();
+		} finally {
+			await fs.rm(agentDir, { recursive: true, force: true });
+		}
 	});
 });

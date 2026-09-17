@@ -25,8 +25,8 @@ import {
 	$env,
 	$flag,
 	getAgentDbPath,
-	getAgentDir,
 	getConfigDirName,
+	getDefaultAgentHome,
 	getProjectDir,
 	logger,
 	postmortem,
@@ -104,6 +104,7 @@ import {
 import { AgentSession } from "./session/agent-session";
 import { AuthStorage } from "./session/auth-storage";
 import { applyWindowing, convertToLlm } from "./session/messages";
+import { resolveSessionAgent } from "./session/session-agent";
 import { SessionManager } from "./session/session-manager";
 import { SkillWatcher } from "./session/skill-watcher";
 import { closeAllConnections } from "./ssh/connection-manager";
@@ -308,10 +309,6 @@ export {
 
 // Helper Functions
 
-function getDefaultAgentDir(): string {
-	return getAgentDir();
-}
-
 /**
  * Resolve the streaming doom-loop detector config for the active model.
  * Returns `undefined` when the detector is disabled, so the agent loop
@@ -414,9 +411,10 @@ function resolvePerModelMaxThinking(modelId: string, byModel: Record<string, num
  * Create an AuthStorage instance with fallback support.
  * Reads from primary path first, then falls back to legacy paths (.pi, .claude).
  */
-export async function discoverAuthStorage(agentDir: string = getDefaultAgentDir()): Promise<AuthStorage> {
-	const dbPath = getAgentDbPath(agentDir);
-	logger.debug("discoverAuthStorage", { agentDir, dbPath });
+export async function discoverAuthStorage(): Promise<AuthStorage> {
+	// Credentials are client-scope: one login for this client, shared by every Agent it runs.
+	const dbPath = getAgentDbPath();
+	logger.debug("discoverAuthStorage", { dbPath });
 
 	const storage = await AuthStorage.create(dbPath, { configValueResolver: resolveConfigValue });
 	await storage.reload();
@@ -465,7 +463,7 @@ export async function discoverContextFiles(
 export async function discoverPromptTemplates(cwd?: string, agentDir?: string): Promise<PromptTemplate[]> {
 	return await loadPromptTemplatesInternal({
 		cwd: cwd ?? getProjectDir(),
-		agentDir: agentDir ?? getDefaultAgentDir(),
+		agentDir: agentDir ?? getDefaultAgentHome(),
 	});
 }
 
@@ -481,7 +479,7 @@ export async function discoverSlashCommands(cwd?: string): Promise<FileSlashComm
  */
 export async function discoverCustomTSCommands(cwd?: string, agentDir?: string): Promise<CustomCommandsLoadResult> {
 	const resolvedCwd = cwd ?? getProjectDir();
-	const resolvedAgentDir = agentDir ?? getDefaultAgentDir();
+	const resolvedAgentDir = agentDir ?? getDefaultAgentHome();
 
 	return loadCustomCommandsInternal({
 		cwd: resolvedCwd,
@@ -781,14 +779,14 @@ function buildMCPPromptCommands(manager: MCPManager): LoadedCustomCommand[] {
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = options.cwd ?? getProjectDir();
-	const agentDir = options.agentDir ?? getDefaultAgentDir();
+	const agentDir = options.agentDir ?? getDefaultAgentHome();
 	const eventBus = options.eventBus ?? new EventBus();
 
 	registerSshCleanup();
 	registerPythonCleanup();
 
 	// Use provided or create AuthStorage and ModelRegistry
-	const authStorage = options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir));
+	const authStorage = options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage));
 	const modelRegistry = options.modelRegistry ?? new ModelRegistry(authStorage);
 
 	const settings = options.settings ?? (await logger.time("settings", Settings.init, { cwd, agentDir }));
@@ -820,11 +818,29 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		setPreferredImageProvider(imageProvider);
 	}
 
+	// Resolve which Agent serves this session (WP4, §10) and record it in the header.
+	// A resumed session keeps the Agent already recorded there (its resolution is history);
+	// a fresh session resolves from persisted declarations. No UI or current-selection state
+	// is consulted, so a Schedule, a gateway webhook and a session restore all reach the same
+	// answer from the same facts.
+	const sessionAgent = await logger.time("sessionAgent", () =>
+		resolveSessionAgent({
+			cwd,
+			processAgentDir: agentDir,
+			sessionHeader: options.sessionManager?.getHeader() ?? null,
+		}),
+	);
 	const sessionManager =
 		options.sessionManager ??
 		logger.time("sessionManager", () =>
-			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
+			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir), undefined, sessionAgent.ref),
 		);
+	// A resumed session, or one created by a caller that had no resolution to pass
+	// (`--session-dir`), keeps its own header: record the resolution on it so the session
+	// and its forks stop depending on a re-resolution. No-op when an Agent is already there.
+	if (options.sessionManager) {
+		await sessionManager.setResolvedAgent(sessionAgent.ref);
+	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	const modelApiKeyAvailability = new Map<string, boolean>();
 	const getModelAvailabilityKey = (candidate: Model): string =>
@@ -859,7 +875,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		deobfuscateSessionContext(sessionManager.buildSessionContext(), obfuscator),
 	);
 	const existingBranch = logger.time("getSessionBranch", () => sessionManager.getBranch());
-	const modelFallbacks = resolveFallbackModels(settings, modelRegistry, modelRegistry.getAvailable());
+	// 停用名单来自本次构造用的 Settings（每个 agent 自己那份）：拿全局单例会让别的
+	// agent 的停用决定这个会话能用什么模型。
+	const modelFallbacks = resolveFallbackModels(settings, modelRegistry, modelRegistry.getAvailable(settings));
 
 	const hasExistingSession = existingBranch.length > 0;
 	const hasThinkingEntry = existingBranch.some(entry => entry.type === "thinking_level_change");
@@ -870,7 +888,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		usageOrder: settings.getStorage()?.getModelUsageOrder(),
 	};
 	const defaultRoleSpec = logger.time("resolveDefaultModelRole", () =>
-		resolveModelRoleValue(settings.getModelRole("default"), modelRegistry.getAvailable(), {
+		resolveModelRoleValue(settings.getModelRole("default"), modelRegistry.getAvailable(settings), {
 			settings,
 			matchPreferences: modelMatchPreferences,
 			modelRegistry,
@@ -1137,7 +1155,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		internalRouter.register(new ArtifactProtocolHandler({ getArtifactsDir }));
 		internalRouter.register(
 			new MemoryProtocolHandler({
-				getMemoryRoot: () => getMemoryRoot(agentDir, settings.getCwd()),
+				getMemoryRoot: () => getMemoryRoot(settings.getCwd()),
 			}),
 		);
 		// One `local://` root for the whole session: the router resolves reads with
@@ -1392,6 +1410,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd,
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根（与 cwd 分开：default Agent 在 serve 里会话在工作、配置根是它的家）。
+				settings.getCwd(),
 			);
 		}
 		const getSessionContext = () => ({
@@ -1500,7 +1520,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				.map(tool => tool.definition.promptSnippet)
 				.filter((snippet): snippet is string => typeof snippet === "string" && snippet.trim().length > 0);
 			const extensionToolGuidelines = registeredTools.flatMap(tool => tool.definition.promptGuidelines ?? []);
-			const memoryInstructions = await buildMemoryToolDeveloperInstructions(agentDir, settings);
+			const memoryInstructions = await buildMemoryToolDeveloperInstructions(settings);
 
 			// Build combined append prompt: memory instructions + MCP server instructions
 			const serverInstructions = mcpManager?.getServerInstructions();
@@ -1892,7 +1912,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				session,
 				settings,
 				modelRegistry,
-				agentDir,
 				taskDepth,
 			}),
 		);

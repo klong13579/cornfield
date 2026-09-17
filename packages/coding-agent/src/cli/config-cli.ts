@@ -5,7 +5,7 @@
  * Uses the settings schema as the source of truth for available settings.
  */
 
-import { APP_NAME, getAgentDir } from "@cornfield/utils";
+import { APP_NAME, getDefaultAgentHome } from "@cornfield/utils";
 import { writeStdout } from "@cornfield/utils/cli";
 import chalk from "chalk";
 import {
@@ -382,7 +382,8 @@ async function handleReset(key: string | undefined, flags: { json?: boolean }): 
 }
 
 function handlePath(): void {
-	writeStdout(getAgentDir());
+	// 打印 default Agent 的家（base 的语义：它才是 agent 的配置根）；输出走 writeStdout（main 的 stdout 上界修复）。
+	writeStdout(getDefaultAgentHome());
 }
 
 // =============================================================================

@@ -27,6 +27,7 @@ let main: ServeFixture | undefined;
 /** down 实例：CORNFIELD_GATEWAY_WIRE_PORT 指向从不绑定的死端口 → gateway unreachable 用例。 */
 let down: ServeFixture | undefined;
 let wirePort = 0;
+/** down 实例指向的端口（探测后立即释放、谁都不监听 → 连接被拒）。 */
 let deadPort = 0;
 let mockWire: ReturnType<typeof Bun.serve> | undefined;
 /** mock 收到的命令（断言转发参数用）。 */

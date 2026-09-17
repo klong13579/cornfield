@@ -467,7 +467,7 @@ export async function searchCodex(params: CodexSearchParams): Promise<SearchResp
 	const auth = await findCodexAuth();
 	if (!auth) {
 		throw new Error(
-			"No Codex OAuth credentials found. Login with 'omp /login openai-codex' to enable Codex web search.",
+			"No Codex OAuth credentials found. Login with 'cornfield /login openai-codex' to enable Codex web search.",
 		);
 	}
 

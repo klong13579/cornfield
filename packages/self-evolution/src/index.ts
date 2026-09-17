@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionFactory } from "@cornfield/coding-agent/ext
 import { Pipeline } from "@cornfield/cognitive-coordination/assembler";
 import { validateSkill } from "@cornfield/cognitive-coordination/sandbox";
 
-import { getAgentDir, getSessionsDir, isEnoent, logger } from "@cornfield/utils";
+import { getSessionsDir, isEnoent, logger } from "@cornfield/utils";
 import { isSkillEligibleForInjection } from "./benefit-admission";
 import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";
 import {
@@ -688,6 +688,8 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 			const unifiedSkills = await loadUnifiedSkillsForInjection(_ctx.cwd, skillStore!, {
 				globalStore: flags.globalStore,
+				// 嵌套在记忆树里的技能按**配置/记忆的项目根**去读（与记忆同一个 key）。
+				memoryKey: _ctx.configRoot,
 			});
 			const implicitRules = (await learningStore.listForInjection(_ctx.cwd, 8)).map(l => ({
 				rule: l.content,
@@ -1052,7 +1054,7 @@ export const createSelfEvolutionExtension: ExtensionFactory = api => {
 
 			let memorySummary: string | undefined;
 			try {
-				const memoryRoot = getMemoryRoot(getAgentDir(), ctx.cwd, { globalStore: flags.globalStore });
+				const memoryRoot = getMemoryRoot(ctx.configRoot, { globalStore: flags.globalStore });
 				const text = (await Bun.file(path.join(memoryRoot, "memory_summary.md")).text()).trim();
 				if (text.length > 0) memorySummary = text;
 			} catch (err) {

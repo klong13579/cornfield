@@ -186,7 +186,7 @@ export class LiveSessionController {
 		this.#bridge.registerTool({
 			name: CONSULT_TOOL_NAME,
 			description:
-				"Delegate any task requiring files, shell, business systems, or multi-step work to the CornField agent. Chitchat and confirmations stay local.",
+				"Delegate any task requiring files, shell, business systems, or multi-step work to the cornfield agent. Chitchat and confirmations stay local.",
 			parameters: {
 				type: "object",
 				properties: { task: { type: "string", description: "The user's task, verbatim-enriched." } },
@@ -196,7 +196,7 @@ export class LiveSessionController {
 		this.#bridge.registerTool({
 			name: TASK_TOOL_NAME,
 			description:
-				"Delegate a task that CHANGES files or system state (edit code, create files, run commands, send messages, mark todos done) to the CornField main session. Read-only queries go to omp_agent_consult instead.",
+				"Delegate a task that CHANGES files or system state (edit code, create files, run commands, send messages, mark todos done) to the cornfield main session. Read-only queries go to omp_agent_consult instead.",
 			parameters: {
 				type: "object",
 				properties: { task: { type: "string", description: "The user's task, verbatim-enriched." } },

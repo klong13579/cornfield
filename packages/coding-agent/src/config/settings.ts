@@ -15,8 +15,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
 	CONFIG_DIR_NAME,
-	getAgentDbPath,
-	getAgentDir,
+	getAgentStorageDbPath,
+	getClientDir,
+	getDefaultAgentHome,
 	getProjectDir,
 	isEnoent,
 	logger,
@@ -62,14 +63,67 @@ export interface RawSettings {
 }
 
 export interface SettingsOptions {
-	/** Current working directory for project settings discovery */
+	/**
+	 * 配置/记忆的项目根：project 层就是它下面的 `.cornfield/config.yml`。
+	 *
+	 * 它是 **f(Agent 身份)**，不是「会话在哪跑」：default Agent（serve 里）= 它的家；
+	 * registry agent = 它的工作根（`workspace.projectRoot ?? agentDir`）；裸跑 CLI（没有 agent
+	 * 身份）= 进程的项目目录（仓库自己的 `.cornfield/config.yml` 因此照旧被读到）。
+	 * 会话自己的工作目录另存于 `SessionManager`，**不跟着它走**（default 会话的工具落点仍是
+	 * serve 的启动目录）。
+	 */
 	cwd?: string;
-	/** Agent directory for config.yml storage */
+	/**
+	 * Agent 的家：会话 / 记忆 / plans 的基目录。
+	 *
+	 * registry agent 的 global 层 = 它自己的 `<agentDir>/config.yml`；**default Agent 的家**
+	 * （`getDefaultAgentHome()`）是个例外 —— 它的 global 层是客户端目录那份，见
+	 * {@link globalConfigPathFor}。
+	 */
 	agentDir?: string;
 	/** Don't persist to disk (for tests) */
 	inMemory?: boolean;
 	/** Initial overrides */
 	overrides?: Partial<Record<SettingPath, unknown>>;
+}
+
+/**
+ * 配置写入落点：`global` = 本实例的 global 文件（{@link globalConfigPathFor}）；
+ * `project` = `<cwd>/.cornfield/config.yml`。
+ * 与 pi-wire 的 `ConfigScope` 同语义（wire 侧直接复用该类型）。
+ */
+export type SettingsWriteScope = "global" | "project";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 配置层的两个文件（唯一实现）
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 这个目录是不是 default Agent 的家（`Settings#agentDir` 的缺省值就是它）。 */
+function isDefaultAgentHome(agentDir: string): boolean {
+	return path.normalize(agentDir) === path.normalize(getDefaultAgentHome());
+}
+
+/**
+ * global 层的文件 —— **按身份取一份，不是固定层序里的某一层**。
+ *
+ * | 身份 | global 文件 |
+ * |---|---|
+ * | default Agent | 客户端目录那份 `~/.cornfield/agent/config.yml` —— 用户一直在编辑的那份；改什么就生效什么，
+ * 且不会被新建的 `<家>/config.yml` 静默压掉（那份不在任何一层里，也不许被创建） |
+ * | 其余 Agent（registry / 显式 agentDir） | 它自己的 `<agentDir>/config.yml`（per-agent 隔离） |
+ *
+ * 三个消费方都调这一个函数：`Settings` 的读与写、`set_config(scope:"global")` 的落点、
+ * `get_config_scope` 报给前端的路径。任何一处自己推一份，都会让「写进去 / 读回来 / 页面报的」
+ * 变成三个答案。
+ */
+export function globalConfigPathFor(agentDir: string): string {
+	if (isDefaultAgentHome(agentDir)) return path.join(getClientDir(), "config.yml");
+	return path.join(path.normalize(agentDir), "config.yml");
+}
+
+/** project 层的文件：`<配置项目根>/.cornfield/config.yml`。 */
+export function projectConfigPathFor(configRoot: string): string {
+	return path.join(path.normalize(configRoot), CONFIG_DIR_NAME, "config.yml");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -125,7 +179,10 @@ const reportedRenamedSettingGroups = new Set<string>();
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class Settings {
-	#configPath: string | null;
+	/** global 层的文件（按身份解析，见 {@link globalConfigPathFor}）。 */
+	#configPath: string;
+	/** project 层的文件（`<配置项目根>/.cornfield/config.yml`）。 */
+	#projectConfigPath: string;
 	#cwd: string;
 	#agentDir: string;
 	#storage: AgentStorage | null = null;
@@ -144,18 +201,32 @@ export class Settings {
 
 	/** Paths modified during this session (for partial save) */
 	#modified = new Set<string>();
+	/** Paths modified in the project layer during this session (for partial save) */
+	#modifiedProject = new Set<string>();
 
 	/** Pending save (debounced) */
 	#saveTimer?: NodeJS.Timeout;
+	#projectSaveTimer?: NodeJS.Timeout;
 	#savePromise?: Promise<void>;
+	#projectSavePromise?: Promise<void>;
 
 	/** Whether to persist changes */
 	#persist: boolean;
 
 	private constructor(options: SettingsOptions = {}) {
+		// 两个基座各一个主人，别混（`test/settings-project-layer-cwd.test.ts` 钉着这件事）：
+		//
+		//   agentDir  这个 Agent 是谁。它的 global 层按身份取（`globalConfigPathFor`）：
+		//             default Agent 的家 → 客户端目录那份（用户编辑的那份）；其余 → 自己的 config.yml。
+		//   cwd       配置/记忆的**项目根**（project 层的基目录）。它是 f(身份)，不是「会话在哪跑」：
+		//             调用方按身份传（default 在 serve 里 = 它的家；registry agent = 它的工作根；
+		//             裸跑 CLI = 进程项目目录）。把默认值改成家会让仓库自己的
+		//             `.cornfield/config.yml` 不再被读到 —— 实测 `cornfield config get grep.enabled`
+		//             从 false 变 true，所以缺省值仍是 `getProjectDir()`。
 		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
-		this.#agentDir = path.normalize(options.agentDir ?? getAgentDir());
-		this.#configPath = options.inMemory ? null : path.join(this.#agentDir, "config.yml");
+		this.#agentDir = path.normalize(options.agentDir ?? getDefaultAgentHome());
+		this.#configPath = globalConfigPathFor(this.#agentDir);
+		this.#projectConfigPath = projectConfigPathFor(this.#cwd);
 		this.#persist = !options.inMemory;
 
 		if (options.overrides) {
@@ -260,12 +331,58 @@ export class Settings {
 		this.#modified.add(path);
 		this.#rebuildMerged();
 		this.#queueSave();
+		this.#fireHook(path, value, prev);
+	}
 
-		// Trigger hook if exists
-		const hook = SETTING_HOOKS[path];
-		if (hook) {
-			hook(value, prev);
+	/**
+	 * 写配置到合并视图**实际解析它的那一层**（sync）：有 project 层
+	 * （`<cwd>/.cornfield/config.yml` 存在）就写 project，否则写本实例的 `config.yml`。
+	 *
+	 * 「写哪个文件」这条规则只在这里实现一次。`set()` 永远写 agent 自己的 `config.yml`
+	 * （TUI / 启动语义，不跟随优先级）；而**会被读回来的配置**——模型路由、thinking、
+	 * 停用名单、配置看板的工具开关——必须走这里：写进读侧不看的那一层就是
+	 * 「写进去、读不到」。`key` 允许 schema 之外的自由键。
+	 *
+	 * @param scope 显式指定落点；缺省 = 按上面的规则自动判定（`getEffectiveScope`）。
+	 */
+	setEffective(key: string, value: unknown, scope?: SettingsWriteScope): void {
+		const segments = key.split(".");
+		const prev = getByPath(this.#merged, segments);
+
+		if ((scope ?? this.getEffectiveScope()) === "project") {
+			setByPath(this.#project, segments, value);
+			// 显式写 project 会创建这个文件：从此刻起它就是存在的那一层，自动判定跟着走。
+			this.#hasProjectConfigFile = true;
+			this.#modifiedProject.add(key);
+			this.#rebuildMerged();
+			this.#queueProjectSave();
+		} else {
+			setByPath(this.#global, segments, value);
+			this.#modified.add(key);
+			this.#rebuildMerged();
+			this.#queueSave();
 		}
+
+		this.#fireHook(key, value, prev);
+	}
+
+	/**
+	 * 写入落点（合并视图的同一规则，唯一实现）：有 project 层就是 `project`，否则 `global`。
+	 * 报给调用方的 scope 取自这里——它就是这次写入真的落到的那一层。
+	 */
+	getEffectiveScope(): SettingsWriteScope {
+		return this.#hasProjectConfigFile ? "project" : "global";
+	}
+
+	/**
+	 * 合并视图（global + project + overrides）里的原始值，按点分路径取；`key` 缺省 = 整份快照。
+	 *
+	 * 不回落 schema 默认值：调用方问的是「配置里写了什么」，schema 之外的自由键同样可读。
+	 * 读这份值就是在读写入方（`setEffective`）落到的那一层——同一个来源，不另查文件。
+	 */
+	getRawValue(key?: string): unknown {
+		if (!key) return structuredClone(this.#merged);
+		return getByPath(this.#merged, key.split("."));
 	}
 
 	/**
@@ -307,6 +424,17 @@ export class Settings {
 		if (this.#modified.size > 0) {
 			await this.#saveNow();
 		}
+
+		if (this.#projectSaveTimer) {
+			clearTimeout(this.#projectSaveTimer);
+			this.#projectSaveTimer = undefined;
+		}
+		if (this.#projectSavePromise) {
+			await this.#projectSavePromise;
+		}
+		if (this.#modifiedProject.size > 0) {
+			await this.#saveProjectConfig();
+		}
 	}
 
 	async cloneForCwd(cwd: string): Promise<Settings> {
@@ -334,6 +462,19 @@ export class Settings {
 
 	getCwd(): string {
 		return this.#cwd;
+	}
+
+	/**
+	 * global 层的文件（按身份解析，见 {@link globalConfigPathFor}）。
+	 * `set_config(scope:"global")` 落的就是它；`get_config_scope` 报给前端的也是它。
+	 */
+	getGlobalConfigPath(): string {
+		return this.#configPath;
+	}
+
+	/** project 层的文件（`<配置项目根>/.cornfield/config.yml`）。 */
+	getProjectConfigPath(): string {
+		return this.#projectConfigPath;
 	}
 
 	getAgentDir(): string {
@@ -395,14 +536,13 @@ export class Settings {
 	/**
 	 * Set a model role's primary model (helper for modelRoutes record).
 	 *
-	 * Writes to project level if a project-level .cornfield/config.yml exists (so reads
-	 * and writes are consistent — project overrides global in the merged view).
-	 * Otherwise writes to global. Preserves the role's existing fallback chain.
+	 * 落点跟随读侧优先级（`setEffective`）：有 project 层就写 project，否则写 global。
+	 * Preserves the role's existing fallback chain.
 	 */
 	setModelRole(role: ModelRole | string, modelId: string): void {
 		const routes = this.getModelRoutes();
 		routes[role] = { primary: modelId, fallbacks: routes[role]?.fallbacks ?? [] };
-		this.#writeModelRoutes(routes);
+		this.setEffective(MODEL_ROUTES_KEY, routes);
 	}
 
 	/**
@@ -414,7 +554,7 @@ export class Settings {
 		const normalized = normalizeRoute(route);
 		if (normalized) routes[role] = normalized;
 		else delete routes[role];
-		this.#writeModelRoutes(routes);
+		this.setEffective(MODEL_ROUTES_KEY, routes);
 	}
 
 	/**
@@ -433,16 +573,6 @@ export class Settings {
 	/** Get all model routes (normalized view of the modelRoutes record). */
 	getModelRoutes(): Record<string, ModelRoleRoute> {
 		return normalizeModelRoutes(this.get(MODEL_ROUTES_KEY));
-	}
-
-	#writeModelRoutes(routes: Record<string, ModelRoleRoute>): void {
-		if (this.#hasProjectConfigFile) {
-			setByPath(this.#project, [MODEL_ROUTES_KEY], routes);
-			this.#rebuildMerged();
-			void this.#saveProjectConfig();
-		} else {
-			this.set(MODEL_ROUTES_KEY, routes);
-		}
 	}
 
 	/**
@@ -521,9 +651,10 @@ export class Settings {
 
 	/**
 	 * Set disabled providers (for compatibility with discovery system).
+	 * 落点跟随读侧优先级（`setEffective`）——停用名单是「写进去、立刻要读回来」的配置。
 	 */
 	setDisabledProviders(ids: string[]): void {
-		this.set("disabledProviders", ids);
+		this.setEffective("disabledProviders", ids);
 	}
 
 	/**
@@ -532,7 +663,7 @@ export class Settings {
 	 * serve 会话选择器 / get_available_models 即时生效，无需重载注册表。
 	 */
 	setDisabledModels(patterns: string[]): void {
-		this.set("disabledModels", patterns);
+		this.setEffective("disabledModels", patterns);
 	}
 
 	/** 当前停用的模型 pattern 名单（`provider/modelId`）。 */
@@ -547,13 +678,13 @@ export class Settings {
 	async #load(): Promise<Settings> {
 		if (this.#persist) {
 			// Open storage
-			this.#storage = await AgentStorage.open(getAgentDbPath(this.#agentDir));
+			this.#storage = await AgentStorage.open(getAgentStorageDbPath(this.#agentDir));
 
 			// Migrate from legacy formats if needed
 			await this.#migrateFromLegacy();
 
 			// Load global settings from config.yml
-			this.#global = await this.#loadYaml(this.#configPath!);
+			this.#global = await this.#loadYaml(this.#configPath);
 		}
 
 		// Load project settings
@@ -605,7 +736,7 @@ export class Settings {
 		let merged: RawSettings = {};
 
 		// Load per-directory .cornfield/config.yml (project-level override of global config.yml)
-		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
+		const projectConfigPath = this.#projectConfigPath;
 		this.#hasProjectConfigFile = await Bun.file(projectConfigPath)
 			.exists()
 			.catch(() => false);
@@ -629,7 +760,7 @@ export class Settings {
 	}
 
 	async #migrateFromLegacy(): Promise<void> {
-		if (!this.#configPath) return;
+		if (!this.#persist) return;
 
 		// Check if config.yml already exists
 		try {
@@ -762,7 +893,7 @@ export class Settings {
 	// ─────────────────────────────────────────────────────────────────────────
 
 	#queueSave(): void {
-		if (!this.#persist || !this.#configPath) return;
+		if (!this.#persist) return;
 
 		// Debounce: wait 100ms for more changes
 		if (this.#saveTimer) {
@@ -776,8 +907,21 @@ export class Settings {
 		}, 100);
 	}
 
+	#queueProjectSave(): void {
+		if (!this.#persist) return;
+
+		// Debounce: wait 100ms for more changes（与 global 侧同一节奏）
+		if (this.#projectSaveTimer) {
+			clearTimeout(this.#projectSaveTimer);
+		}
+		this.#projectSaveTimer = setTimeout(() => {
+			this.#projectSaveTimer = undefined;
+			this.#projectSavePromise = this.#saveProjectConfig();
+		}, 100);
+	}
+
 	async #saveNow(): Promise<void> {
-		if (!this.#persist || !this.#configPath || this.#modified.size === 0) return;
+		if (!this.#persist || this.#modified.size === 0) return;
 
 		const configPath = this.#configPath;
 		const modifiedPaths = [...this.#modified];
@@ -811,22 +955,36 @@ export class Settings {
 	}
 
 	/**
-	 * Persist project-level settings to .cornfield/config.yml.
-	 * Reads the current file first to preserve external changes,
-	 * then applies the in-memory #project snapshot on top.
+	 * Persist this session's modified project-layer keys to `<cwd>/.cornfield/config.yml`.
+	 *
+	 * 只写本次改过的那几个键（与 `#saveNow` 同一套部分保存纪律）：整份 `#project` 落盘会
+	 * 把启动后被别处删掉的键复活，也会把能力层（capability）提供的不落盘配置写进用户文件。
 	 */
 	async #saveProjectConfig(): Promise<void> {
-		const projectConfigPath = path.join(this.#cwd, CONFIG_DIR_NAME, "config.yml");
+		const projectConfigPath = this.#projectConfigPath;
+		const modifiedPaths = [...this.#modifiedProject];
+		this.#modifiedProject.clear();
+		if (!this.#persist || modifiedPaths.length === 0) return;
 
 		try {
-			// Re-read to preserve external changes
-			const current = await this.#loadYaml(projectConfigPath);
+			await withFileLock(projectConfigPath, async () => {
+				// Re-read to preserve external changes
+				const current = await this.#loadYaml(projectConfigPath);
 
-			// Apply our project state on top
-			const merged = this.#deepMerge(current, this.#project);
-			await Bun.write(projectConfigPath, YAML.stringify(merged, null, 2));
+				// Apply only our modified paths
+				for (const modPath of modifiedPaths) {
+					const segments = modPath.split(".");
+					setByPath(current, segments, getByPath(this.#project, segments));
+				}
+
+				await Bun.write(projectConfigPath, YAML.stringify(current, null, 2));
+			});
 		} catch (error) {
 			logger.warn("Settings: project save failed", { error: String(error) });
+			// Re-add failed paths for retry
+			for (const p of modifiedPaths) {
+				this.#modifiedProject.add(p);
+			}
 		}
 	}
 
@@ -847,6 +1005,15 @@ export class Settings {
 				hook(value, value);
 			}
 		}
+	}
+
+	/**
+	 * 触发某个键的副作用钩子（有就触发）。只登记过的键有钩子；自由键（schema 之外）
+	 * 查不到钩子，是「没有副作用」，不是「钩子丢了」。
+	 */
+	#fireHook(key: string, value: unknown, prev: unknown): void {
+		const hook = SETTING_HOOKS[key as SettingPath];
+		if (hook) hook(value, prev);
 	}
 
 	#deepMerge(base: RawSettings, overrides: RawSettings): RawSettings {

@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { isEnoent, logger } from "@cornfield/utils";
-import { getAgentDir } from "@cornfield/utils/dirs";
+import { getClientDir } from "@cornfield/utils/dirs";
 
 const SMITHERY_AUTH_FILENAME = "smithery.json";
 const SMITHERY_URL = process.env.SMITHERY_URL || "https://smithery.ai";
@@ -22,7 +22,7 @@ type SmitheryAuthPayload = {
 };
 
 function getSmitheryAuthPath(): string {
-	return path.join(getAgentDir(), SMITHERY_AUTH_FILENAME);
+	return path.join(getClientDir(), SMITHERY_AUTH_FILENAME);
 }
 
 function normalizeApiKey(value: string | undefined): string | undefined {

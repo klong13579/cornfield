@@ -4,8 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ContextRing } from "../../components/ContextRing";
 import { ProviderLogo } from "../../components/ProviderLogo";
+import type { ContextItem } from "../../lib/context-items";
+import { composePrompt, hasFileVersion } from "../../lib/context-items";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
-import { useSessionStore } from "../../state/session-store";
+import { SCOPE_LABELS } from "../../lib/scope-display";
+import { getFileWorkflow, useFileWorkflow } from "../../state/file-workflow-store";
+import { type SessionView, useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { DEFAULT_COMMANDS, filterSlashCommands, type SlashCommandDef, SlashPalette } from "./SlashPalette";
@@ -40,6 +44,78 @@ export function groupModelsByProvider(
 }
 
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
+
+/**
+ * 发消息时 wire 的定向身份（`prompt.sessionId`）= **会话身份**（`view.attachmentAddress`，本屏焦点附件的地址）。
+ *
+ * 不能拿屏幕上的 Agent 名（`activeAgentIdOf(view)` / 下拉里选的那个）当 `sessionId`：wire 把
+ * Agent 名解到那个 Agent **未绑定**的附件 —— 对绑了 Project 的会话，那是**另一个根**（屏幕上
+ * 根本没在看的那个会话），消息会进错会话。
+ *
+ * 为什么在载荷里点名地址，而不是省掉 `sessionId` 让 wire 取「焦点附件」这个缺省：两者指向
+ * 同一个附件，但缺省是一个客户端看不见的服务端状态；载荷里写出地址，才答得上「这条消息进了
+ * 哪个会话」，也才与右栏文件面/产物面用的是同一个身份。地址为空串（还没收到快照）时退回缺省
+ * —— 此刻客户端确实不知道对方是谁。
+ */
+export function promptTargetOf(view: Pick<SessionView, "attachmentAddress">): string | undefined {
+	return view.attachmentAddress === "" ? undefined : view.attachmentAddress;
+}
+
+/** 上下文条目在输入区的展示名（选区带行范围，其它就是路径）。 */
+function contextItemLabel(item: ContextItem): string {
+	if (item.kind !== "selection") return item.path;
+	const range = item.lineStart === item.lineEnd ? `${item.lineStart}` : `${item.lineStart}-${item.lineEnd}`;
+	return `${item.path}:${range}`;
+}
+
+/** 版本在 chip 里只显示前 8 位（sha256 太长）；完整值在 title 上，不丢事实。 */
+function shortVersion(version: string): string {
+	return version.length > 8 ? `${version.slice(0, 8)}…` : version;
+}
+
+/**
+ * 上下文条目 chip：定位（路径 / 选区行范围）+ 范围 + 版本（§9 要求每个引用看得到这两件事）。
+ *
+ * 缺哪件就说「未知」：渲染成空标签等于把「不知道」画成「没有」。URL 条目不说版本 ——
+ * 链接不是文件，那是「不适用」而不是「没读到」（{@link hasFileVersion}）。
+ */
+export function ContextItemChip({ item, onRemove }: { item: ContextItem; onRemove: () => void }): React.JSX.Element {
+	return (
+		<span className="chip max-w-[320px] gap-1.5">
+			<span className="truncate font-mono" title={item.path}>
+				{contextItemLabel(item)}
+			</span>
+			<span
+				className="shrink-0 rounded-sm bg-surface-3 px-1 text-[9px] text-ink-subtle"
+				title={
+					item.scope === undefined
+						? "范围未知：拿不到这个 Agent 的工作区锚点，判不出来"
+						: `范围：${SCOPE_LABELS[item.scope]}`
+				}
+			>
+				{item.scope === undefined ? "范围未知" : SCOPE_LABELS[item.scope]}
+			</span>
+			{hasFileVersion(item.kind) &&
+				(item.version === undefined ? (
+					<span className="shrink-0 text-[9px] text-ink-faint" title="版本未知：加这条引用时没读到文件版本">
+						版本未知
+					</span>
+				) : (
+					<span className="shrink-0 font-mono text-[9px] text-ink-faint" title={`版本 ${item.version}`}>
+						版本 {shortVersion(item.version)}
+					</span>
+				))}
+			<button
+				type="button"
+				className="shrink-0 text-ink-faint hover:text-danger"
+				title={`移除 ${item.path}`}
+				onClick={onRemove}
+			>
+				×
+			</button>
+		</span>
+	);
+}
 
 function statusDot(s: string): string {
 	if (s === "online") return "bg-success";
@@ -92,6 +168,8 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	/** ui.draft 是输入区唯一事实源（含 ?q= 直达种子——由 WorkspaceView 在挂载时写入一次、发送后清空）。
 	 * 不再回退 autoFocusDraft：否则种子成为永久 fallback，用户清空输入后文本立即恢复。 */
 	const value = ui.draft;
+	// 上下文条目（文件/选区）挂在文件工作流上并与会话同归属：换会话即清空（引用会失效）
+	const contextItems = useFileWorkflow().contextItems;
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
 
@@ -234,7 +312,9 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	};
 
 	const send = () => {
-		const text = value.trim();
+		// 带上上下文条目 = 草稿 + 序列化块（@路径 走运行时既有的提及通道，选区额外内联选中文本）。
+		// 只有条目没有文字也允许发送：用户指着一段代码说话，就是一条完整的消息。
+		const text = composePrompt(value.trim(), contextItems);
 		if (!text) return;
 		// 方向 2：停用账号（gateway 侧 enabled:false）禁止从工作台发起会话
 		if (agentId && isAccountStopped(agentId)) {
@@ -246,7 +326,10 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 		}
 		setBlockedMsg(null);
 		getUiStore().setDraft("");
-		store.prompt(text, agentId, attachments.length > 0 ? attachments : undefined);
+		// 第二个入参是 wire 的定向身份（`prompt.sessionId`）—— 见 promptTargetOf：会话身份，不是 agentId。
+		store.prompt(text, promptTargetOf(view), attachments.length > 0 ? attachments : undefined);
+		// 条目随这条消息一起发走了：留着它会让下一条消息莫名其妙地带上一段旧代码
+		getFileWorkflow().clearContextItems();
 		setAttachments([]);
 	};
 
@@ -309,6 +392,24 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 				)}
 
 				<div className="rounded-xl border border-hairline bg-surface-2 transition-[border-color,box-shadow] duration-150 focus-within:border-hairline-strong focus-within:shadow-[0_0_0_3px_var(--color-accent-dim)]">
+					{contextItems.length > 0 && (
+						// 可见的「上下文」标题就是这一块的标签，不再叠一个 aria-label（role 与标签重复反而不清楚）
+						<div className="flex flex-wrap items-center gap-1.5 border-b border-hairline px-3 py-1.5">
+							<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+								上下文
+							</span>
+							{contextItems.map(item => (
+								<ContextItemChip
+									key={item.id}
+									item={item}
+									onRemove={() => getFileWorkflow().removeContextItem(item.id)}
+								/>
+							))}
+							<button type="button" className="link" onClick={() => getFileWorkflow().clearContextItems()}>
+								清空
+							</button>
+						</div>
+					)}
 					<textarea
 						ref={textRef}
 						rows={1}
@@ -375,8 +476,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 															onClick={() => {
 																setAgentId(a.id);
 																setBlockedMsg(null);
-																store.attach(a.id); // lazy attach（幂等）
-																store.switchSession(a.id); // 切 active：后续 prompt 默认发往该 agent
+																store.focusAgent(a.id); // attach + 切 active：后续 prompt 默认发往该 agent
 																setShowAgentMenu(false);
 															}}
 														>

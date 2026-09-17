@@ -59,7 +59,7 @@ export async function runShellCommand(cmd: ShellCommandArgs): Promise<void> {
 	}
 
 	const cwd = cmd.cwd ? path.resolve(cmd.cwd) : getProjectDir();
-	const settings = await Settings.init({ cwd });
+	const settings = await Settings.init();
 	const { shell, env: shellEnv } = settings.getShellConfig();
 	const snapshotPath = cmd.noSnapshot || !shell.includes("bash") ? null : await getOrCreateSnapshot(shell, shellEnv);
 	const minimizer = buildMinimizerOptions(settings.getGroup("shellMinimizer"));

@@ -4,9 +4,33 @@
 
 ### Added
 
+- **扩展上下文新增 `configRoot`（配置/记忆的项目根）**（`src/extensibility/extensions/types.ts`, `src/extensibility/extensions/runner.ts`, `src/sdk.ts`, `src/session/agent-session.ts`, `src/modes/controllers/extension-ui-controller.ts`）：`ExtensionContext` 此前只有「会话工作目录 `cwd`」，扩展要判断「这块记忆该跟谁走」只能自己推一条路径 —— 而两者在 default Agent 跑 serve 时并不相同（会话在仓库里干活，配置/记忆的项目根是它自己的家）。现在宿主把 `Settings#getCwd()` 作为 `configRoot` 交给扩展（与 `cwd` 并列、身份规则仍只在 `Settings` 里实现一处）。**消费方向（handler / tool / command 收到一个 context）是纯加法**；唯一要跟着改的是「自己手搓一个 `ExtensionContext` 字面量」的代码（mock / 测试，或用户自己写的这一类）—— 该字段是**必填**，缺了编译期就报（不选可选的原因见票 27：可选 + 回落到 `cwd` 会把刚修好的分叉又静默带回来）。配套（`@cornfield/self-evolution`）：记忆目录的 key 从「会话 cwd」改为「配置/记忆的项目根」，`evolution` 侧（DB / skills / activity.log）仍跟会话 cwd。
+
+- **`cornfield agent init --root <path>`：声明额外读写根**（`src/cli/agent-cli.ts`, `src/skeleton/workspace.ts`, `src/commands/agent.ts`, `test/agent-cli-attached-roots.test.ts`）：`attachedRoots` 此前只有读者（`src/session/session-workspace.ts` 把每个声明的 root 折进会话工作面），全仓没有写侧 ——「一个 agent 读多个根」只能手改 JSON 才可达。现在每个 root 先解析成绝对 realpath 并校验存在、是目录、不是 agentDir 自己，任一不合法就报错且**不改动声明文件**（声明一个不存在的 root 会让这个 agent 每次会话解析都失败，宁可 init 失败）；写入是读-改-写，其它键（含本模块不认识的键）与键序原样保留。`agent validate` 对「声明了但已不存在」的 root 报 error（此前它会说 valid: true）。
+
+- **agentDir 文件单一真相 + `get_agent_prompt_sources` 读命令**（`src/skeleton/agent-dir-files.ts`, `src/server/wire-server.ts`, `test/skeleton-agent-dir-files.test.ts`, `test/wire-server-prompt-sources.integration.test.ts`）：agentDir 里有哪些文件、每一项是 prompt 面还是配置/技能面、缺失算 error 还是 warning，收在 `skeleton/agent-dir-files.ts` 一处；`agent validate` 的三个校验集改从它推导（元素与顺序不变）。新增 wire 读命令按这份清单**逐项报 `exists`**（缺的那项也在清单里），前端不再自备一份会漂移的 prompt 源清单。
+
+- **听记 provenance + 定时任务写面转发**（`src/stt/listen-provenance.ts`, `src/stt/listen-service.ts`, `src/stt/listen-controller.ts`, `src/server/wire-server.ts`, `src/modes/wire-stdio.ts`）：听记落盘新增 `provenance`（agentId / agentDir / projectId / sessionFile），由**写入方当时的事实**标定（serve 用 agent-scope 的锚点，TUI /record 用进程自己的 agentDir + 工作目录归属）；Project 读不到就不写这一项——旧记录（v1）就是「未标注」，不得在展示层被归给当前 Agent。`record_transcribe*` 落盘时打标，`listen_list` 原样带出。`cron_create` / `cron_update` / `cron_remove` / `cron_test_run` 在 serve WS 面转发 gateway 生产端点（写面失败用字符串错误，不冒充 `internal`）；wire-stdio 面把这四条列入「本模式未实现」而不是「未知命令」。
+
 - **ad-hoc `python -c` 被拦下并指向 `python` tool**（`src/config/settings-schema.ts`、`test/bash-interceptor.test.ts`）：`python` 是 `discoverable`，在 `createTools` 里被搬进 `session.xdevDevices`、不进 `toolRegistry`，所以一条 `tool: "python"` 的拦截规则在生产里**永不触发**（接线修复见 Fixed 那条），而 `bun test` 里是绿的。规则只认解释器后面紧跟的 `-c`：`python script.py -c x`、`python -m pip install`、`python3 - <<'PY'` 一律不动；`node -e` / `bun -e` **故意不写**——还没有 `js` runtime tool 可指，而规则只在它的 `tool` 可用时才生效。回归 8 条：`python` / `python3` / `ipython` 三种拼写、`-u -c` 前置 flag、裸 `python -c`、`ls && python -c` 与 `FOO=1 python -c`、`script.py -c` / `-m` / `-V` / `--version` 不误伤、heredoc 即豁免、`python` 不可用时放行。消息里点名了 `cells: [{ code }]` 的形状：会话语料里出现过模型把 `{"command": "python3 -c …"}` 直接喂给 `python` 工具而被 schema 拒的实例（python 工具的 13 个错误里 9 个是 `cells` 参数形状错），拦截后要模型自己翻译成 `cells`，所以把形状写在消息里。**注意 `bashInterceptor.enabled` 的 schema 默认是 `false`**（本机 config 里是 `true`），与既有 8 条一样只在显式打开时生效。
 
+### Changed
+
+- **配置写入落点只有一处实现：`Settings#setEffective`**（`src/config/settings.ts`, `src/server/wire-server.ts`, `src/session/agent-session.ts`, `test/agent-config-effective-layer.integration.test.ts`）：同一个 agentDir 既是「agent 家目录」又是「project」，于是两份 `config.yml` 各被一半写方写（工具开关写 `<agentDir>/config.yml`，模型路由与 thinking 写 `<agentDir>/.cornfield/config.yml`），而**读的时候 project 层压过 global**。现在「会被读回来的配置」一律走 `setEffective`：有 project 层就写 project，否则写本实例的 `config.yml`；`set_config` 缺省不再是硬编码的 `global`，回包报的 scope 就是真落到的那一层。读侧一律走**目标 agent 自己的 Settings 实例**（合并视图的唯一实现），不再自己拼文件读（`get_config` / `get_tool_switches` / `get_available_models` / `set_model_disabled`）。附带：project 层保存改成部分保存（只写本次改过的键），与 global 同纪律，不会复活被别处删掉的键。见 `docs/config/config-usage.md` §4。
+
+- **`registry.json` 的 read-modify-write 加文件锁**（`src/skeleton/registry.ts`, `src/config/file-lock.ts`, `test/registry-concurrency.test.ts`）：`registerAgent` 是「读整份 → 改一条 → 写回整份」，CLI 里「一次一个人敲」让旧假设成立，但 `serve` 是逐帧并发处理命令、gateway 启动时也在注册账号 —— 两个写方同时落笔，后写的那次会把先写的条目从 registry.json 里抹掉（agentDir 两份都在盘上，`agent list` 里少一个；同进程并发两次 `agent init` 实测 5/5 轮丢、两条 WS 连接 2/3 轮丢）。锁放在注册表自己身上，所以 CLI / serve / gateway 三个写方都受保护。`config/file-lock` 顺带自己建锁目录（新 HOME 上 `.cornfield/agent/` 还不存在时，拿锁不再以 ENOENT 失败）。
+
+- **`matchProjectForPath` 的规则改由 pi-wire 提供**（`src/agent-domain/project-store.ts`）：签名与返回类型不变（现有调用点零改动），内部改为对 target 与每个 root 各做 `resolveEquivalentPath` 归一，再调 pi-wire 的 `pickDeepestRootIndex` —— 前端用量面板问的是同一件事，规则不能再有两份实现（归一化留在 serve：realpath 是这边独有的事实）。
+
+- **听记条目改用 pi-wire 的规范形状**（`src/stt/listen-service.ts`）：`ListenRecordingSummary` 不再自建同形接口，改从 `@cornfield/wire` 引入 `ListenRecordingDto`（两端一份，字段加一处同时可见）。
+
 ### Fixed
+
+- **模型可见性与停用名单按 agent，不再吃全局单例**（`src/config/model-registry.ts`, `src/session/agent-session.ts`, `src/server/wire-server.ts`, `src/sdk.ts`）：default agent 的 `disabledProviders: [narwal-plan]` 此前会让**所有** agent 的模型选择器都看不到 narwal-plan（列表与名单都读全局 `Settings.instance` / 模块级 `settings` 代理）。现在 `ModelRegistry.getAvailable(settings?)` / `#isModelAvailable(model, settings)` 接受调用方自己的 Settings（缺省仍是模块级 settings，非会话调用方行为不变），会话侧传自己的那份；停用名单也写进目标 agent 自己的配置，而不是写到 default 的 `config.yml`（写错人 + 读侧读不到）。
+
+- **骨架发的 `modelRoles` 是旧键**（`src/skeleton/assets/.cornfield/config.yml`）：活键是 `modelRoutes`，旧键只在读入迁移时被认一次（并会重写整个文件、丢掉注释）。新建的 agentDir 现在直接写活键。
+
+- **看板选 thinking 档位现在真的落盘**（`src/server/wire-server.ts`, `packages/pi-wire/src/commands.ts`, `test/wire-server-thinking-persist.integration.test.ts`）：`set_thinking_level` 增加可选 `persist`。此前 UI 上改了档位、配置文件一个字节不动、重启回退，而且没有任何提示 —— 「看起来能配、其实只改了本次会话」。缺省仍是只改本会话（`cycle_thinking_level` 等随时切档的语义不变），看板显式传 `persist: true` 才写进目标 agent 的配置。
 
 - **`grep` 把「文件太大没查」说成「没有匹配」**（`crates/pi-natives/src/grep.rs`、`packages/coding-agent/src/tools/search.ts`、`test/tools/search-oversized.test.ts`）：原生 grep 有一个 4 MiB 的文件上限（`MAX_FILE_BYTES`），超限文件在 `read_file_bytes` 里返回 `None`——与「二进制文件」共用同一个静默跳过，调用方分不出「这份文件里没有」和「这份文件根本没打开」。2026-09-16 一天内被报三次（225 MB 的反汇编、4.4 MB 的产物 HTML、以及一个把自己误判成 gitignore 问题的显式文件路径）。现按 upstream 的形状拆开：`read_file_bytes` 返回 `Read` / `Oversized` / `Skipped`；**显式指定的单个超限文件改为搜它前 4 MiB 的窗口**，不再直接答空；`GrepResult` 新增 `skipped_oversized`，单文件与目录遍历两条路径都计数（单文件走前窗时 `Some(1)`，所以「搜了前窗但没中」不会被当成「整个文件查过了」）；工具侧在空结果里接一句 `N file(s) exceed the search size limit and were not searched in full.`，不再只回 `No matches found`。措辞用「not searched in full」是因为两条路径情形不同：遍历是**整个没读**，显式单文件是**只读了前窗**。**未移植**：upstream 目录遍历里那遗 deferred-oversized 第二遍（对超限文件也搜前窗、排在普通结果之后）——本地只计数不搜，因此遍历遇到大文件仍可能漏匹配，但**不再静默**。回归：Rust 4 条（超限单文件前窗命中、前窗之外零命中且仍报部分搜索、卡界之下的对照、遍历计数）、TS 3 条（前窗命中、部分搜索的措辞、界下真阴性仍是裸 no-match）。
 

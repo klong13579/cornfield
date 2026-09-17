@@ -7,7 +7,7 @@
  */
 import { Database } from "bun:sqlite";
 import * as path from "node:path";
-import { logger } from "@cornfield/utils";
+import { isEnoent, logger } from "@cornfield/utils";
 import { initMemoryTables } from "../memory/schema";
 import { resolveEvolutionPathLayout } from "../paths";
 import { migrateAddAgentWrittenSource } from "./migrations/add-agent-written-source";
@@ -48,6 +48,44 @@ export function getEvolutionDb(cwd: string, globalStore?: boolean): Database {
 	logger.debug("Self-evolution DB initialized", { path: dbPath });
 	dbCache.set(dbPath, { db, refCount: 1 });
 	return db;
+}
+
+/**
+ * 只读打开演化库：**不建目录、不建库、不跑迁移**。
+ *
+ * 为什么需要它而不是直接用 `getEvolutionDb`：那个的语义是「库要在且是最新 schema」，所以它会
+ * `mkdir -p` + 建库 + 迁移。只读读面（技能页要看「演化系统沉淀了什么」）用它会**创造一个空库
+ * 然后报「里面没有技能」**—— 那是把「还没演化」当成「读到了，空」发出去的另一种说法。
+ *
+ * 返回值：
+ * - `Database` —— 库在、打开了（schema 对不对不在这里判，调用方查表时会知道）；
+ * - `null` —— **文件不在**，即这个库还没生成。这是明确的空集，不是读失败（调用方不许把它显示成错误）；
+ * - 抛 —— 文件在但打不开（权限、路径上是个目录……）。读不到就是读不到，不许退化成空集。
+ *
+ * 判「文件不在」用的是打开失败**之后**的一次 stat：主路径仍然是「直接开，失败再解释原因」，
+ * 不是「先查存在再开」（后者对每个存在的库都多一次系统调用，且把两者之间的竞态藏在预检里）。
+ */
+export async function openEvolutionDbReadOnly(dbPath: string): Promise<Database | null> {
+	let db: Database;
+	try {
+		db = new Database(dbPath, { readonly: true });
+	} catch (err) {
+		if (await isAbsentFile(dbPath)) return null;
+		throw err;
+	}
+	// 写者可能正持着锁：只读连接同样要等一会儿，不要立刻 SQLITE_BUSY。
+	db.exec("PRAGMA busy_timeout = 5000;");
+	return db;
+}
+
+/** 路径上确实没有文件（stat 都失败且原因是 ENOENT）。stat 的其他失败不当作「不在」。 */
+async function isAbsentFile(filePath: string): Promise<boolean> {
+	try {
+		await Bun.file(filePath).stat();
+		return false;
+	} catch (err) {
+		return isEnoent(err);
+	}
 }
 
 /**

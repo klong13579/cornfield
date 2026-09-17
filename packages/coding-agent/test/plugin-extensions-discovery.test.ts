@@ -3,13 +3,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { discoverAndLoadExtensions } from "@cornfield/coding-agent/extensibility/extensions/loader";
-import { getAgentDir, getPluginsDir, setAgentDir, TempDir } from "@cornfield/utils";
+import { getClientDir, getPluginsDir, setClientDir, TempDir } from "@cornfield/utils";
 
 describe("plugin extension discovery", () => {
 	let projectDir: TempDir;
 	let tempXdgDataHome = "";
 	let originalXdgDataHome: string | undefined;
-	const originalAgentDir = getAgentDir();
+	const originalClientDir = getClientDir();
 
 	beforeEach(() => {
 		projectDir = TempDir.createSync("@pi-plugin-ext-");
@@ -18,7 +18,7 @@ describe("plugin extension discovery", () => {
 		fs.mkdirSync(path.join(tempXdgDataHome, "omp"), { recursive: true });
 		process.env.XDG_DATA_HOME = tempXdgDataHome;
 		// Rebuild path caches after changing XDG env so plugin discovery resolves into the temp root.
-		setAgentDir(originalAgentDir);
+		setClientDir(originalClientDir);
 
 		const pluginsDir = getPluginsDir();
 		const pluginDir = path.join(pluginsDir, "node_modules", "@demo", "plugin");
@@ -61,7 +61,7 @@ describe("plugin extension discovery", () => {
 		} else {
 			process.env.XDG_DATA_HOME = originalXdgDataHome;
 		}
-		setAgentDir(originalAgentDir);
+		setClientDir(originalClientDir);
 	});
 
 	it("loads installed plugin extensions declared in package.json", async () => {

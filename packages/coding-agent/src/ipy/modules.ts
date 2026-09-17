@@ -28,7 +28,7 @@ export interface PythonModuleExecutor {
 export interface DiscoverPythonModulesOptions {
 	/** Working directory for project-level modules. Default: getProjectDir() */
 	cwd?: string;
-	/** Agent directory for user-level modules. Default: from getAgentDir() */
+	/** Agent home for user-level modules. Default: the default Agent's home */
 	agentDir?: string;
 }
 

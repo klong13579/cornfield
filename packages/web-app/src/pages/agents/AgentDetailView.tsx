@@ -1,15 +1,30 @@
-import type { HostToolDefinitionDto, ModelInfoDto, ToolSwitchDto, ToolSwitchesDto } from "@cornfield/wire";
+import type {
+	HostToolDefinitionDto,
+	SkillScopeRowDto,
+	SkillsResultDto,
+	ToolSwitchDto,
+	ToolSwitchesDto,
+} from "@cornfield/wire";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
+import type { AgentPromptSourceDto, GatewayAccountPatchDto, GatewayGroupInfo } from "../../lib/pi-client-api";
+import { SCOPE_LABELS } from "../../lib/scope-display";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import {
+	SKILL_ACTIVATION_LABELS,
+	SKILL_STATUS_LABELS,
+	skillStatusClass,
+	skillVersionText,
+} from "../skills/skill-display";
 import { FileExplorer } from "../workspace/FileExplorer";
 import { KindBadge } from "./AgentsView";
+import { ModelPicker } from "./ModelPicker";
 
 /**
- * Agent 详情（FR-2）—— 6 tab：Skills / 模型 / 工具 / 画像 / 文件 / Prompts。
- * 数据源：Skills 读 .cornfield/skills 真实列表（fs_list+SKILL.md）、画像读 mission.md+user.md、
+ * Agent 详情（FR-2）—— 7 tab：Skills / 钉钉 / 模型 / 工具 / 画像 / 文件 / Prompts。
+ * 数据源：Skills 读 serve get_skills（与「技能」页同一份结果）、画像读 mission.md+user.md、
+ * Prompts 读 get_agent_prompt_sources（agentDir 的 prompt 面，serve 侧单一真相）+ fs_read 读正文、
  * 模型接 get_available_models/set_model 真命令、画像实时建模待连接器路径（缺口 B5）。
  */
 
@@ -25,17 +40,12 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: "prompts", label: "Prompts" },
 ];
 
-// 技能列表改为真实数据：fs_list 读 .cornfield/skills/ 目录（serve skillCount 同源）。
-// 版本/描述从各 skill 的 SKILL.md frontmatter 解析（fs_read）。
-
 const THINKING_LEVELS = ["off", "low", "medium", "high"];
 
 export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose: () => void }): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const [tab, setTab] = useState<TabId>("skills");
-	const [models, setModels] = useState<ModelInfoDto[]>([]);
-	const [selProvider, setSelProvider] = useState("anthropic");
 	// C3：host tool 注册态（set_host_tools 真命令本地权威态；snapshot 无工具开关数据，wire 面未提供）
 	const [hostTools, setHostToolsState] = useState<HostToolDefinitionDto[]>(() => store.getHostTools());
 	const [newHostName, setNewHostName] = useState("");
@@ -60,15 +70,10 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 		store.setHostTools(next);
 	};
 
-	useEffect(() => {
-		void store.fetchModels().then(result => setModels(result.models));
-	}, [store]);
-
 	const agent = view.agents.find(a => a.id === agentId);
 	const name = agent?.name ?? (view.agents.length === 0 ? "等待 Agent 注册表" : "未知 Agent");
-	const provider = agent?.model?.split("/")[0] ?? (view.model ?? "").split("/")[0] ?? "anthropic";
+	// 当前模型（裸 id，与「模型配置」tab 的 Provider/Model 两个下拉同源：AgentDetailView → ModelPicker）。
 	const currentModel = agent?.model ?? view.model ?? "";
-	const providers = Array.from(new Set(models.map(m => m.provider)));
 
 	return (
 		<div className="px-10 pt-8 pb-12">
@@ -105,7 +110,10 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					</div>
 					<div className="flex items-baseline gap-4">
 						<h1 className="text-[32px] font-semibold leading-snug tracking-[-0.8px] text-ink">{name}</h1>
-						<span className="rounded bg-accent-dim px-2.5 py-1 font-mono text-[12px] text-ink">
+						<span
+							data-testid="agent-model-badge"
+							className="rounded bg-accent-dim px-2.5 py-1 font-mono text-[12px] text-ink"
+						>
 							{currentModel}
 						</span>
 						{agent && <KindBadge kind={agent.kind} />}
@@ -132,7 +140,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					))}
 				</div>
 
-				{tab === "skills" && <SkillsView agentId={agentId} />}
+				{tab === "skills" && <AgentSkillsTab agentId={agentId} />}
 
 				{tab === "dingtalk" && <DingtalkView agentId={agentId} />}
 
@@ -140,37 +148,8 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					<div>
 						<h4 className="mb-3.5 section-title text-ink-faint">模型选择</h4>
 						<div className="flex max-w-[420px] flex-col gap-2.5">
-							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
-								<span className="w-[90px] shrink-0">Provider</span>
-								<select
-									value={selProvider}
-									onChange={e => setSelProvider(e.target.value)}
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-								>
-									{providers.length > 0 ? (
-										providers.map(p => <option key={p}>{p}</option>)
-									) : (
-										<option>{provider}</option>
-									)}
-								</select>
-							</label>
-							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
-								<span className="w-[90px] shrink-0">Model</span>
-								<select
-									value={currentModel}
-									onChange={e => {
-										if (e.target.value) store.setModel(e.target.value, selProvider, agentId);
-									}}
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-								>
-									{models
-										.filter(m => m.provider === selProvider)
-										.map(m => (
-											<option key={m.id}>{m.id}</option>
-										))}
-									{models.length === 0 && <option>{currentModel || "—"}</option>}
-								</select>
-							</label>
+							{/* Provider / Model 两个下拉（含目录读取态）：真数据路径在 ModelPicker.tsx；key 换 agent 重挂。 */}
+							<ModelPicker key={agentId} agentId={agentId} currentModel={currentModel} />
 							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
 								<span className="w-[90px] shrink-0">Thinking</span>
 								<select
@@ -191,7 +170,7 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 				{tab === "tools" && (
 					<div className="flex flex-col gap-8">
 						<section>
-							<h4 className="mb-3 section-title text-ink-faint">内核工具开关（写该 agent 的 config.yml）</h4>
+							<h4 className="mb-3 section-title text-ink-faint">内核工具开关（写该 agent 生效的那层配置）</h4>
 							<ToolSwitchesView agentId={agentId} />
 						</section>
 						<section>
@@ -243,7 +222,12 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 
 				{tab === "profile" && <ProfileView agentId={agentId} />}
 
-				{tab === "files" && <FileExplorer agentId={agentId} />}
+				{tab === "files" && (
+					// Agent 详情页浏览的是**这个 Agent 自己根上的附件**：未绑 Project 的附件地址
+					// 就是 Agent 名（T26 保证），所以 wire 身份与展示 Agent 在这里同值 —— 两个入参
+					// 不是重复，是把“在哪个根里”与“是谁的”各自说清（工作台右栏两者不同）。
+					<FileExplorer attachmentAddress={agentId} agentId={agentId} />
+				)}
 
 				{tab === "prompts" && <PromptsView agentId={agentId} />}
 
@@ -568,7 +552,7 @@ const PYTHON_MODES: Array<{ value: ToolSwitchesDto["pythonToolMode"]; label: str
 	{ value: "ipy-only", label: "ipy-only — 仅 Python" },
 ];
 
-/** 内核工具开关（get_tool_switches 真读 + set_config 写回该 agent 的 config.yml）。 */
+/** 内核工具开关（get_tool_switches 真读合并视图 + set_config 写回生效层）。 */
 function ToolSwitchesView({ agentId }: { agentId: string }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
@@ -670,68 +654,48 @@ function ToolSwitchesView({ agentId }: { agentId: string }): React.JSX.Element {
 				))}
 			</div>
 			<div className="mt-3 text-[11px] text-ink-faint">
-				开关状态来自该 agent 的 config.yml（未配置项显示内核默认）；切换立即写回配置文件，新建会话生效。
+				开关状态来自该 agent 的配置合并视图（未配置项显示内核默认）；切换写回生效层：有项目级 .cornfield/config.yml
+				就写它，否则写该 agent 的 config.yml。新建会话生效。
 			</div>
 		</div>
 	);
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Skills tab：真实技能列表（fs_list 读 .omp/skills/，SKILL.md frontmatter 解析）
+// Skills tab：直接读 serve get_skills（与「技能」页同一个结果，不再自己扫目录/解析 frontmatter）。
+// 五个事实都由 serve 给：scope（范围）/ source（来源）/ version（声明+指纹）/ activation（进没进会话）/
+// errors（受阻与发现错误）。启停入口在「技能」页（同一份数据 + set_skill_enabled）。
+// 展示词表（范围/激活/状态标签、版本与配色）两页共用 ./skills/skill-display。
 // ─────────────────────────────────────────────────────────────────────
 
-interface SkillInfo {
-	name: string;
-	desc?: string;
-	version?: string;
-}
-
-/** 解析 skills/<name>/SKILL.md 的 frontmatter（name/description/version）。 */
-function parseFrontmatter(text: string): { desc?: string; version?: string; name?: string } {
-	const out: { desc?: string; version?: string; name?: string } = {};
-	const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
-	if (!m) return out;
-	for (const line of m[1].split("\n")) {
-		const mm = line.match(/^(name|description|version)\s*:\s*(.+)$/);
-		if (mm) {
-			const val = mm[2].trim().replace(/^["']|["']$/g, "");
-			if (mm[1] === "description") out.desc = val;
-			else if (mm[1] === "version") out.version = val;
-			else out.name = val;
-		}
-	}
-	return out;
-}
-
-function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
+/**
+ * 该 agent 的技能（get_skills 定向本 agent）。
+ * 列表内容 = 本次会话加载的技能 + 停用名单 + 受阻/发现错误，都是 serve 的事实，不在前端重算。
+ */
+function AgentSkillsTab({ agentId }: { agentId: string }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
-	const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+	const [data, setData] = useState<SkillsResultDto | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
-		if (!view.connected) return; // 连接就绪后再拉，避免 fs_list 在握手期失败
+		if (!view.connected) return; // 连接就绪后再拉，避免 get_skills 在握手期失败
+		// 换 Agent / 重连先清空：留着上一个 Agent 的技能列表，就是在替它发言
+		setData(null);
+		setError(null);
 		const load = async (): Promise<void> => {
 			try {
-				const { entries } = await store.fsList(agentId, ".cornfield/skills");
-				const dirs = entries.filter(e => e.type === "dir");
-				const infos = await Promise.all(
-					dirs.map(async d => {
-						// 读 SKILL.md frontmatter（可能不在顶层而在一级子目录，容错）
-						try {
-							const { text } = await store.fsRead(agentId, `.cornfield/skills/${d.name}/SKILL.md`);
-							const fm = parseFrontmatter(text);
-							return { name: fm.name ?? d.name, desc: fm.desc, version: fm.version };
-						} catch {
-							// 无 SKILL.md（纯目录/素材）——仅列目录名
-							return { name: d.name };
-						}
-					}),
-				);
-				if (!cancelled) setSkills(infos);
+				const result = await store.fetchSkills(agentId); // sessionId 定向本 agent
+				if (!cancelled) {
+					setData(result);
+					setError(null);
+				}
 			} catch (err) {
-				if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+				if (!cancelled) {
+					setData(null);
+					setError(err instanceof Error ? err.message : String(err));
+				}
 			}
 		};
 		void load();
@@ -740,10 +704,13 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 		};
 	}, [agentId, store, view.connected]);
 
+	if (!view.connected) {
+		return <div className="px-1 py-8 text-center text-[12px] text-ink-faint">未连接——技能列表不可用</div>;
+	}
 	if (error) {
 		return <div className="px-1 py-3 text-[12px] text-danger">技能列表加载失败：{error}</div>;
 	}
-	if (!skills) {
+	if (!data) {
 		return (
 			<div className="flex flex-col gap-2 px-1 py-3">
 				{[0, 1, 2, 3].map(i => (
@@ -752,36 +719,85 @@ function SkillsView({ agentId }: { agentId: string }): React.JSX.Element {
 			</div>
 		);
 	}
-	if (skills.length === 0) {
-		return (
-			<div className="px-1 py-8 text-center text-[12px] text-ink-faint">
-				该 agent 没有已安装技能（.cornfield/skills/ 为空）
-			</div>
-		);
+
+	// 需要人看见的问题：Project 归属未知 + 被挡住的技能 + 发现错误（与「技能」页同一套事实）
+	const problems: Array<{ title: string; detail: string }> = [];
+	if (data.scope.projectError) problems.push({ title: "Project 归属未知", detail: data.scope.projectError });
+	for (const blocked of data.blocked) {
+		problems.push({ title: `受阻：${blocked.name}`, detail: `${blocked.path} —— ${blocked.reason}` });
+	}
+	for (const err of data.errors) {
+		problems.push({ title: "发现错误", detail: err.path ? `${err.path} —— ${err.message}` : err.message });
 	}
 
 	return (
 		<div>
-			{skills.map(skill => (
-				<div
-					key={skill.name}
-					className="flex items-baseline gap-3 border-b border-hairline px-1 py-3.5 transition-colors hover:bg-surface"
-				>
-					<span className="w-[220px] shrink-0 font-mono text-[13px] font-medium text-ink">{skill.name}</span>
-					<span className="min-w-0 flex-1 text-[12px] text-ink-subtle">{skill.desc ?? "—"}</span>
-					<span className="shrink-0 font-mono text-[12px] text-ink-faint">{skill.version ?? ""}</span>
-					<button
-						type="button"
-						className="toggle shrink-0 on"
-						aria-checked={true}
-						role="switch"
-						disabled
-						title="技能启停即将支持"
-					/>
+			{data.skills.length === 0 ? (
+				<div className="px-1 py-8 text-center text-[12px] text-ink-faint">
+					该 agent 本次会话未加载任何技能（停用名单 {data.disabled.length} 项）
 				</div>
-			))}
+			) : (
+				data.skills.map(row => <SkillLine key={`loaded:${row.name}`} row={row} />)
+			)}
+
+			{data.disabled.length > 0 && (
+				<section className="mt-6">
+					<h4 className="mb-3 section-title text-ink-faint">已停用（settings skills.ignoredSkills）</h4>
+					{data.disabled.map(row => (
+						<SkillLine key={`disabled:${row.name}`} row={row} dimmed />
+					))}
+				</section>
+			)}
+
+			{problems.length > 0 && (
+				<section className="mt-6 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3">
+					<div className="mb-1 text-[12px] font-semibold text-danger">发现错误 {problems.length} 项</div>
+					{problems.map(problem => (
+						<div key={`${problem.title}:${problem.detail}`} className="text-[11px] text-ink-subtle">
+							<span className="font-medium text-ink">{problem.title}</span>：{problem.detail}
+						</div>
+					))}
+				</section>
+			)}
+
 			<div className="mt-3 text-[11px] text-ink-faint">
-				{skills.length} 个已安装技能（.cornfield/skills/ 真实列表）；启用/停用待 set_skill_enabled 协议。
+				{data.skills.length} 个本次会话加载的技能 · 停用 {data.disabled.length} · 受阻/错误 {problems.length}
+				—— 数据来自 get_skills（agentDir {data.scope.agentDir || "未知"}）；启用/停用在「技能」页操作。
+			</div>
+		</div>
+	);
+}
+
+/** 一行技能：名字 + 描述 + 版本（声明或指纹）+ serve 给的五个事实。 */
+function SkillLine({ row, dimmed }: { row: SkillScopeRowDto; dimmed?: boolean }): React.JSX.Element {
+	return (
+		<div
+			className={`border-b border-hairline px-1 py-3 transition-colors hover:bg-surface ${dimmed ? "opacity-70" : ""}`}
+		>
+			<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+				<span
+					className={`w-[200px] shrink-0 font-mono text-[13px] font-medium text-ink ${dimmed ? "line-through" : ""}`}
+				>
+					{row.name}
+				</span>
+				<span className="min-w-[200px] flex-1 text-[12px] text-ink-subtle">{row.description || "—"}</span>
+				<span className="w-[110px] shrink-0 text-right font-mono text-[12px] text-ink-faint">
+					{skillVersionText(row)}
+				</span>
+			</div>
+			<div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-ink-faint">
+				<span className="rounded bg-surface-2 px-1.5 py-0.5">{SCOPE_LABELS[row.scope]}</span>
+				<span>
+					{row.providerName ?? row.provider} · {row.source}
+				</span>
+				<span className={`rounded px-1.5 py-0.5 ${skillStatusClass(row.status)}`}>
+					{SKILL_STATUS_LABELS[row.status]}
+				</span>
+				<span className="rounded bg-surface-2 px-1.5 py-0.5">{SKILL_ACTIVATION_LABELS[row.activation]}</span>
+				<span className="max-w-[420px] truncate" title={row.path || "磁盘上找不到 SKILL.md"}>
+					{row.path || "路径未知"}
+				</span>
+				{row.reason && <span className="max-w-[420px] truncate">原因：{row.reason}</span>}
 			</div>
 		</div>
 	);
@@ -852,84 +868,219 @@ function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Prompts tab：聚合 agent 的各类 prompt 配置源
+// Prompts tab：agentDir 的 prompt 源（清单来自 serve，不再自己抄一份）
+//
+// 这份清单的真源是 `get_agent_prompt_sources`（serve 侧 `skeleton/agent-dir-files.ts` 的
+// prompt 面）。这里曾经硬编码 7 项并且已经漂移：`.omp/SYSTEM.md` 是旧路径、
+// `AGENTS-personal.md` / `CONTEXT.md` 全仓只有它提过；真正 always-on 的
+// `TOOLS.md` / `TODO.md` / `knowledge/external-workspaces.md` 反而没有入口。
+// 现在只渲染 serve 给的（`title` + `description`），正文按 `path` 用 fs_read 读。
+//
+// 三种「没有正文」不许互相顶替（与右栏 Artifacts/Changes 同一套写法）：
+//   不存在 —— 清单里 `exists:false`：serve 逐项报的事实（缺的项就留在这份清单里，不裁掉）
+//   读失败 —— 清单说存在，但 fs_read 报错（读的瞬间被删/超限/…）：原文照显，不写成「不存在」
+//   未读   —— 还没点过任何一项，不是「这份文件是空的」
+// 另有两态在清单层：未连接（没问过）与加载中，见 {@link PromptSourcesState}。
 // ─────────────────────────────────────────────────────────────────────
 
 const FS_MAX_READ_HINT = ">128KB 仅显示前段";
 
-interface PromptSource {
-	path: string;
-	title: string;
-	desc: string;
+/**
+ * 清单的读取状态。
+ *
+ * 「未连接」与「加载中」各自有名字：把「没问过」渲染成一份空清单，用户会据此以为这个
+ * agentDir 什么都没有。
+ */
+type PromptSourcesState =
+	| { status: "disconnected" }
+	| { status: "loading" }
+	| { status: "ready"; sources: AgentPromptSourceDto[] }
+	| { status: "error"; error: string };
+
+/**
+ * 一次点开的读取结果 —— 同时是「选中的是哪一项」（单一事实，不与另一个 selectedPath 字段
+ * 并行存在：两个字段说同一件事，迟早会不一致）。
+ */
+type PromptReadState =
+	/** 清单已报它不存在：**不去读一个已知不存在的文件**，直接把那个事实说出来。 */
+	| { path: string; kind: "missing" }
+	| { path: string; kind: "loading" }
+	| { path: string; kind: "text"; text: string; truncated: boolean }
+	| { path: string; kind: "error"; error: string };
+
+/** Prompts tab 的全部状态 + 它属于哪个 agent（换 agent 时整份作废，见 {@link currentPromptsLoad}）。 */
+export interface PromptsLoad {
+	agentId: string;
+	sources: PromptSourcesState;
+	read: PromptReadState | null;
 }
 
-const PROMPT_SOURCES: PromptSource[] = [
-	{ path: "mission.md", title: "mission.md", desc: "agent 使命/人格定义（工作方式与长期目标）" },
-	{ path: "user.md", title: "user.md", desc: "用户身份声明（草稿/权威版本之一）" },
-	{ path: ".omp/SYSTEM.md", title: ".omp/SYSTEM.md", desc: "Gateway Agent 系统提示词（IM 场景纪律）" },
-	{ path: "AGENTS.md", title: "AGENTS.md", desc: "仓库级 agent 指南（项目规则/约定）" },
-	{ path: "AGENTS-personal.md", title: "AGENTS-personal.md", desc: "个人版 agent 指南（若存在）" },
-	{ path: "CONTEXT.md", title: "CONTEXT.md", desc: "长期上下文/背景注入" },
-	{ path: "prompt-includes.json", title: "prompt-includes.json", desc: "系统提示注入清单（插件/技能白名单）" },
-];
+function freshPromptsLoad(agentId: string): PromptsLoad {
+	return { agentId, sources: { status: "loading" }, read: null };
+}
 
-function PromptsView({ agentId }: { agentId: string }): React.JSX.Element {
-	const store = useSessionStore();
-	const [selectedPath, setSelectedPath] = useState<string | null>(null);
-	const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
+/**
+ * 「这份状态算不算本次 agent 的」：
+ *
+ * `agentId` 一变，手上那份（上一个 agent 的清单与正文）就不是本次的结果了 —— 而拉取是异步的，
+ * 上一次的答复可能晚一步才回来。所以归属判定放在**渲染时**（不是等 effect 把状态清掉）：
+ * 不是本次 agent 的，一律当作「还在加载」；上一次的答复回来时也不是无条件覆盖，
+ * 而是先对一下 agentId。
+ */
+export function currentPromptsLoad(load: PromptsLoad, agentId: string): PromptsLoad {
+	return load.agentId === agentId ? load : freshPromptsLoad(agentId);
+}
 
-	const open = async (path: string): Promise<void> => {
-		setSelectedPath(path);
-		setLoading(true);
-		setError(null);
-		// 文件不存在是常态（如 AGENTS-personal.md 可能没有）——失败标记为不可用而非报错
-		try {
-			const result = await store.fsRead(agentId, path);
-			setContent(result);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-			setContent(null);
-		}
-		setLoading(false);
-	};
+function errorTextOf(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
 
+/**
+ * Prompts tab 的展示层（纯 props）。
+ *
+ * 纯 props 是为了能把「不存在 / 读失败 / 未读 / 未连接 / 加载中」五种画面静态渲染出来逐个
+ * 钉住 —— 这几种「没有」在屏幕上长得像，混掉一个就是一个假结论。
+ */
+export function PromptSourcesView({
+	sources,
+	read,
+	onOpen,
+}: {
+	sources: PromptSourcesState;
+	/** 当前选中的项 + 它的读取结果（{@link PromptReadState}）。 */
+	read: PromptReadState | null;
+	onOpen: (source: AgentPromptSourceDto) => void;
+}): React.JSX.Element {
 	return (
 		<div className="grid min-h-0 grid-cols-[minmax(220px,320px)_1fr] gap-4">
 			<div className="rounded-lg border border-hairline bg-surface py-1">
-				{PROMPT_SOURCES.map(s => (
-					<button
-						key={s.path}
-						type="button"
-						className={`flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-2 ${selectedPath === s.path ? "bg-accent-dim" : ""}`}
-						onClick={() => void open(s.path)}
-					>
-						<span className="font-mono text-[12.5px] font-medium text-ink">{s.title}</span>
-						<span className="text-[11px] leading-snug text-ink-faint">{s.desc}</span>
-					</button>
-				))}
+				{sources.status === "disconnected" && (
+					<div className="flex flex-col gap-1 px-3 py-6">
+						<div className="text-[12px] text-ink-faint">未连接——读不到 prompt 源清单</div>
+						<div className="text-[11px] leading-relaxed text-ink-subtle">
+							连上 serve 后这里会列出这个 agentDir 的 prompt 源
+						</div>
+					</div>
+				)}
+				{sources.status === "loading" && <div className="px-3 py-6 text-[12px] text-ink-faint">加载中…</div>}
+				{sources.status === "error" && (
+					<div className="px-3 py-3 text-[12px] text-danger">清单读取失败：{sources.error}</div>
+				)}
+				{sources.status === "ready" && sources.sources.length === 0 && (
+					<div className="px-3 py-6 text-[12px] text-ink-faint">serve 报这个 agentDir 一份 prompt 源都没有</div>
+				)}
+				{sources.status === "ready" &&
+					sources.sources.map(s => (
+						<button
+							key={s.path}
+							type="button"
+							data-prompt-path={s.path}
+							className={`flex w-full cursor-pointer flex-col gap-1 px-3 py-2.5 text-left transition-colors hover:bg-surface-2 ${read?.path === s.path ? "bg-accent-dim" : ""}`}
+							onClick={() => onOpen(s)}
+						>
+							<span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+								<span className="text-[12.5px] font-medium text-ink">{s.title}</span>
+								<span className="font-mono text-[10.5px] text-ink-subtle">{s.path}</span>
+								{!s.exists && <span className="badge fail">不存在</span>}
+							</span>
+							<span className="text-[11px] leading-snug text-ink-faint">{s.description}</span>
+						</button>
+					))}
 			</div>
 			<div className="min-h-0 overflow-auto rounded-lg border border-hairline bg-surface px-4 py-3">
-				{loading && <div className="py-8 text-center text-[12px] text-ink-faint">加载中…</div>}
-				{!loading && selectedPath && content && (
+				{read === null && (
+					<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧浏览 agent 的各份 prompt 配置</div>
+				)}
+				{read?.kind === "loading" && <div className="py-8 text-center text-[12px] text-ink-faint">加载中…</div>}
+				{read?.kind === "missing" && (
+					<div className="flex flex-col gap-1 py-8 text-center">
+						<div className="font-mono text-[12px] text-ink-muted">{read.path}</div>
+						<div className="text-[12px] text-ink-faint">该文件不存在（serve 报 exists=false）</div>
+						<div className="px-6 text-[11px] leading-relaxed text-ink-subtle">
+							它没有内容可读；「不存在」与「读了但没读到」不是一回事
+						</div>
+					</div>
+				)}
+				{read?.kind === "error" && (
+					<div className="flex flex-col gap-1 py-8 text-center">
+						<div className="font-mono text-[12px] text-ink-muted">{read.path}</div>
+						<div className="text-[12px] text-danger">读取失败：{read.error}</div>
+					</div>
+				)}
+				{read?.kind === "text" && (
 					<>
 						<div className="mb-2 flex items-center gap-2">
-							<span className="truncate font-mono text-[12px] font-medium text-ink">{selectedPath}</span>
-							{content.truncated && <span className="badge fail">{FS_MAX_READ_HINT}</span>}
+							<span className="truncate font-mono text-[12px] font-medium text-ink">{read.path}</span>
+							{read.truncated && <span className="badge fail">{FS_MAX_READ_HINT}</span>}
 						</div>
 						<pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
-							{content.text}
+							{read.text}
 						</pre>
 					</>
-				)}
-				{!loading && selectedPath && error && (
-					<div className="py-8 text-center text-[12px] text-ink-faint">该文件不存在或不可读（{error}）</div>
-				)}
-				{!loading && !selectedPath && (
-					<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧浏览 agent 的各份 prompt 配置</div>
 				)}
 			</div>
 		</div>
 	);
+}
+
+function PromptsView({ agentId }: { agentId: string }): React.JSX.Element {
+	const view = useSession();
+	const store = useSessionStore();
+	const [load, setLoad] = useState<PromptsLoad>(() => freshPromptsLoad(agentId));
+
+	// 换 agent：整份作废（**渲染时**判定，不等 effect）—— 上一个 agent 的清单与正文都不许
+	// 当成本次的结果渲染出去。
+	const current = currentPromptsLoad(load, agentId);
+	const sources: PromptSourcesState = view.connected ? current.sources : { status: "disconnected" };
+
+	useEffect(() => {
+		let cancelled = false;
+		if (!view.connected) return;
+		setLoad(freshPromptsLoad(agentId));
+		store
+			.fetchAgentPromptSources(agentId)
+			.then(list => {
+				if (cancelled) return;
+				setLoad(prev =>
+					prev.agentId === agentId ? { ...prev, sources: { status: "ready", sources: list } } : prev,
+				);
+			})
+			.catch((err: unknown) => {
+				if (cancelled) return;
+				setLoad(prev =>
+					prev.agentId === agentId ? { ...prev, sources: { status: "error", error: errorTextOf(err) } } : prev,
+				);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, store, view.connected]);
+
+	/** 点开一项：清单已报不存在的，直接说「不存在」，不去读一个已知不存在的文件。 */
+	const open = (source: AgentPromptSourceDto): void => {
+		setLoad(prev => ({
+			...prev,
+			read: source.exists ? { path: source.path, kind: "loading" } : { path: source.path, kind: "missing" },
+		}));
+		if (!source.exists) return;
+		store
+			.fsRead(agentId, source.path)
+			.then(({ text, truncated }) => {
+				// 回来时还停在同一项上才落：中途换了 agent / 点了别的项，这次答复已经不是它的了。
+				setLoad(prev =>
+					prev.agentId === agentId && prev.read?.path === source.path
+						? { ...prev, read: { path: source.path, kind: "text", text, truncated } }
+						: prev,
+				);
+			})
+			.catch((err: unknown) => {
+				setLoad(prev =>
+					prev.agentId === agentId && prev.read?.path === source.path
+						? { ...prev, read: { path: source.path, kind: "error", error: errorTextOf(err) } }
+						: prev,
+				);
+			});
+	};
+
+	return <PromptSourcesView sources={sources} read={current.read} onOpen={open} />;
 }

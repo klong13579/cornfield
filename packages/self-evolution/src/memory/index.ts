@@ -126,10 +126,9 @@ export function startMemoryStartupTask(options: {
 	session: AgentSession;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	agentDir: string;
 	taskDepth: number;
 }): void {
-	const { session, settings, modelRegistry, agentDir, taskDepth } = options;
+	const { session, settings, modelRegistry, taskDepth } = options;
 	const cfg = loadMemoryConfig(settings);
 	if (!cfg.enabled) return;
 	if (taskDepth > 0) return;
@@ -144,21 +143,20 @@ export function startMemoryStartupTask(options: {
 		return;
 	}
 
-	void runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg }).catch(error => {
+	void runMemoryStartup({ session, settings, modelRegistry, config: cfg }).catch(error => {
 		logger.warn("Memory startup failed", { error: String(error) });
 	});
 }
 
 /**
  * Build memory usage instructions for prompt injection.
+ *
+ * 只吃 settings：记忆根 = `getMemoryRoot(settings.getCwd())`（配置/记忆的项目根，票 27）。
  */
-export async function buildMemoryToolDeveloperInstructions(
-	agentDir: string,
-	settings: Settings,
-): Promise<string | undefined> {
+export async function buildMemoryToolDeveloperInstructions(settings: Settings): Promise<string | undefined> {
 	const cfg = loadMemoryConfig(settings);
 	if (!cfg.enabled) return undefined;
-	const memoryRoot = getMemoryRoot(agentDir, settings.getCwd());
+	const memoryRoot = getMemoryRoot(settings.getCwd());
 	const summaryPath = path.join(memoryRoot, "memory_summary.md");
 
 	let text: string;
@@ -180,15 +178,18 @@ export async function buildMemoryToolDeveloperInstructions(
 
 /**
  * Clear all persisted memory state and generated artifacts.
+ *
+ * 两把 key 分开（票 27）：`memoryKey` = 配置/记忆的项目根（删哪个记忆目录），`evolutionKey` = 会话 cwd
+ *（DB 与活动日志仍按它 —— 那两项不跟记忆一起搬）。
  */
-export async function clearMemoryData(agentDir: string, cwd: string): Promise<void> {
-	const db = getMemoryDb(cwd);
+export async function clearMemoryData(memoryKey: string, evolutionKey: string): Promise<void> {
+	const db = getMemoryDb(evolutionKey);
 	try {
 		clearMemoryDataInDb(db);
 	} finally {
-		releaseMemoryDb(cwd);
+		releaseMemoryDb(evolutionKey);
 	}
-	await fs.rm(getMemoryRoot(agentDir, cwd), { recursive: true, force: true });
+	await fs.rm(getMemoryRoot(memoryKey), { recursive: true, force: true });
 }
 
 /**
@@ -198,7 +199,6 @@ export async function runMemoryMaintenanceOnce(options: {
 	session: AgentSession;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	agentDir: string;
 	phase?: "all" | "phase2";
 }): Promise<void> {
 	const cfg = loadMemoryConfig(options.settings);
@@ -214,13 +214,15 @@ export async function runMemoryMaintenanceOnce(options: {
 
 /**
  * Force-enqueue global consolidation maintenance work.
+ *
+ * 只吃演化侧的 key（DB 与 global watermark 都按它）——旧签名的第一个参数 `_agentDir` 从未被用过（票 27）。
  */
-export function enqueueMemoryConsolidation(_agentDir: string, cwd: string, sourceUpdatedAt = unixNow()): void {
-	const db = getMemoryDb(cwd);
+export function enqueueMemoryConsolidation(evolutionKey: string, sourceUpdatedAt = unixNow()): void {
+	const db = getMemoryDb(evolutionKey);
 	try {
-		enqueueGlobalWatermark(db, sourceUpdatedAt, cwd, { forceDirtyWhenNotAdvanced: true });
+		enqueueGlobalWatermark(db, sourceUpdatedAt, evolutionKey, { forceDirtyWhenNotAdvanced: true });
 	} finally {
-		releaseMemoryDb(cwd);
+		releaseMemoryDb(evolutionKey);
 	}
 }
 
@@ -228,7 +230,6 @@ async function runMemoryStartup(options: {
 	session: AgentSession;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	agentDir: string;
 	config: MemoryRuntimeConfig;
 }): Promise<void> {
 	await runPhase1(options);
@@ -240,15 +241,15 @@ async function runPhase1(options: {
 	session: AgentSession;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	agentDir: string;
 	config: MemoryRuntimeConfig;
 }): Promise<void> {
-	const { session, modelRegistry, agentDir, config } = options;
+	const { session, modelRegistry, config, settings } = options;
 	const cwd = session.sessionManager.getCwd();
 	const db = getMemoryDb(cwd);
 	const nowSec = unixNow();
 	const workerId = `memory-${process.pid}`;
-	const memoryRoot = getMemoryRoot(agentDir, cwd);
+	// 记忆目录按**配置/记忆的项目根**（与 `sdk.ts` 的运行时同源）；DB 仍按会话 cwd。
+	const memoryRoot = getMemoryRoot(settings.getCwd());
 	const currentThreadId = session.sessionManager.getSessionId();
 
 	try {
@@ -373,15 +374,15 @@ async function runPhase2(options: {
 	session: AgentSession;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
-	agentDir: string;
 	config: MemoryRuntimeConfig;
 }): Promise<void> {
-	const { session, modelRegistry, agentDir, config } = options;
+	const { session, modelRegistry, config, settings } = options;
 	const cwd = session.sessionManager.getCwd();
 	const db = getMemoryDb(cwd);
 	const nowSec = unixNow();
 	const workerId = `memory-${process.pid}`;
-	const memoryRoot = getMemoryRoot(agentDir, cwd);
+	// 记忆目录按**配置/记忆的项目根**（与 `sdk.ts` 的运行时同源）；DB 仍按会话 cwd。
+	const memoryRoot = getMemoryRoot(settings.getCwd());
 
 	try {
 		const claimResult = tryClaimGlobalPhase2Job(db, {
@@ -1187,7 +1188,15 @@ function loadMemoryConfig(settings: Settings): MemoryRuntimeConfig {
 }
 
 export { encodeProjectPathForGlobalMemory as encodeProjectPath, getMemoryRoot } from "../paths";
-export { closeMemoryDb, getMemoryDb, openMemoryDb, releaseMemoryDb, resolveMemoryDbPath } from "./storage";
+export {
+	closeMemoryDb,
+	getMemoryDb,
+	openMemoryDb,
+	readSessionMemory,
+	releaseMemoryDb,
+	resolveMemoryDbPath,
+	type SessionMemoryRow,
+} from "./storage";
 export { ensureMemorySummaryFromMemory } from "./summary";
 
 function unixNow(): number {

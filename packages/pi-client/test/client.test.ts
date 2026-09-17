@@ -57,6 +57,33 @@ describe("PiClient 连接 + hello 握手", () => {
 		});
 	});
 
+	test("hello_ack 里的 gatewayWirePort 原样透传（serve 没报时字段缺席，不补缺省）", async () => {
+		const { client } = buildClient();
+		const events: PiClientEventKind[] = [];
+		client.subscribe(e => events.push(e));
+
+		const connectP = client.connect();
+		await tick();
+		const ws = FakeWebSocket.all[0];
+		ws.open();
+		ws.recv(
+			JSON.stringify({
+				type: "hello_ack",
+				connectionId: "conn-7",
+				protocolVersion: MULTIDEVICE_PROTOCOL_VERSION,
+				gatewayWirePort: 7899,
+			}),
+		);
+		await connectP;
+		const helloAck = events.find(e => e.type === "hello_ack");
+		expect(helloAck).toEqual({
+			type: "hello_ack",
+			connectionId: "conn-7",
+			protocolVersion: MULTIDEVICE_PROTOCOL_VERSION,
+			gatewayWirePort: 7899,
+		});
+	});
+
 	test("hello_error 拒握手，connect() reject PiHandshakeError（关闭自动重连）", async () => {
 		const { client } = buildClient({ autoReconnect: false });
 		const connectP = client.connect();

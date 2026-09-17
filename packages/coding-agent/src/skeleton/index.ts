@@ -10,6 +10,16 @@
  */
 
 export { SKELETON_FILES, type SkeletonFile } from "./assets";
+export {
+	assertDefaultAgentHome,
+	checkDefaultAgentHome,
+	DEFAULT_HOME_OWNERSHIP,
+	type DefaultHomeCheck,
+	type DefaultHomeMigrationReport,
+	type DefaultHomeOwnership,
+	type MigratedEntry,
+	migrateDefaultAgentHome,
+} from "./default-home";
 export { SKELETON_DIRS } from "./dirs";
 export { ensureAgentDir, reconcileSkeletonFiles } from "./ensure";
 export {
@@ -28,8 +38,10 @@ export {
 export { resolveAgentDir } from "./resolve";
 export { buildAgentSessionPath } from "./session";
 export {
+	attachRoots,
 	ensureWorkspace,
 	loadWorkspace,
+	readWorkspaceDeclaration,
 	WORKSPACE_SCHEMA_VERSION,
 	type WorkspaceDeclaration,
 	type WorkspaceKnowledgePaths,

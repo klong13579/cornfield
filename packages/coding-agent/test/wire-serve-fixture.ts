@@ -15,6 +15,16 @@
  *   （registry.json、skills discovery），所以预置内容走 `seed` 钩子写在 spawn 之前——
  *   晚于 spawn 写只剩下 fs watcher 的竞态。
  *
+ * **为什么必须是空 HOME**（票 28 的实测结论）：serve 的内建 default meta 兜底是
+ * `agentDir = process.cwd()`，但启动时 `loadMetasSafe()` 会读
+ * `<HOME>/.cornfield/agent/registry.json` 并在其后 registerMeta ⇒ **覆盖**内建兜底。
+ * 开发机真 HOME 里存在 `default` 条目时，工作根就被换成条目的路径，一切以「cwd 就是工作根」
+ * 为前提的用例都会假红（wire-server-git 曾 6 fail：`fatal: not a git repository`）；
+ * 空 HOME 让注册表从零开始、default 落回内建兜底。`CORNFIELD_CONFIG_DIR` /
+ * `CORNFIELD_AGENT_DIR` 一并剔除：它们优先于 HOME，开发者 shell 里带着它们时同样会把
+ * 工作根指到别处。隔离只做在**子进程的 env** 上，不改进程自己的 `process.env`
+ * —— 没有跨测试的全局状态要恢复。
+ *
  * 这里把它们收敛成一处。**静默停摆**（子进程活着、零输出、不监听）已定位到 bun 运行时层
  * ——连 `serve:boot:start` 都没打出来，产品侧无从修——所以按仓库自己的先例
  * （`live-controller` 的 `makeHarness` 对握手 infra flake 重试一次）重试一次；
@@ -63,7 +73,11 @@ export interface SpawnServeOptions {
 	cwd?: string | ((home: string) => string);
 	/** 额外的 serve 参数，追加在 --port/--host/--no-extensions 之后。 */
 	extraArgs?: string[];
-	/** 额外环境变量（HOME / PI_NO_TITLE 由夹具负责）；传函数时入参是夹具创建的隔离 HOME（用 CORNFIELD_CONFIG_DIR 之类的用例需要）。 */
+	/**
+	 * 额外环境变量（`HOME` / `PI_NO_TITLE` 由夹具负责）；传函数时入参是夹具创建的隔离 HOME。
+	 * 继承来的 `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR` 会被剔除（它们优先于 HOME，
+	 * 会绕开隔离）；用例在这里**显式**给的这两个值照常生效（那是它自己的隔离）。
+	 */
 	env?: Record<string, string> | ((home: string) => Record<string, string>);
 	/**
 	 * 预置隔离 HOME 的内容（入参是夹具创建的隔离 HOME），在 spawn **之前**执行。
@@ -79,6 +93,34 @@ export interface SpawnServeOptions {
  *
  * 失败时按 `ServeReadyTimeoutError` 的字段判断是不是「静默停摆」：是则换一个端口重来一次
  * （并留一行 warn），不是则原样抛出——把「慢」和「真没起来」分开，不把真实回归伪装成 flake。
+ */
+/**
+ * 子进程环境：隔离 HOME + 剔除两个**优先于 HOME** 的继承变量，再叠用例显式给的值。
+ *
+ * 顺序是有意的（两边的隔离语义在这里合流）：先从**继承来的** `process.env` 里剔掉
+ * `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR` —— 开发者 shell 里带着它们时会把工作根
+ * 指到隔离 HOME 之外；然后才让用例 `env` 里显式给的值生效 —— 那是它自己的隔离（例如
+ * `wire-server-listen` 把配置根定到隔离 HOME 本身），不是继承来的泄露。
+ */
+function buildServeEnv(
+	home: string,
+	extra?: Record<string, string> | ((home: string) => Record<string, string>),
+): Record<string, string | undefined> {
+	const env: Record<string, string | undefined> = {
+		...process.env,
+		HOME: home,
+		PI_NO_TITLE: "1",
+	};
+	delete env.CORNFIELD_CONFIG_DIR;
+	delete env.CORNFIELD_AGENT_DIR;
+	return Object.assign(env, typeof extra === "function" ? extra(home) : (extra ?? {}));
+}
+
+/**
+ * 起 serve（隔离 HOME）并等到 /health 就绪。
+ *
+ * 预算与失败语义都在 `./wait-for-serve`（`SERVE_READY_TIMEOUT_MS` / `SERVE_BOOT_BUDGET_MS` /
+ * `ServeReadyTimeoutError`）；这里只管进程与隔离 HOME 的生死。
  */
 export async function spawnServeFixture(options: SpawnServeOptions = {}): Promise<ServeFixture> {
 	const attempts = options.retryOnSilentStall === false ? 1 : 2;
@@ -111,12 +153,7 @@ export async function spawnServeFixture(options: SpawnServeOptions = {}): Promis
 				...(cwd ? { cwd } : {}),
 				stdout: "pipe",
 				stderr: "pipe",
-				env: {
-					...process.env,
-					HOME: home,
-					PI_NO_TITLE: "1",
-					...(typeof options.env === "function" ? options.env(home) : (options.env ?? {})),
-				},
+				env: buildServeEnv(home, options.env),
 			},
 		);
 		try {

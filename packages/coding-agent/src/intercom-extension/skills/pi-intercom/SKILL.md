@@ -91,6 +91,13 @@ Child sessions behave differently toward you automatically:
 - **Completion reports**: a child sends a structured `Subagent completed its
   task round.` message to you after each task round (run id + agent + child
   index). Treat it as a status update, not an ask.
+
+  Every child-to-parent report also opens with one machine-readable line:
+  `[child-session] {"runId":"…","lifecycle":"…"}`. It is the same message, not a
+  second one — read it as the envelope and the prose below it as the content.
+  A formal Child Session's `lifecycle` (`started` / `progress` / `waiting` /
+  `completed` / `failed`) is what a parent session's session tree records; for a
+  session that is not hosting a tree, it is safe to ignore and read the prose.
 - **Ask without `to`**: a child's `intercom({action:"ask", message:"..."})`
   with no `to`/`cwd` routes to you by default. Reply the same way you reply
   to any ask.
@@ -307,10 +314,15 @@ Parameters beyond `action` / `to` / `message`:
 | `inboundMode` | `"queue"` | `"interrupt"` steers inbound messages at the next safe model boundary instead of waiting for the current turn to end |
 | `inboundTrigger` | `"always"` | Whether an inbound message may start a turn: `"always"` / `"replies"` (replies only) / `"never"` |
 | `confirmSend` | `false` | Confirm ordinary and inferred sends from an interactive session |
-| `stableId` | unset | Stable address across restarts (use it when others must target you by name) |
 | `replyHint` | `true` | Include the reply command in inbound messages |
 | `status` | unset | Custom suffix appended to your automatic lifecycle status |
 | `enabled` | `true` | Turn intercom off entirely |
+
+This file is machine-global, so it holds no identity setting. An intercom ID belongs to a
+process: to answer to a fixed address, that process must be launched with
+`PI_INTERCOM_STABLE_ID` set (its launcher's job, not a file's). Without it you answer to
+your own session ID. A registration that would take an ID held by a live session is
+refused by the broker — two processes cannot share one address.
 
 ## Visible Peer Sessions
 

@@ -1,0 +1,538 @@
+/**
+ * Agent 看板 e2e —— 真实 serve（源码）+ 真实 web-app（dist）+ 真实 Chrome。
+ *
+ * 证明两件事（单测都证不了）：
+ *   1. 「新增 agent」在隔离 HOME 里用真 CLI 建出来之后，前端 #/agents 真的看得到、详情页打得开。
+ *   2. AgentDetailView 的 7 个 tab 逐个打开时渲染的是什么（含空态文案 / 加载失败文案 / console error），
+ *      以及「工具开关」读写的到底是不是**这个 agent 自己的** <agentDir>/config.yml。
+ *
+ * 隔离：HOME = 临时目录（不碰真人 registry / 会话 / 仓库）；serve 的日志与 session 落在临时 HOME 下。
+ * 断言里的绝对路径都以 agentDir 为锚，测试自己读磁盘来判定「落盘到底是什么」。
+ *
+ * 前置：`bun run --cwd=packages/web-app build`（vite preview 起的是 dist）。
+ */
+
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import * as fsp from "node:fs/promises";
+import * as net from "node:net";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, type Page, test } from "@playwright/test";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+const CLI = path.join(repoRoot, "packages/coding-agent/src/cli.ts");
+const SHOT_DIR = path.join(repoRoot, "packages/web-app/test-results/agent-dashboard");
+const AGENT = "verify-bot";
+
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
+
+/** 7 个 tab 的按钮文案（与 AgentDetailView 的 TABS 一致）。 */
+const TAB_LABELS = ["Skills", "钉钉", "模型配置", "工具开关", "用户画像", "文件", "Prompts"] as const;
+
+/**
+ * agentDir 的 prompt 面（= serve 侧 `skeleton/agent-dir-files.ts` 的 `AGENT_DIR_PROMPT_FILES`，
+ * 顺序就是它的声明顺序）。
+ *
+ * 这里另一份字面量是故意的：探针要拿**独立的**一份清单去核对屏幕上的那一份 —— 从前端 import
+ * 就没法发现「前端少列了/多列了」（上一版就是这样漂移掉的：`.omp/SYSTEM.md` 是旧路径，
+ * `AGENTS-personal.md` / `CONTEXT.md` 全仓库只有它提过）。
+ */
+const PROMPT_PATHS = [
+	"AGENTS.md",
+	"mission.md",
+	"TOOLS.md",
+	"TODO.md",
+	"user.md",
+	"prompt-includes.json",
+	".cornfield/SYSTEM.md",
+	"knowledge/external-workspaces.md",
+] as const;
+
+function freePort(): Promise<number> {
+	return new Promise(resolve => {
+		const srv = net.createServer();
+		srv.listen(0, "127.0.0.1", () => {
+			const port = (srv.address() as net.AddressInfo).port;
+			srv.close(() => resolve(port));
+		});
+	});
+}
+
+function waitForOutput(proc: ChildProcess, matcher: RegExp, timeoutMs: number, label: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			proc.stdout?.removeAllListeners();
+			proc.stderr?.removeAllListeners();
+			reject(new Error(`${label} 超时（${timeoutMs}ms）未匹配 ${matcher}`));
+		}, timeoutMs);
+		const onData = (buf: Buffer) => {
+			const m = buf.toString().match(matcher);
+			if (m) {
+				clearTimeout(timer);
+				proc.stdout?.removeListener("data", onData);
+				proc.stderr?.removeListener("data", onData);
+				resolve(m[0]);
+			}
+		};
+		proc.stdout?.on("data", onData);
+		proc.stderr?.on("data", onData);
+	});
+}
+
+async function waitForHttp(url: string, timeoutMs: number): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			if ((await fetch(url)).ok) return;
+		} catch {
+			// 未就绪，重试
+		}
+		await new Promise(r => setTimeout(r, 300));
+	}
+	throw new Error(`HTTP 未就绪：${url}`);
+}
+
+function kill(proc: ChildProcess): void {
+	try {
+		proc.kill("SIGTERM");
+	} catch {
+		// 已退出
+	}
+}
+
+interface TabObservation {
+	tab: string;
+	/** 该 tab 打开后页面正文里可读到的文本（截断）。 */
+	text: string;
+	/** 该 tab 打开期间新增的 console error / pageerror。 */
+	errors: string[];
+	screenshot: string;
+}
+
+/** 每个 tab 打开后正文里必然出现 / 必然不出现的串（用作回归断言，不是仅截图）。 */
+const TAB_EXPECT: Record<string, { has: string[]; hasNot?: string[] }> = {
+	Skills: { has: ["个本次会话加载的技能", "lint"] },
+	钉钉: { has: ["该 agent 未绑定钉钉机器人"] },
+	模型配置: { has: ["模型选择"] },
+	工具开关: { has: ["python 工具模式", "glob"] },
+	用户画像: { has: ["mission.md（agent 职责）", "user.md（用户画像声明）"] },
+	文件: { has: ["点击左侧目录展开，点文件查看或编辑"] },
+	Prompts: { has: ["点击左侧浏览 agent 的各份 prompt 配置"] },
+};
+
+/** 打开详情页的一个 tab：点击 → 等渲染稳定 → 断言 → 截图 → 记文本与 console error。 */
+async function openTab(page: Page, label: string, observations: TabObservation[], errors: string[]): Promise<void> {
+	const before = errors.length;
+	await page
+		.getByRole("button", { name: new RegExp(`^${label}`) })
+		.first()
+		.click();
+	// 等到骨架屏幕消失（空态也是稳定态）
+	await page
+		.waitForFunction(() => document.querySelectorAll(".skeleton").length === 0, undefined, { timeout: 20_000 })
+		.catch(() => undefined);
+	await page.waitForTimeout(400);
+	const text = await page.evaluate(() => (document.querySelector("main") ?? document.body).innerText.slice(0, 6000));
+	const expect_ = TAB_EXPECT[label];
+	for (const frag of expect_.has) expect(text, `${label} tab 正文应包含「${frag}」`).toContain(frag);
+	for (const frag of expect_.hasNot ?? []) expect(text, `${label} tab 正文不应包含「${frag}」`).not.toContain(frag);
+	const shot = path.join(SHOT_DIR, `${label}.png`);
+	await page.screenshot({ path: shot, fullPage: true });
+	observations.push({ tab: label, text, errors: errors.slice(before), screenshot: shot });
+}
+
+/** 读「工具开关」tab 里所有开关的（工具名, aria-checked）——按 DOM 顺序，与 TOOL_SWITCH_DEFS 一致。 */
+async function readToolSwitches(page: Page): Promise<Array<{ label: string; checked: string | null }>> {
+	return page.evaluate(() =>
+		Array.from(document.querySelectorAll('button[role="switch"]')).map(b => ({
+			label: b.closest("div")?.querySelector("span.font-mono")?.textContent ?? "",
+			checked: b.getAttribute("aria-checked"),
+		})),
+	);
+}
+
+test.use({ viewport: { width: 1600, height: 1100 } });
+
+test.describe("Agent 看板（真实 serve + 真实前端）", () => {
+	test("新增 agent 可见 + 详情 7 个 tab 逐个打开", async ({ page }) => {
+		const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-dash-home-"));
+		const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-dash-proj-"));
+		execFileSync("git", ["init", "-q"], { cwd: projectDir });
+		await fsp.mkdir(SHOT_DIR, { recursive: true });
+
+		const env = {
+			...process.env,
+			HOME: homeDir,
+			PI_NO_TITLE: "1",
+			CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT,
+		};
+		// ── 第一部分：真 CLI 建 agent（隔离 HOME）──
+		const initOut = execFileSync("bun", [CLI, "agent", "init", AGENT], {
+			cwd: projectDir,
+			env,
+			encoding: "utf8",
+		});
+		const agentDir = path.join(homeDir, ".cornfield", "agents", AGENT);
+		// 预置两份 config.yml，把「作用域」变成可观测事实：
+		//  - <agentDir>/config.yml（verify-bot 自己）    : glob.enabled=false
+		//  - <HOME>/.cornfield/agent/config.yml（default）: disabledProviders=[narwal-plan]
+		// 然后看：工具开关读的是哪一份（应=自己那份）；模型下拉里的 narwal-plan 会不会
+		// 因为**别的 agent** 的停用名单而消失（消失 = 模型可见性是全局的，跨 agent 泄漏）。
+		const perAgentConfig = path.join(agentDir, "config.yml");
+		await fsp.writeFile(perAgentConfig, "glob:\n  enabled: false\n");
+		const defaultAgentConfig = path.join(homeDir, ".cornfield", "agent", "config.yml");
+		await fsp.mkdir(path.dirname(defaultAgentConfig), { recursive: true });
+		await fsp.writeFile(defaultAgentConfig, "disabledProviders:\n  - narwal-plan\n");
+
+		const servePort = await freePort();
+		const appPort = await freePort();
+		const serveUrl = `ws://127.0.0.1:${servePort}/ws`;
+		const serve = spawn(
+			"bun",
+			[CLI, "serve", "--port", String(servePort), "--host", "127.0.0.1", "--no-extensions"],
+			{ cwd: projectDir, env },
+		);
+		const preview = spawn(
+			"bun",
+			["x", "vite", "preview", "--port", String(appPort), "--strictPort", "--host", "127.0.0.1"],
+			{ cwd: path.join(repoRoot, "packages/web-app"), env: process.env },
+		);
+
+		const errors: string[] = [];
+		page.on("console", m => {
+			if (m.type() === "error") errors.push(m.text());
+		});
+		page.on("pageerror", e => errors.push(`pageerror: ${e.message}`));
+		// F7：浏览器侧对 gateway 的请求到底打哪个端口（下面用两个断言钉住：只打 serve 报的那个，不打 7892）
+		const gatewayWireRequests: string[] = [];
+		page.on("request", req => {
+			const url = req.url();
+			if (url.includes("127.0.0.1") && url.includes("/wire")) gatewayWireRequests.push(url);
+		});
+
+		const observations: TabObservation[] = [];
+		try {
+			await waitForOutput(serve, /ws:\/\/127\.0\.0\.1:\d+\/ws/, 60_000, "serve 启动");
+			await waitForHttp(`http://127.0.0.1:${appPort}/`, 30_000);
+
+			await page.addInitScript(
+				(cfg: { wsUrl: string }) => {
+					localStorage.setItem("cornfield.serve.connection", JSON.stringify({ wsUrl: cfg.wsUrl, token: "" }));
+				},
+				{ wsUrl: serveUrl },
+			);
+
+			// ── 1. #/agents 看得到这个 agent ──
+			await page.goto(`http://127.0.0.1:${appPort}/#/agents`, { waitUntil: "domcontentloaded" });
+			// 就绪信号 = 注册表推送到位（该 agent 出现在列表里）
+			await expect(page.getByText(AGENT, { exact: true }).first()).toBeVisible({ timeout: 60_000 });
+			await page.screenshot({ path: path.join(SHOT_DIR, "00-agents-list.png"), fullPage: true });
+
+			// ── 2. 详情页打开（点 verify-bot 卡片自己的「详情」，不是 default 的）──
+			const card = page.locator("div.rounded-xl").filter({ has: page.getByText(AGENT, { exact: true }) });
+			await card.getByRole("button", { name: "详情" }).click();
+			await expect(page).toHaveURL(new RegExp(`#/agents/${AGENT}$`), { timeout: 15_000 });
+			await expect(page.getByRole("heading", { name: AGENT })).toBeVisible({ timeout: 15_000 });
+
+			// ── 3. 7 个 tab 逐个打开 ──
+			for (const label of TAB_LABELS) {
+				await openTab(page, label, observations, errors);
+			}
+
+			// ── 4a. 模型配置首屏：两个下拉的选中值必须落在自己的选项上，Model 不得是 0 个 option ──
+			//        受控 select 的 value 不在选项里时浏览器把 selectedIndex 置 -1（屏幕上「一个都没选中」）；
+			//        Model 那一栏被写死的 provider 筛空时干脆一个 option 都没有：选不了，也看不到当前模型。
+			//        这一组断言在任何读取态（目录还在路上 / 已到）下都成立 —— 不看加载状态。
+			await page
+				.getByRole("button", { name: /^模型配置/ })
+				.first()
+				.click();
+			const providerSelect = page.getByTestId("model-provider-select");
+			const modelSelect = page.getByTestId("model-select");
+			// 当前模型从页面自己宣称的那一处读（标题上的模型徽标，与下拉同源），不是测试自己编的一个值
+			const currentModel = (await page.getByTestId("agent-model-badge").innerText()).trim();
+			expect(currentModel, "该 agent 没报当前模型，这条断言会退化成空断言").not.toBe("");
+			expect(await modelSelect.locator("option").count(), "Model 下拉不得是 0 个 option").toBeGreaterThan(0);
+			expect(
+				await modelSelect.evaluate(el => (el as HTMLSelectElement).selectedIndex),
+				`Model 下拉的 value（${currentModel}）必须落在它自己的某个 option 上`,
+			).toBeGreaterThanOrEqual(0);
+			await expect(modelSelect).toHaveValue(currentModel);
+			expect(
+				await providerSelect.evaluate(el => (el as HTMLSelectElement).selectedIndex),
+				"Provider 下拉的 value 必须落在它自己的某个 option 上",
+			).toBeGreaterThanOrEqual(0);
+			// 读取态必须说得出来（未连接 / 加载中 / 读取失败 / 没有模型 四态不许合并成一句空白）
+			expect((await page.getByTestId("model-catalog-state").innerText()).trim()).not.toBe("");
+
+			// ── 4a-1. 模型配置读作用域（只记录，不断言）：verify-bot 自己**没有**停用 narwal-plan，
+			//         而 default agent 的全局 config.yml 停用了它 —— 看下拉里还有没有 narwal-plan ──
+			const providerOptions = await providerSelect.locator("option").allTextContents();
+			// 三个下拉的首屏态（Provider / Model / Thinking）——只记录，供人工复核
+			const providerSelected = await page.evaluate(() => {
+				const sels = Array.from(document.querySelectorAll("select"));
+				return sels.map(s => ({
+					value: (s as HTMLSelectElement).value,
+					selectedIndex: (s as HTMLSelectElement).selectedIndex,
+					optionCount: s.options.length,
+				}));
+			});
+			const modelScopeProbe = {
+				providerOptions,
+				narwalPlanVisible: providerOptions.includes("narwal-plan"),
+				selects: providerSelected,
+				detailAgentConfig: await fsp.readFile(perAgentConfig, "utf8"),
+				defaultAgentConfig: await fsp.readFile(defaultAgentConfig, "utf8"),
+			};
+
+			// ── 4a-2. 模型配置写作用域（只记录）：选一个真实 provider+model，看哪个文件变了；
+			//         再改 Thinking，看有没有落盘（set_thinking_level 是否 persist）──
+			const projectConfig = path.join(agentDir, ".cornfield", "config.yml");
+			const readBoth = async (): Promise<{ detail: string; project: string }> => ({
+				detail: await fsp.readFile(perAgentConfig, "utf8"),
+				project: await fsp.readFile(projectConfig, "utf8"),
+			});
+			const beforeWrite = await readBoth();
+			// 当前 provider 未知时第一条（「未知」）是不可选的事实项 —— 挑第一个真能选的 provider，
+			// 再看 Model 下拉是否随之出现真模型（级联：Model 的范围由 Provider 决定）。
+			const providerPick = await providerSelect.locator("option:not([disabled])").first().getAttribute("value");
+			expect(providerPick, "Provider 下拉里至少该有一个真 provider 可选").toBeTruthy();
+			await providerSelect.selectOption(providerPick!, { timeout: 15_000 });
+			await page.waitForTimeout(600);
+			const modelOptions = await modelSelect.locator("option").allTextContents();
+			const modelPick = await modelSelect.locator("option:not([disabled])").first().getAttribute("value");
+			if (modelPick) {
+				await modelSelect.selectOption(modelPick, { timeout: 15_000 });
+			}
+			await page.waitForTimeout(2500);
+			const afterModelWrite = await readBoth();
+			await page.locator("select").nth(2).selectOption("high", { timeout: 15_000 });
+			await page.waitForTimeout(2500);
+			const afterThinkingWrite = await readBoth();
+			const modelWriteProbe = { modelOptions, beforeWrite, afterModelWrite, afterThinkingWrite };
+			await page.screenshot({ path: path.join(SHOT_DIR, "模型配置-after-write.png"), fullPage: true });
+
+			// ── 4b. Prompts tab：清单来自 serve（agentDir 的 prompt 面单一真相），逐项与磁盘对照 ──
+			//     上一版探针存证的是前端自己硬编码的那份清单（已经漂移成 `.omp/SYSTEM.md` 这种旧路径），
+			//     于是只能把「该文件读不出来」当成现状。现在钉住的是真源的四件事：
+			//       1. 清单就是 agentDir 的 8 项 prompt 面（一项不多、一项不少）；
+			//       2. 每一项的存在性判断与**磁盘**一致（磁盘上有的不许报「不存在」）；
+			//       3. 磁盘上被删掉的那项**仍留在清单里**并如实报「不存在」（缺的文件才是这个视图的用处）；
+			//       4. 正文真的按 path 读了磁盘上那份内容。
+			const removedPromptPath = "knowledge/external-workspaces.md";
+			await fsp.rm(path.join(agentDir, removedPromptPath), { force: true });
+			await page
+				.getByRole("button", { name: /^Prompts/ })
+				.first()
+				.click();
+			await expect(page.locator(`button[data-prompt-path="${removedPromptPath}"]`)).toBeVisible({
+				timeout: 20_000,
+			});
+			const promptRowCount = await page.locator("button[data-prompt-path]").count();
+			expect(promptRowCount, "Prompts 清单应与 agentDir 的 prompt 面逐项对应").toBe(PROMPT_PATHS.length);
+			const promptProbe: Record<string, string> = {};
+			for (const rel of PROMPT_PATHS) {
+				const onDisk = await fsp.access(path.join(agentDir, rel)).then(
+					() => true,
+					() => false,
+				);
+				await page.locator(`button[data-prompt-path="${rel}"]`).click();
+				await page.waitForTimeout(300);
+				const body = await page.evaluate(() => (document.querySelector("main") ?? document.body).innerText);
+				const ui = /该文件不存在/.test(body) ? "missing" : /读取失败/.test(body) ? "read-failed" : "opened";
+				promptProbe[rel] = `${onDisk ? "on-disk" : "absent"}:${ui}`;
+				// 磁盘上有的应读出正文（不是「不存在」也不是「读失败」），没有的应报「不存在」
+				expect(ui, `${rel}（磁盘上${onDisk ? "有" : "没有"}）在页面上报的是「${ui}」`).toBe(
+					onDisk ? "opened" : "missing",
+				);
+			}
+			// 正文确实来自磁盘那份（真源读得到）：拿文件自己的第一行非空行对屏幕上的文字
+			const agentsMdText = await fsp.readFile(path.join(agentDir, "AGENTS.md"), "utf8");
+			const agentsMdProbe =
+				agentsMdText
+					.split("\n")
+					.find(line => line.trim().length > 0)
+					?.trim()
+					.slice(0, 24) ?? "";
+			expect(agentsMdProbe, "AGENTS.md 不该是空文件，否则这条断言退化成空断言").not.toBe("");
+			await page.locator('button[data-prompt-path="AGENTS.md"]').click();
+			await page.waitForTimeout(300);
+			const agentsMdBody = await page.evaluate(() => (document.querySelector("main") ?? document.body).innerText);
+			expect(agentsMdBody, `AGENTS.md 的正文（首行 ${agentsMdProbe}）应出现在右侧`).toContain(agentsMdProbe);
+			// 旧硬编码里那三个不该再出现：`.omp/SYSTEM.md` 是旧路径，另两个全仓库只有它提过
+			for (const stale of [".omp/SYSTEM.md", "AGENTS-personal.md", "CONTEXT.md"]) {
+				expect(await page.locator(`button[data-prompt-path="${stale}"]`).count(), `${stale} 不该再出现`).toBe(0);
+			}
+			await page.screenshot({ path: path.join(SHOT_DIR, "Prompts-sources.png"), fullPage: true });
+
+			// ── 4c. 作用域证据：预置的 <agentDir>/config.yml glob.enabled=false 是否被 UI 读到 ──
+			// 读的是**这个 agent 自己**的合并视图（project 压 global），不是 default 的那份。
+			await page
+				.getByRole("button", { name: /^工具开关/ })
+				.first()
+				.click();
+			await expect.poll(async () => (await readToolSwitches(page)).length, { timeout: 15_000 }).toBeGreaterThan(0);
+			const switches = await readToolSwitches(page);
+			const glob = switches.find(s => s.label === "glob");
+			expect(glob, "工具开关列表里应有 glob 一行的开关").toBeTruthy();
+			expect(
+				glob?.checked,
+				"glob 的开关应反射这个 agent 自己的配置（预置在 <agentDir>/config.yml 的 glob.enabled=false）",
+			).toBe("false");
+
+			// ── 5. 写入落点证据：切开关 → 落盘到**生效的那一层** ──
+			// 这个 agentDir 自带 `<agentDir>/.cornfield/config.yml`（骨架写的），而 F6 起写侧跟随读侧
+			// 优先级：set_config 不带 scope 就写那一层（写进读侧不看的那层就是「写进去、读不到」），
+			// 而 <agentDir>/config.yml 一字节都不动 —— 同一个 agent 的一份配置不再被劈成两半。
+			const perAgentConfigBeforeWrite = await fsp.readFile(perAgentConfig, "utf8");
+			const globIndex = switches.findIndex(s => s.label === "glob");
+			await page.locator('button[role="switch"]').nth(globIndex).click();
+			await expect
+				.poll(async () => fsp.readFile(projectConfig, "utf8"), { timeout: 15_000 })
+				.toContain("enabled: true");
+			expect(
+				await fsp.readFile(perAgentConfig, "utf8"),
+				"写入不该再落到 <agentDir>/config.yml（那一层被 <agentDir>/.cornfield/config.yml 压着）",
+			).toBe(perAgentConfigBeforeWrite);
+			await page.screenshot({ path: path.join(SHOT_DIR, "tools-after-write.png"), fullPage: true });
+
+			// ── 5b. F7：gateway 请求打在 serve 报的端口上（这里是隔离 HOME 的 CORNFIELD_GATEWAY_WIRE_PORT），
+			//        而不是浏览器自己猜的 7892 —— 猜错就是打到本机真实运营中的 gateway（别的进程的数据）。
+			//        放在最后断言：这条跟前四条是正交的，不该因为它红了就把 tab/清单那几组证据摞下不提。──
+			await expect
+				.poll(
+					() => gatewayWireRequests.some(u => u.startsWith(`http://127.0.0.1:${DEAD_GATEWAY_WIRE_PORT}/wire`)),
+					{
+						timeout: 20_000,
+					},
+				)
+				.toBe(true);
+			expect(
+				gatewayWireRequests.filter(u => u.includes(":7892")),
+				`不该再有请求打到硬编码的 7892：${JSON.stringify(gatewayWireRequests)}`,
+			).toEqual([]);
+
+			// 证据落盘（供人工复核，不参与断言）
+			await fsp.writeFile(
+				path.join(SHOT_DIR, "observations.json"),
+				JSON.stringify(
+					{
+						homeDir,
+						projectDir,
+						agentDir,
+						initOut: initOut.trim(),
+						perAgentConfigAfter: await fsp.readFile(perAgentConfig, "utf8"),
+						perAgentProjectConfigAfter: await fsp.readFile(projectConfig, "utf8"),
+						modelScopeProbe,
+						modelWriteProbe,
+						promptProbe,
+						promptRowCount,
+						promptPaths: PROMPT_PATHS,
+						gatewayWireRequests,
+						observations,
+						allConsoleErrors: errors,
+					},
+					null,
+					2,
+				),
+			);
+		} finally {
+			kill(serve);
+			kill(preview);
+			await fsp.rm(homeDir, { recursive: true, force: true }).catch(() => undefined);
+			await fsp.rm(projectDir, { recursive: true, force: true }).catch(() => undefined);
+		}
+	});
+});
+
+/**
+ * 入口镜像：F1 落地后，这里钉的是「#/agents 有创建员工的入口，点开是那张行内表单」。
+ *
+ * 本用例原先断言的是**没有**入口（记录当时的功能缺口）。入口做出来之后那条断言就不再是真的，
+ * 所以改成钉住新事实。完整的创建闭环（真写盘 → 列表出现 → 详情页打得开）在 `agent-create.spec.ts`，
+ * 这里只证明入口在、开得出，不重复跑一遍流程。
+ */
+test("#/agents 的「创建员工」入口开得出表单", async ({ page }) => {
+	const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-dash-home2-"));
+	const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-dash-proj2-"));
+	execFileSync("git", ["init", "-q"], { cwd: projectDir });
+	const env = { ...process.env, HOME: homeDir, PI_NO_TITLE: "1" };
+	const servePort = await freePort();
+	const appPort = await freePort();
+	const serve = spawn("bun", [CLI, "serve", "--port", String(servePort), "--host", "127.0.0.1", "--no-extensions"], {
+		cwd: projectDir,
+		env,
+	});
+	const preview = spawn(
+		"bun",
+		["x", "vite", "preview", "--port", String(appPort), "--strictPort", "--host", "127.0.0.1"],
+		{ cwd: path.join(repoRoot, "packages/web-app"), env: process.env },
+	);
+	try {
+		await waitForOutput(serve, /ws:\/\/127\.0\.0\.1:\d+\/ws/, 60_000, "serve 启动");
+		await waitForHttp(`http://127.0.0.1:${appPort}/`, 30_000);
+		await page.addInitScript(
+			(cfg: { wsUrl: string }) => {
+				localStorage.setItem("cornfield.serve.connection", JSON.stringify({ wsUrl: cfg.wsUrl, token: "" }));
+			},
+			{ wsUrl: `ws://127.0.0.1:${servePort}/ws` },
+		);
+		await page.goto(`http://127.0.0.1:${appPort}/#/agents`, { waitUntil: "domcontentloaded" });
+		// 就绪信号 = server_snapshot 到位（头行从 0 agent 变为 1 个 default agent）
+		await expect(page.getByText(/1 工作区/)).toBeVisible({ timeout: 60_000 });
+		await page.waitForTimeout(1000);
+
+		// ── 侧栏分组（mock 的四段）：真浏览器里组标题与组内顺序就是注册表那份 ──
+		// 取法用 DOM 顺序而不是 innerText：断言的就是「谁在谁前面」，不依赖换行怎么断。
+		const sidebar = page.getByRole("navigation", { name: "主导航" });
+		await expect(sidebar.getByRole("heading", { name: "能力" })).toBeVisible();
+		// 宽度也是验收项（UX.md §1：桌面左侧导航 240px），不是「看着像」。
+		const sidebarBox = await sidebar.boundingBox();
+		expect(sidebarBox && Math.round(sidebarBox.width)).toBe(240);
+		const sidebarOrder = await sidebar.evaluate(el =>
+			Array.from(el.querySelectorAll("h2, a")).map(node => (node.textContent ?? "").trim()),
+		);
+		expect(sidebarOrder).toEqual([
+			"工作",
+			"首页",
+			"会话工作台",
+			"会话记录",
+			"Agent",
+			"Agent 总览",
+			"能力",
+			"Skills",
+			"Memory",
+			"Todo",
+			"模型",
+			"语音",
+			"系统",
+			"定时任务",
+			"用量",
+			"设置",
+		]);
+		await page.screenshot({ path: path.join(SHOT_DIR, "sidebar-groups.png"), fullPage: true });
+		const buttons = await page.evaluate(() =>
+			Array.from(document.querySelectorAll("button")).map(b => (b.textContent ?? "").trim()),
+		);
+		await fsp.mkdir(SHOT_DIR, { recursive: true });
+		await fsp.writeFile(path.join(SHOT_DIR, "agents-page-buttons.json"), JSON.stringify(buttons, null, 2));
+		// 入口存在（两个：筛选行右侧 + 空态里，开的是同一个面板）
+		const entries = page.getByRole("button", { name: "创建员工" });
+		expect(await entries.count(), `页面按钮：${JSON.stringify(buttons)}`).toBeGreaterThan(0);
+		await entries.first().click();
+		await expect(page.getByRole("heading", { name: "创建员工" })).toBeVisible();
+		await expect(page.getByPlaceholder("hr-bot")).toBeVisible();
+	} finally {
+		kill(serve);
+		kill(preview);
+		await fsp.rm(homeDir, { recursive: true, force: true }).catch(() => undefined);
+		await fsp.rm(projectDir, { recursive: true, force: true }).catch(() => undefined);
+	}
+});

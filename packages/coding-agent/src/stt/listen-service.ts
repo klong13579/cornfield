@@ -4,36 +4,38 @@
  * 从 ListenController 抽出的纯数据路径（不持有 UI 状态）：
  * - 转写：本地 whisper（mlx-whisper/openai-whisper）或 API `record.model`（qwen3-asr
  *   批量端点），超长音频（> stt.chunkSizeMB）自动分块串行转写后拼接——与 /record 同管线。
- * - 落盘：`~/.cornfield/listen/YYYY-MM-DD-<desc>.json`，格式 { version, recorded_at, text }。
+ * - 落盘：`~/.cornfield/listen/YYYY-MM-DD-<desc>.json`，格式 { version, recorded_at, text, provenance? }。
+ *
+ * ## T10C：听记库是客户端级的，记录里的 scope 靠 provenance 标注
+ *
+ * 听记存在配置根（`~/.cornfield/listen/`），**不属于任何一个 Agent**：一个 bot 的记录与另一个的
+ * 落在同一个目录。所以「这条是谁录的」不能在展示层猜（按时间碰会话、按磁盘顺序分组都是假数据），
+ * 必须在写入时由**写入方自己**落盘（它当时就知道是哪个 Agent/会话/项目），读取时原样带出。
+ * 旧记录（v1）没有这个字段——它们就是「未标注」，不得被归给当前选中的 Agent。
  *
  * 谁在用：
  * - ListenController（TUI /record、/listen 的控制器外壳，持有录音/电平/VAD 状态机）
  * - wire-server `record_transcribe` / `listen_list`（前端听记）——同目录同格式同模型
+ *
+ * 条目形状是 pi-wire 的 `ListenRecordingDto`（本文件从 `@cornfield/wire` import，不再自建一份
+ * 同形接口）；provenance 的类型见 `results/listen.ts`。
  */
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getConfigRootDir, logger } from "@cornfield/utils";
+import type { ListenProvenanceDto, ListenRecordingDto } from "@cornfield/wire";
 import type { ModelRegistry } from "../config/model-registry";
 import { parseModelString } from "../config/model-resolver";
 import { settings } from "../config/settings";
 import { cleanupChunks, joinTranscripts, splitWavFile } from "./chunker";
 import { type TranscribeProgress, transcribe, transcribeViaApi } from "./transcriber";
 
-export interface ListenRecordingSummary {
-	/** 文件名（含 .json）。 */
-	name: string;
-	/** 绝对路径。 */
-	path: string;
-	/** JSON 里的 recorded_at（ISO），缺失回退文件 mtime。 */
-	recordedAt: string;
-	size: number;
-	/** 转写全文。 */
-	text: string;
-	/** 原始音频文件名（listen/audio/<stem>.wav，留档后存在）；缺省 = 未留档。 */
-	audio?: string;
-}
+/** 一条听记的来源（= wire `ListenProvenanceDto`，同形同义）。 */
+export type ListenProvenance = ListenProvenanceDto;
+
+export type ListenRecordingSummary = ListenRecordingDto;
 
 /** 单个音频的转写结果。 */
 export interface TranscribeAudioResult {
@@ -185,14 +187,22 @@ export async function transcribeAudioWithDefaults(
  * wavPath 提供时（TUI /record / wire 单帧 / 分帧 end 都传），原始音频拷贝留档到
  * `listen/audio/<同名>.wav`（转写成功才留档；拷贝失败不影响文本落盘）。
  */
-export async function saveListenText(text: string, description?: string, wavPath?: string): Promise<string> {
+export async function saveListenText(
+	text: string,
+	description?: string,
+	wavPath?: string,
+	provenance?: ListenProvenance,
+): Promise<string> {
 	const dir = getListenDir();
 	const out = path.join(dir, buildFilename(description));
-	await fsp.writeFile(
-		out,
-		JSON.stringify({ version: 1, recorded_at: new Date().toISOString(), text }, null, 2),
-		"utf-8",
-	);
+	const record: { version: number; recorded_at: string; text: string; provenance?: ListenProvenance } = {
+		version: 2,
+		recorded_at: new Date().toISOString(),
+		text,
+	};
+	const trimmed = provenance ? compactProvenance(provenance) : undefined;
+	if (trimmed) record.provenance = trimmed;
+	await fsp.writeFile(out, JSON.stringify(record, null, 2), "utf-8");
 	if (wavPath) {
 		const stem = path.basename(out, ".json");
 		const audioOut = path.join(getListenAudioDir(), `${stem}.wav`);
@@ -201,6 +211,28 @@ export async function saveListenText(text: string, description?: string, wavPath
 		});
 	}
 	return out;
+}
+
+/** 丢掉空值，全空就不落这个字段（“没有 provenance” 与 “provenance 全是 null” 不该都写进文件）。 */
+function compactProvenance(provenance: ListenProvenance): ListenProvenance | undefined {
+	const out: ListenProvenance = {};
+	if (provenance.agentId) out.agentId = provenance.agentId;
+	if (provenance.agentDir) out.agentDir = provenance.agentDir;
+	if (provenance.projectId) out.projectId = provenance.projectId;
+	if (provenance.sessionFile) out.sessionFile = provenance.sessionFile;
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** 读回 provenance（磁盘上的值不可信：逐字段收窄，坏形状当未标注而不是抛）。 */
+function readProvenance(raw: unknown): ListenProvenance | undefined {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const candidate = raw as Record<string, unknown>;
+	const out: ListenProvenance = {};
+	for (const key of ["agentId", "agentDir", "projectId", "sessionFile"] as const) {
+		const value = candidate[key];
+		if (typeof value === "string" && value.trim()) out[key] = value;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** 列出 ~/.cornfield/listen/ 全部录音（文件名倒序），目录缺失时返回空数组。 */
@@ -213,7 +245,7 @@ export async function listListenRecordings(): Promise<ListenRecordingSummary[]> 
 		const full = path.join(dir, name);
 		try {
 			const raw = await fsp.readFile(full, "utf-8");
-			const data = JSON.parse(raw) as { recorded_at?: string; text?: string };
+			const data = JSON.parse(raw) as { recorded_at?: string; text?: string; provenance?: unknown };
 			const stat = await fsp.stat(full);
 			const stem = name.replace(/\.json$/, "");
 			const audioPath = path.join(getListenAudioDir(), `${stem}.wav`);
@@ -221,6 +253,7 @@ export async function listListenRecordings(): Promise<ListenRecordingSummary[]> 
 				() => true,
 				() => false,
 			);
+			const provenance = readProvenance(data.provenance);
 			recordings.push({
 				name,
 				path: full,
@@ -228,6 +261,7 @@ export async function listListenRecordings(): Promise<ListenRecordingSummary[]> 
 				size: stat.size,
 				text: typeof data.text === "string" ? data.text : "",
 				...(hasAudio ? { audio: `${stem}.wav` } : {}),
+				...(provenance ? { provenance } : {}),
 			});
 		} catch (err) {
 			logger.warn("Skipping unreadable recording", { file: name, err: String(err) });

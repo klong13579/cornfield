@@ -1,12 +1,14 @@
 import { Clipboard, Download, FileText, ListTodo, Mic, Pause, Play, Send, Square } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Orb } from "../../components/Orb";
 import { encodeWavPcm16, WAV_TARGET_SAMPLE_RATE } from "../../lib/audio-encode";
 import type { ListenRecordingDto } from "../../lib/pi-client-api";
+import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import { serveHttpBase } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import { bucketRecordings, filterRecordings, type RecordingBucket, recordingScopeLabel } from "./recording-scope";
 
 /**
  * 听记（VOICE-D）—— TUI /record 的 web 前端：浏览器录音 → 16kHz PCM WAV →
@@ -60,6 +62,7 @@ export function ListenView(): React.JSX.Element {
 	const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 	const [recordings, setRecordings] = useState<ListenRecordingDto[]>([]);
 	const [search, setSearch] = useState("");
+	const [scopeFilter, setScopeFilter] = useState<RecordingBucket | "all">("all");
 	const [openName, setOpenName] = useState<string | null>(null);
 
 	const audioRef = useRef<{ ctx: AudioContext; stream: MediaStream; stop: () => void } | null>(null);
@@ -301,9 +304,18 @@ export function ListenView(): React.JSX.Element {
 		}
 	};
 
-	const filtered = search.trim()
-		? recordings.filter(r => r.name.includes(search.trim()) || r.text.includes(search.trim()))
-		: recordings;
+	// ── scope（Agent / Project / Session）：听记库是客户端级的，归属只认写入时标下的 provenance ──
+	const scope = useMemo(
+		() => ({
+			agentId: activeAgentIdOf(view),
+			agentDir: activeAgentOf(view)?.agentDir,
+			sessionFile: view.sessionFile,
+			projectId: view.currentProjectId,
+		}),
+		[view],
+	);
+	const buckets = useMemo(() => bucketRecordings(recordings, scope), [recordings, scope]);
+	const filtered = filterRecordings(recordings, search, scopeFilter === "all" ? undefined : scopeFilter, scope);
 
 	return (
 		<div className="flex flex-col items-center gap-6">
@@ -485,13 +497,43 @@ export function ListenView(): React.JSX.Element {
 			<div className="mt-4 w-full page-narrow">
 				<div className="mb-2 flex items-center gap-3">
 					<h3 className="text-[11px] font-semibold tracking-[0.08em] text-ink-faint uppercase">历史记录</h3>
-					<span className="text-[11px] text-ink-faint">~/.cornfield/listen/ · 与 TUI /listen 同数据</span>
+					<span className="text-[11px] text-ink-faint">
+						~/.cornfield/listen/ · 客户端级库，逐条按写入时的标注归属
+					</span>
 					<input
 						value={search}
 						onChange={e => setSearch(e.target.value)}
 						placeholder="搜索关键词…"
 						className="ml-auto max-w-[220px] rounded border border-hairline bg-surface px-2.5 py-1.5 text-[12px] text-ink"
 					/>
+				</div>
+				{/* scope 分桶：无 provenance 的旧记录进「未标注」，不归给当前 Agent */}
+				<div className="mb-2 flex flex-wrap items-center gap-1.5">
+					<button
+						type="button"
+						onClick={() => setScopeFilter("all")}
+						className={`rounded-md border px-2 py-1 text-[11.5px] transition-colors ${
+							scopeFilter === "all"
+								? "border-accent bg-accent-dim text-ink"
+								: "border-hairline bg-surface text-ink-subtle hover:text-ink"
+						}`}
+					>
+						全部 {recordings.length}
+					</button>
+					{buckets.map(bucket => (
+						<button
+							key={bucket.bucket}
+							type="button"
+							onClick={() => setScopeFilter(bucket.bucket)}
+							className={`rounded-md border px-2 py-1 text-[11.5px] transition-colors ${
+								scopeFilter === bucket.bucket
+									? "border-accent bg-accent-dim text-ink"
+									: "border-hairline bg-surface text-ink-subtle hover:text-ink"
+							}`}
+						>
+							{bucket.label} {bucket.recordings.length}
+						</button>
+					))}
 				</div>
 				<div className="overflow-hidden rounded-xl border border-hairline bg-surface">
 					{recordings.length === 0 && !search && (
@@ -500,9 +542,9 @@ export function ListenView(): React.JSX.Element {
 							录（同一列表）
 						</div>
 					)}
-					{filtered.length === 0 && search && (
+					{filtered.length === 0 && (search || scopeFilter !== "all") && (
 						<div className="px-4 py-6 text-center text-[12px] text-ink-faint">
-							没有匹配「{search}」的记录，换个关键词试试
+							{search ? `没有匹配「${search}」的记录，换个关键词试试` : "该 scope 下没有录音记录"}
 						</div>
 					)}
 					{filtered.map(rec => (
@@ -513,10 +555,14 @@ export function ListenView(): React.JSX.Element {
 								</span>
 								<span className="min-w-0 flex-1">
 									<span className="block truncate text-[13px] text-ink">{rec.name}</span>
-									<span className="mt-0.5 flex gap-2.5 font-mono text-[11px] text-ink-faint">
+									<span className="mt-0.5 flex flex-wrap gap-2.5 font-mono text-[11px] text-ink-faint">
 										<span>{new Date(rec.recordedAt).toLocaleString()}</span>
 										<span>{Math.max(1, Math.round(rec.size / 1024))} KB</span>
 										<span className="badge neutral">whisper</span>
+										{/* 来源标注：未标注就明写，不留白让人以为是当前的 */}
+										<span className={rec.provenance ? "badge neutral" : "badge neutral text-warning"}>
+											{recordingScopeLabel(rec)}
+										</span>
 									</span>
 								</span>
 								{rec.audio && (

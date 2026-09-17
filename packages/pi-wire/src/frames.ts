@@ -149,6 +149,11 @@ export interface WireSessionIndexEntry {
 	title?: string;
 	/** 会话打开时的工作目录（header.cwd；cli 会话为 `omp` 启动目录，agent 会话为该 agent 的 agentDir）。 */
 	cwd?: string;
+	/**
+	 * 会话归属的 Project（header.projectId）。**未记录就是 undefined** —— 老会话没有这个字段，
+	 * 不拿 cwd 反推一个：归属是会话记录下来的事实，不是投影端按路径猜出来的。
+	 */
+	projectId?: string;
 	/** 开始时间（header.timestamp，ISO）。 */
 	startTime: string;
 	/** 结束时间（最后一条 entry 的 timestamp，ISO；仅头部时 = startTime）。 */
@@ -275,7 +280,17 @@ export interface WireErrorPayload {
 }
 
 export type ServerFrame<TSnapshot = unknown, TEvent = unknown> =
-	| { type: "hello_ack"; connectionId: string; protocolVersion: number }
+	/**
+	 * 握手应答。
+	 *
+	 * `gatewayWirePort` = 本 serve 认为 gateway 的 `POST /wire` 在哪 —— 与服务端 `callGatewayWire`
+	 * 用的是同一个值（`CORNFIELD_GATEWAY_WIRE_PORT`，缺省 7892）。浏览器读不到 env，所以由握手告诉它：
+	 * 客户端不再自己写死 7892（那会让「隔离 HOME 起的 serve」的页面照样连到本机真实 gateway）。
+	 *
+	 * 可选：stdio 语义的握手（`--mode wire-stdio`）不代调 gateway，也就不报这个端口。
+	 * 客户端在拿到之前应当**明说端口未知**，而不是回退到一个猜的端口。
+	 */
+	| { type: "hello_ack"; connectionId: string; protocolVersion: number; gatewayWirePort?: number }
 	| { type: "hello_error"; error: string }
 	| { type: "response"; id: string; ok: true; result?: unknown }
 	| { type: "response"; id: string; ok: false; error: string | WireErrorPayload }

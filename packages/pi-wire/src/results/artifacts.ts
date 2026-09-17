@@ -2,7 +2,7 @@
  * 产物（artifacts）结果形状 —— list_artifacts 响应（serve 端权威数据面）。
  *
  * 产物来源：该 agent 最近会话 JSONL 的工具调用（write / edit / puppeteer screenshot）
- * 写出的文件；path 相对 agentDir。前端「产物」tab 消费：列表 + 点开预览
+ * 写出的文件；path 相对它所属的那个根。前端「产物」tab 消费：列表 + 点开预览
  * （html → iframe /preview 静态路由；image → 同路由；markdown/text → fs_read）。
  */
 
@@ -15,7 +15,7 @@ export interface ArtifactDto {
 	title: string;
 	/** 产物类型（前端按类型选预览方式）。 */
 	type: ArtifactKind;
-	/** 相对 agentDir 路径（resolveFsPath 校验后；供 /preview 与 fs_read 复用）。 */
+	/** 相对它所属的那个根（roots 校验后；供 /preview 与 fs_read 复用）。 */
 	path: string;
 	/** 文件 mtime（毫秒 epoch；列表按此倒序）。 */
 	updatedAt: number;

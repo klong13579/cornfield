@@ -1,16 +1,23 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@cornfield/client";
-import { PiClient as WirePiClient } from "@cornfield/client";
+import { PiServerError, PiClient as WirePiClient } from "@cornfield/client";
 import type {
+	AgentCreateDto,
+	AgentCreateInput,
 	AgentInfoDto,
+	AgentPromptSourceDto,
 	AvailableModelsDto,
+	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
 	ConfigScopeDto,
 	ConnectionInfoDto,
 	CronLogEntryDto,
 	DashboardStatsDto,
+	DelegateChildInput,
+	DelegatedChildDto,
 	DingtalkAgentConfigDto,
-	DisabledSkillDto,
 	EnvironmentSummaryDto,
+	EvolvedSkillsDto,
+	GitChangesDto,
 	HostToolDefinitionDto,
 	ImageContentDto,
 	MemoryProjectionDto,
@@ -18,12 +25,17 @@ import type {
 	ModelSelectionDto,
 	ModelTestResultDto,
 	ProgressEventDto,
+	ProjectDeleteDto,
+	ProjectListDto,
+	ProjectRecordDto,
+	ProjectUpsertDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
 	ProviderOAuthStartDto,
 	ProviderStatusDto,
 	SessionSnapshotDto,
-	SkillDto,
+	SessionTreeDto,
+	SkillsResultDto,
 	StatsPeriodDto,
 	TaskRowDto,
 	TodoPhaseDto,
@@ -33,19 +45,34 @@ import type {
 } from "@cornfield/wire";
 import type {
 	AgentMessageDto,
+	AgentTodoDeleteDto,
+	AgentTodoDto,
+	AgentTodoListDto,
+	AgentTodoUpsertDto,
 	ArtifactDto,
+	CronCreateInput,
+	CronRemoveResultDto,
+	CronTaskWriteResultDto,
+	CronTestRunResultDto,
+	CronUpdateInput,
 	DiagnosisAggregationDto,
 	DiagnosisReportListItemDto,
 	DiagnosisSummaryDto,
+	FsDiffResult,
 	FsEntryDto,
 	FsImageResult,
+	FsReadResult,
+	FsWriteResult,
 	GatewayAccountPatchDto,
 	GatewayStatusDto,
 	ListenRecordingDto,
 	McpServerDto,
+	NewSessionOptions,
+	NewSessionResult,
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
+import { FsConflictError } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
 
 /** serve get_state env 条目（pi-wire WireEnvironmentSummary；pendingCronCount 为可选缺省）。 */
@@ -63,6 +90,8 @@ interface WireSessionIndexEntryDto {
 	agentName?: string;
 	title?: string;
 	cwd?: string;
+	/** 会话自己记下的归属（header.projectId）；旧会话没有就是没有，serve 不拿 cwd 猜。 */
+	projectId?: string;
 	startTime: string;
 	endTime?: string;
 	messageCount: number;
@@ -146,6 +175,14 @@ export class PiClientAdapter implements PiClient {
 	#connListeners = new Set<(conn: ConnectionInfoDto) => void>();
 	/** 测试注入的 WebSocket 构造器（recordTranscribe 独立短连接共用）。 */
 	#wsCtor?: PiWebSocketCtor;
+	/**
+	 * serve 在 hello_ack 里上报的 gateway wire 端口（serve 自己解析的那个）。
+	 *
+	 * 浏览器猜不了端口（没有 process.env），猜错就是打到**本机真实运营中的 gateway**（隔离
+	 * 环境里看到的会是别的进程的数据）。所以：要么拿到 serve 报的那个，要么明说拿不到 ——
+	 * `null` 就是「还没上报」，绝不当成 7892。
+	 */
+	#gatewayWirePort: number | null = null;
 
 	constructor(config: ServeConnectionConfig = loadServeConfig(), webSocketCtor?: PiWebSocketCtor) {
 		this.#connection = { connected: false, wsUrl: config.wsUrl, protocolVersion: 1 };
@@ -166,6 +203,8 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	disconnect(): void {
+		// 端口是**当前这条连接**的事实，断开就不知道了（重连后 serve 会再报一次）。
+		this.#gatewayWirePort = null;
 		this.#client.close("client disconnect");
 	}
 
@@ -218,8 +257,39 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "compact" }).then(() => undefined);
 	}
 
-	newSession(): Promise<void> {
-		return this.#req({ type: "new_session" }).then(() => undefined);
+	/**
+	 * 新建会话（new_session）。三个入参都落在这一条命令（+ 一次改名）上：
+	 * - `agentId` → `new_session.sessionId`（命令面所有状态命令的 `sessionId` 都是「哪个 agent」，
+	 *   serve 按它解析目标；目标 Agent 必须已 attach，否则 ok:false，错误原文上抛）
+	 * - `projectId` → `new_session.projectId`：会话的**权威归属**，serve 按它定工作根与边界根，
+	 *   并把结果作为事实记进会话（`SessionHeader.projectId`）。未知 id 直接 ok:false
+	 * - `title`   → 创建成功后紧跟一次 `set_session_name`（wire 没有「创建时命名」这条命令）
+	 *
+	 * 空串与缺省同义（不指定）——本地不替调用方把 `""` 变成一个具体的 Project。
+	 *
+	 * `cancelled:true`（serve 接了命令但没建，如上一回合还没收尾）不当成功：**标题那一跳必须跳过**
+	 * —— 否则改的是**上一个**会话的名字。这不是修饰：`created:false` 时调用方手上没有新会话。
+	 */
+	async newSession(opts?: NewSessionOptions): Promise<NewSessionResult> {
+		const target = opts?.agentId;
+		const project = opts?.projectId;
+		const result = await this.#req<{ cancelled?: boolean }>({
+			type: "new_session",
+			...(target ? { sessionId: target } : {}),
+			...(project ? { projectId: project } : {}),
+		});
+		const created = result?.cancelled !== true;
+		if (created && opts?.title) {
+			await this.#req({
+				type: "set_session_name",
+				name: opts.title,
+				...(target ? { sessionId: target } : {}),
+			});
+		}
+		// 三个入参都有去处，所以这里是空的 —— **但出口得在**：将来有一个 wire 上表达不出来的字段，
+		// 就在这个数组里点名（并同步更新 `NewSessionResult` 的文档），别让它静默消失。
+		// 它说的是**能力**（wire 有没有对应的字段），不是结果：所以只看入参，不看 created。
+		return { created, notApplied: [] };
 	}
 	forkFrom(entryId: string): Promise<void> {
 		return this.#req({ type: "fork_from", entryId }).then(() => undefined);
@@ -266,13 +336,13 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "permission_respond", requestId, choice }).then(() => undefined);
 	}
 
-	/** 读目标 agent 的 config.yml 域（get_config；per-agent，sessionId 必传）。 */
+	/** 读目标 agent 的配置合并视图（get_config；per-agent，sessionId 必传）。 */
 	getConfig(sessionId: string, key?: string): Promise<{ config: unknown }> {
 		const command = { type: "get_config", sessionId, ...(key ? { key } : {}) } as never;
 		return this.#req<{ config: unknown }>(command);
 	}
 
-	/** 写目标 agent 的 config.yml 域并持久化（set_config；per-agent）。 */
+	/** 写目标 agent 生效层的配置并持久化（set_config；per-agent）。 */
 	setConfig(sessionId: string, key: string, value: unknown): Promise<{ ok: boolean; key: string; value: unknown }> {
 		const command = { type: "set_config", sessionId, key, value } as never;
 		return this.#req<{ ok: boolean; key: string; value: unknown }>(command);
@@ -457,8 +527,10 @@ export class PiClientAdapter implements PiClient {
 	/** 拉取注册表 agent 元数据（list_agents），不触发 attach。 */
 	async listAgents(): Promise<AgentInfoDto[]> {
 		try {
-			const result = await this.#req<unknown>({ type: "list_agents" });
-			const list = result as SessionEntryLike[] | null;
+			// serve 回的是 { agents: [...] }（和 server_snapshot 的 sessions 同形）。当成裸数组读
+			// 会让每次调用都静默回落到上一次的缓存值 —— 拉取结果永远不生效。
+			const result = await this.#req<{ agents?: SessionEntryLike[] | null }>({ type: "list_agents" });
+			const list = result.agents;
 			if (Array.isArray(list)) {
 				this.#agents = list.map(mapAgentEntry);
 				return this.#agents;
@@ -467,6 +539,18 @@ export class PiClientAdapter implements PiClient {
 			console.warn("[web-app] list_agents unavailable", err);
 		}
 		return this.#agents;
+	}
+
+	/**
+	 * 建一个新 agentDir（create_agent）。serve 侧就是 `cornfield agent init` 那条实现，所以这里
+	 * 只把入参搬过去、把答复原样交回 —— 不在这里拼路径、不在这里推断「建到哪去了」（`agentDir`
+	 * 是服务端归一后的读数，`--dir` 给父目录时客户端算不出它）。
+	 *
+	 * 列表缓存的刷新**不在这里**：`#agents` 是 `listAgents()` 的产物，由调用方（store）建完
+	 * 再拉一次就是现状。两边都刷就是两次网络往返 + 两处真相。
+	 */
+	createAgent(input: AgentCreateInput): Promise<AgentCreateDto> {
+		return this.#req<AgentCreateDto>({ type: "create_agent", ...input });
 	}
 
 	attach(sessionId: string): Promise<void> {
@@ -511,8 +595,9 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * 历史会话索引（serve list_sessions）。
-	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/sessionFile），
-	 * 映射到前端 SessionRecordSummary（id/name/agent/startedAt/source）。失败返回空数组，UI 空态。
+	 * 后端返回 WireSessionIndexEntry（sessionId/title/startTime/endTime/agentName/status/source/
+	 * sessionFile/projectId），映射到前端 SessionRecordSummary（id/name/agent/startedAt/source…）。
+	 * 失败返回空数组，UI 空态。
 	 */
 	async listSessions(): Promise<SessionRecordSummary[]> {
 		try {
@@ -527,11 +612,95 @@ export class PiClientAdapter implements PiClient {
 				source: s.source ?? (s.agentId === "default" ? "cli" : "agent"),
 				sessionFile: s.sessionFile,
 				cwd: s.cwd,
+				// 原样带上会话记下的归属：它缺省就是缺省（旧会话没记过），不拿 cwd 反推一个。
+				...(s.projectId === undefined ? {} : { projectId: s.projectId }),
 			}));
 		} catch (err) {
 			console.warn("[web-app] list_sessions unavailable", err);
 			return [];
 		}
+	}
+
+	/** 读当前会话的委派账本（get_session_tree）。 */
+	getSessionTree(sessionId?: string): Promise<SessionTreeDto> {
+		return this.#req<SessionTreeDto>({ type: "get_session_tree", ...(sessionId ? { sessionId } : {}) });
+	}
+
+	/** 把子会话结果带回父会话（bring_back_child_result）；幂等门阀是结果里的 firstTime。 */
+	bringBackChildResult(childSessionId: string, sessionId?: string): Promise<BroughtBackChildResultDto> {
+		return this.#req<BroughtBackChildResultDto>({
+			type: "bring_back_child_result",
+			childSessionId,
+			...(sessionId ? { sessionId } : {}),
+		});
+	}
+
+	/**
+	 * 委派一个子会话（delegate_child）。
+	 *
+	 * 不捕获错误：serve 只有在子进程真的起来、且真的挂上父边之后才会 OK，其余情况都是
+	 * 真错误 —— 吞掉它并把回执造出来，就是让用户对着一棵不存在子会话的树。
+	 */
+	delegateChild(input: DelegateChildInput, sessionId?: string): Promise<DelegatedChildDto> {
+		return this.#req<DelegatedChildDto>({
+			type: "delegate_child",
+			...(sessionId ? { sessionId } : {}),
+			objective: input.objective,
+			...(input.label ? { label: input.label } : {}),
+			...(input.agentId ? { agentId: input.agentId } : {}),
+			...(input.cwd ? { cwd: input.cwd } : {}),
+		});
+	}
+
+	/**
+	 * 已声明的 Project（list_projects）。
+	 *
+	 * 不捕获错误：读不到（存储损坏）必须原样到 store 显示成错误态 —— 捕获后返回空数组
+	 * 就是把「声明过但读坏了」显示成「没声明过」。
+	 */
+	listProjects(sessionId?: string): Promise<ProjectListDto> {
+		return this.#req<ProjectListDto>({ type: "list_projects", ...(sessionId ? { sessionId } : {}) });
+	}
+
+	/**
+	 * 声明或更新一个 Project（set_project），返回存储真正落盘的那一份（`root` 已由存储归一）。
+	 *
+	 * 不捕获错误：root 被别的 Project 占用 / 输入不成立 / 存储写不进去都必须原样到 UI 显示成错误 ——
+	 * 吞掉它就是在告诉用户「已经声明好了」，而盘上什么也没多。
+	 * `defaultAgentId` 只在真的给了值时才发字段：缺省与空串不是同一件事，不在这里替它二选一。
+	 */
+	setProject(project: ProjectRecordDto): Promise<ProjectUpsertDto> {
+		return this.#req<ProjectUpsertDto>({
+			type: "set_project",
+			projectId: project.projectId,
+			name: project.name,
+			root: project.root,
+			...(project.defaultAgentId === undefined ? {} : { defaultAgentId: project.defaultAgentId }),
+		});
+	}
+
+	/** 删掉一个已声明的 Project（delete_project）。没声明过会招错，不静默成功。 */
+	deleteProject(projectId: string): Promise<ProjectDeleteDto> {
+		return this.#req<ProjectDeleteDto>({ type: "delete_project", projectId });
+	}
+
+	/**
+	 * Agent Todo（T10A）。三条命令已在 pi-wire 的 `WireCommand` union 里登记，所以这里按
+	 * 普通命令写，不需要 cast。
+	 *
+	 * 三个都不捕获错误：读不到（存储损坏 / 声明读不出来）与写不进去（owner / Project 绑定）
+	 * 必须原样到 store 显示 —— 捕获后返回空板或假装成功，就是把「坏了」显示成「没有」。
+	 */
+	listAgentTodos(sessionId?: string): Promise<AgentTodoListDto> {
+		return this.#req<AgentTodoListDto>({ type: "list_agent_todos", ...(sessionId ? { sessionId } : {}) });
+	}
+
+	setAgentTodo(todo: AgentTodoDto, sessionId?: string): Promise<AgentTodoUpsertDto> {
+		return this.#req<AgentTodoUpsertDto>({ type: "set_agent_todo", todo, ...(sessionId ? { sessionId } : {}) });
+	}
+
+	deleteAgentTodo(todoId: string, sessionId?: string): Promise<AgentTodoDeleteDto> {
+		return this.#req<AgentTodoDeleteDto>({ type: "delete_agent_todo", todoId, ...(sessionId ? { sessionId } : {}) });
 	}
 
 	async diagnoseSession(
@@ -570,6 +739,24 @@ export class PiClientAdapter implements PiClient {
 		} as never);
 	}
 
+	/**
+	 * agentDir 的 prompt 源清单（get_agent_prompt_sources；逐项报 exists，缺的那项也在清单里）。
+	 *
+	 * 清单是 serve 侧的事实（skeleton/agent-dir-files.ts 的 prompt 面），本层不重排、不过滤：
+	 * 「该建哪个 / 哪个没了」正是这份视图要看的东西。答复里没有 sources 数组 = 协议违约，
+	 * 就抛错 —— 返回空清单会被渲染成「这个 agent 没有任何 prompt 源」，那是一句假话。
+	 */
+	async getAgentPromptSources(agentId: string): Promise<AgentPromptSourceDto[]> {
+		const result = await this.#req<{ sources?: AgentPromptSourceDto[] | null }>({
+			type: "get_agent_prompt_sources",
+			sessionId: agentId,
+		});
+		if (!Array.isArray(result.sources)) {
+			throw new Error("get_agent_prompt_sources 响应里没有 sources 清单");
+		}
+		return result.sources;
+	}
+
 	/** 列出 agent workspace 目录（fs_list；name/type/size，目录在前）。 */
 	async fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }> {
 		const result = await this.#req<{ entries?: FsEntryDto[] | null }>({
@@ -580,14 +767,86 @@ export class PiClientAdapter implements PiClient {
 		return { entries: result.entries ?? [] };
 	}
 
-	/** 读 agent workspace 文件（fs_read；>128KB 截断标记）。 */
-	async fsRead(sessionId: string, path: string): Promise<{ text: string; truncated: boolean }> {
-		const result = await this.#req<{ text?: string | null; truncated?: boolean | null }>({
+	/** 读 agent workspace 文件（fs_read；>128KB 截断标记；version = 磁盘内容身份，保存时回传做 CAS）。 */
+	async fsRead(sessionId: string, path: string): Promise<FsReadResult> {
+		const result = await this.#req<{
+			text?: string | null;
+			truncated?: boolean | null;
+			version?: string | null;
+		}>({
 			type: "fs_read",
 			sessionId,
 			path,
 		} as never);
-		return { text: result.text ?? "", truncated: result.truncated === true };
+		return {
+			text: result.text ?? "",
+			truncated: result.truncated === true,
+			version: result.version ?? "",
+		};
+	}
+
+	/**
+	 * 整段写文件（fs_write）+ 服务端 compare-and-swap。
+	 *
+	 * `expectedVersion` 原样回传打开时读到的 version；服务端对不上就拒绝并且不落盘，
+	 * 这里把那个判决归一成 {@link FsConflictError}（可恢复：调用方重读磁盘后让用户选）。
+	 * 其余错误（越界/超限/未连接）原样上抛 —— 只有冲突是「选择哪一份」的问题。
+	 */
+	async fsWrite(sessionId: string, path: string, content: string, expectedVersion: string): Promise<FsWriteResult> {
+		const command = { type: "fs_write", sessionId, path, content, expectedVersion } as never;
+		try {
+			const result = await this.#req<{
+				bytesWritten?: number | null;
+				version?: string | null;
+				normalized?: boolean | null;
+			}>(command);
+			return {
+				path,
+				bytesWritten: result.bytesWritten ?? 0,
+				version: result.version ?? "",
+				normalized: result.normalized === true,
+			};
+		} catch (err) {
+			const detail = conflictDetailOf(err);
+			if (detail !== null) throw new FsConflictError(detail);
+			throw err;
+		}
+	}
+
+	/** 两段纯文本的统一 diff（fs_diff 的 before/after 分支；不落地）。 */
+	async fsDiff(before: string, after: string): Promise<FsDiffResult> {
+		const result = await this.#req<{ diff?: string | null; firstChangedLine?: number | null }>({
+			type: "fs_diff",
+			before,
+			after,
+		} as never);
+		return { diff: result.diff ?? "", firstChangedLine: result.firstChangedLine ?? undefined };
+	}
+
+	/**
+	 * 一个 agent 工作区的改动清单（git_changes）。
+	 *
+	 * 不把读失败注水成空清单：`{changes: []}` 是「读到了，工作区确实干净」，它是命令的正常
+	 * 答案；读不到（不是 git 仓库 / git 失败 / 未知 agent）整条 ok:false 并招错 —— 两者在
+	 * 右栏要显示成两种不同的东西。
+	 *
+	 * 答复里可选的 `error` 是**降级**通道（serve 读到了一份不完整的清单，见 GitChangesDto）：
+	 * 原样透传，不吞也不当成失败 —— 吞了它就是把一份残清单冒充成完整的。
+	 */
+	async getGitChanges(sessionId?: string): Promise<GitChangesDto> {
+		const result = await this.#req<{
+			repoRoot?: string | null;
+			changes?: GitChangesDto["changes"] | null;
+			error?: string | null;
+		}>({
+			type: "git_changes",
+			...(sessionId ? { sessionId } : {}),
+		});
+		return {
+			repoRoot: result.repoRoot ?? "",
+			changes: result.changes ?? [],
+			...(result.error ? { error: result.error } : {}),
+		};
 	}
 
 	/** 读 agent workspace 图片（fs_read_image；dataUrl，2MB 上限；FileExplorer 预览用）。 */
@@ -599,7 +858,8 @@ export class PiClientAdapter implements PiClient {
 		} as never);
 	}
 
-	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；sessionFile 定向单会话；失败抛错由调用方空态）。 */
+	/** 产物列表（list_artifacts；会话 toolCall 提取，mtime 倒序；`sessionId` = 会话身份（附件地址），
+	 * sessionFile 定向单会话；失败抛错由调用方空态）。 */
 	async listArtifacts(sessionId: string, sessionFile?: string): Promise<{ artifacts: ArtifactDto[] }> {
 		const result = await this.#req<{ artifacts?: ArtifactDto[] | null }>({
 			type: "list_artifacts",
@@ -609,8 +869,8 @@ export class PiClientAdapter implements PiClient {
 		return { artifacts: result.artifacts ?? [] };
 	}
 
-	/** 产物静态预览 URL（/preview/<agentId>/<relpath>，serve 同源端口，逐段编码；token 非空时带上）。 */
-	artifactPreviewUrl(agentId: string, path: string): string {
+	/** 产物静态预览 URL（/preview/<附件地址>/<relpath>，serve 同源端口，逐段编码；token 非空时带上）。 */
+	artifactPreviewUrl(attachmentAddress: string, path: string): string {
 		const wsUrl = this.#connection.wsUrl;
 		const base = wsUrl.replace(/^ws:/, "http:").replace(/\/ws$/, "");
 		const segs = path
@@ -618,7 +878,7 @@ export class PiClientAdapter implements PiClient {
 			.map(s => encodeURIComponent(s))
 			.join("/");
 		const tokenQuery = this.#token ? `?token=${encodeURIComponent(this.#token)}` : "";
-		return `${base}/preview/${encodeURIComponent(agentId)}/${segs}${tokenQuery}`;
+		return `${base}/preview/${encodeURIComponent(attachmentAddress)}/${segs}${tokenQuery}`;
 	}
 
 	/** 本机 gateway 运行状态（gateway_status；gateway 生产端点直连）。 */
@@ -649,26 +909,65 @@ export class PiClientAdapter implements PiClient {
 		return this.#req<DashboardStatsDto>(command as never);
 	}
 
-	/** 记忆投影（get_memory；三分区只读，取不到为 null，失败抛错由调用方空态）。 */
-	async getMemory(): Promise<MemoryProjectionDto> {
-		return this.#req<MemoryProjectionDto>({ type: "get_memory" } as never);
+	/**
+	 * 记忆投影（get_memory；按 Agent/Project/Session/User scope 分区，只读）。
+	 * sessionId 定向 agent（命令已带该字段，不需要 cast）。
+	 */
+	async getMemory(sessionId?: string): Promise<MemoryProjectionDto> {
+		return this.#req<MemoryProjectionDto>({ type: "get_memory", ...(sessionId ? { sessionId } : {}) });
 	}
 
-	/** 已加载技能 + 已停用名单（get_skills；只读；失败抛错由调用方空态）。 */
-	async getSkills(): Promise<{ skills: SkillDto[]; disabled: DisabledSkillDto[] }> {
-		const result = await this.#req<{ skills?: SkillDto[]; disabled?: DisabledSkillDto[] }>({
+	/** 技能工作台数据（get_skills；已加载 + 停用 + 被挡住 + 发现错误，失败抛错由调用方空态）。 */
+	async getSkills(sessionId?: string): Promise<SkillsResultDto> {
+		const result = await this.#req<Partial<SkillsResultDto>>({
 			type: "get_skills",
-		} as never);
-		return { skills: result.skills ?? [], disabled: result.disabled ?? [] };
+			...(sessionId ? { sessionId } : {}),
+		});
+		return {
+			skills: result.skills ?? [],
+			disabled: result.disabled ?? [],
+			blocked: result.blocked ?? [],
+			errors: result.errors ?? [],
+			scope: result.scope ?? {
+				agentId: sessionId ?? "default",
+				agentDir: "",
+				sessionCwd: "",
+				projectRoot: null,
+				projectError: null,
+			},
+		};
 	}
 
-	/** 启停技能（set_skill_enabled；写配置 + 重发现热重载，失败抛错由调用方提示）。 */
-	async setSkillEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+	/**
+	 * 演化系统沉淀的技能（get_evolved_skills；与 get_skills 是两件事，不合并）。
+	 *
+	 * 空清单 = 库读到了、里面确实没技能；库在但打不开 → ok:false 招错（读失败不是空集）。
+	 * 行里的字段原样透传（包括可选的 error 降级通道），不在这里补默认值 —— 补一个假值
+	 * 就让「没记过」和「记了个空」长得一模一样。
+	 */
+	async getEvolvedSkills(sessionId?: string): Promise<EvolvedSkillsDto> {
+		const result = await this.#req<{ skills?: EvolvedSkillsDto["skills"] | null; error?: string | null }>({
+			type: "get_evolved_skills",
+			...(sessionId ? { sessionId } : {}),
+		});
+		return {
+			skills: result.skills ?? [],
+			...(result.error ? { error: result.error } : {}),
+		};
+	}
+
+	/** 启停技能（set_skill_enabled；写该 agent 自己的配置 + 重发现热重载）。 */
+	async setSkillEnabled(
+		name: string,
+		enabled: boolean,
+		sessionId?: string,
+	): Promise<{ ok: boolean; name: string; enabled: boolean }> {
 		return this.#req<{ ok: boolean; name: string; enabled: boolean }>({
 			type: "set_skill_enabled",
 			name,
 			enabled,
-		} as never);
+			...(sessionId ? { sessionId } : {}),
+		});
 	}
 
 	/** 远程技能市场（list_remote_skills；契约命令名，WireCommand union 暂缺故最小局部 cast）。 */
@@ -761,6 +1060,31 @@ export class PiClientAdapter implements PiClient {
 	/** gateway cron 任务表（get_cron_tasks；gateway 生产端点直连）。 */
 	async getCronTasks(): Promise<{ tasks: TaskRowDto[] }> {
 		return this.#gatewayWire<{ tasks: TaskRowDto[] }>({ type: "get_cron_tasks" });
+	}
+
+	/**
+	 * 调度定义写面（T10C）：四个命令都直连 gateway POST /wire（scheduler 的主人是 gateway）。
+	 * 失败原因（未注册的 agentId / 已不存在的 agentDir / 重名 / 未知 taskId）原样抛给调用方渲染，
+	 * 不在这里吞成 false。
+	 */
+	async cronCreate(input: CronCreateInput): Promise<CronTaskWriteResultDto> {
+		return this.#gatewayWire<CronTaskWriteResultDto>({ type: "cron_create", ...input });
+	}
+
+	async cronUpdate(taskId: string, input: CronUpdateInput): Promise<CronTaskWriteResultDto> {
+		return this.#gatewayWire<CronTaskWriteResultDto>({ type: "cron_update", taskId, ...input });
+	}
+
+	async cronRemove(taskId: string): Promise<CronRemoveResultDto> {
+		return this.#gatewayWire<CronRemoveResultDto>({ type: "cron_remove", taskId });
+	}
+
+	async cronTestRun(name: string, inMs?: number): Promise<CronTestRunResultDto> {
+		return this.#gatewayWire<CronTestRunResultDto>({
+			type: "cron_test_run",
+			name,
+			...(inMs !== undefined ? { inMs } : {}),
+		});
 	}
 
 	/**
@@ -900,13 +1224,20 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	/**
-	 * P2-4：cron/gateway 命令直连 gateway 生产端点（POST /wire，127.0.0.1:7892）。
-	 * 不再经 serve 中转。gateway 未运行（端点不可达）→ fetch 抛错（调用方错误态）。
-	 * 端口写死 7892：浏览器无 process.env；与 gateway #startWireEndpoint 默认一致，
-	 * 当地址调整时随 gateway 侧改动同步（serve 转发侧用 CORNFIELD_GATEWAY_WIRE_PORT 覆盖）。
+	 * gateway 命令直连 gateway 生产端点（POST /wire，host:port = serve 在 hello_ack 里报的
+	 * `gatewayWirePort`）。
+	 *
+	 * **端口由 serve 给**：浏览器侧没有 process.env，以前写死 7892，于是隔离 HOME 跑 e2e 时，
+	 * 前端仍然连着本机真实运营中的 gateway（页面上出现的是别的进程的数据）。未上报（未连接 /
+	 * 握手前）时就地下抛错 —— 快、且说得出原因；不许静默回退到 7892。
+	 * gateway 未运行（端点不可达）→ fetch 抛错（调用方错误态）。
 	 */
 	async #gatewayWire<T>(command: Record<string, unknown>): Promise<T> {
-		const res = await fetch(`http://127.0.0.1:7892/wire`, {
+		const port = this.#gatewayWirePort;
+		if (port === null) {
+			throw new Error("gateway 端口未知：待 serve 上报 gateway 端口（hello_ack.gatewayWirePort）");
+		}
+		const res = await fetch(`http://127.0.0.1:${port}/wire`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(command),
@@ -940,12 +1271,15 @@ export class PiClientAdapter implements PiClient {
 
 	/**
 	 * serve 重启 / WS 重连后旧快照可能残留（如上传送中相位）导致发送按钮锁死在「停止」。
-	 * 重新 attach 已知会话，强制 serve 广播权威 session_snapshot 覆盖缓存。幂等：已附着则无副作用。
+	 *
+	 * 走 `switch_session` 而不是 `attach`：重连是一条**新连接**，serve 侧焦点回到 default，
+	 * 只 attach 不会把焦点拉回来，于是本连接会开始收 default 的快照 —— 另一个 Agent 的
+	 * 会话就出现在当前转录里。switch_session 同时含 attach，并把焦点与权威快照一起恢复。
 	 */
 	async #resyncAttached(): Promise<void> {
 		if (!this.#sessionId) return;
 		try {
-			await this.#req({ type: "attach", sessionId: this.#sessionId } as never);
+			await this.#req({ type: "switch_session", sessionId: this.#sessionId });
 		} catch {
 			// 会话已不存在（serve 数据重置）等场景：忽略，等下一个 server_snapshot
 		}
@@ -957,6 +1291,8 @@ export class PiClientAdapter implements PiClient {
 				this.#applyStatus(event.status, event.attempt);
 				break;
 			case "hello_ack":
+				// serve 上报 gateway wire 端口 → gateway 类命令打那个端口（见 #gatewayWire）。
+				this.#gatewayWirePort = gatewayWirePortOf(event);
 				this.#connection = {
 					...this.#connection,
 					connectionId: event.connectionId,
@@ -983,6 +1319,8 @@ export class PiClientAdapter implements PiClient {
 	#applyStatus(status: string, attempt: number | undefined): void {
 		const connected = status === "open";
 		const reconnecting = status === "connecting" && (attempt ?? 0) > 0;
+		// 断开就不再知道 serve 报的是哪个端口：清掉，重连后由新的 hello_ack 重新报。
+		if (!connected) this.#gatewayWirePort = null;
 		if (connected === this.#connection.connected && reconnecting === (this.#connection.reconnecting ?? false)) return;
 		this.#connection = { ...this.#connection, connected, reconnecting };
 		this.#notifyConnection();
@@ -1143,6 +1481,33 @@ function toPlaybackEntries(messages: unknown[]): PlaybackEntry[] {
 		});
 	}
 	return entries;
+}
+
+/**
+ * fs_write 的 CAS 拒绝标记。服务端把判决放在 error 字符串的固定前缀上（wire 错误码枚举
+ * `WireErrorCode` 在 pi-wire 里，本票不改那个包），这里只认这个前缀 —— 其余服务端错误
+ * （越界/超限/未知文件）必须原样上抛，不能被归成「冲突」。
+ */
+const FS_CONFLICT_PREFIX = "fs_conflict:";
+
+/** 从服务端错误里取出冲突判决文本；不是冲突则返回 null。 */
+function conflictDetailOf(err: unknown): string | null {
+	if (!(err instanceof PiServerError)) return null;
+	const detail = typeof err.serverError === "string" ? err.serverError : err.serverError.message;
+	return detail.startsWith(FS_CONFLICT_PREFIX) ? detail : null;
+}
+
+/**
+ * 从 hello_ack 上读 serve 上报的 gateway wire 端口。
+ *
+ * 读的是**帧上的字段**（不是常量）：serve 侧把它解析自 CORNFIELD_GATEWAY_WIRE_PORT，所以
+ * 隔离 HOME 跑出来的那套 serve 报的就是它自己的端口。没报 / 报的不是一个正经端口号 → null，
+ * 调用方据此报「还没上报」，而不是回落 7892。
+ */
+function gatewayWirePortOf(event: PiClientEventKind): number | null {
+	if (event.type !== "hello_ack") return null;
+	const raw: unknown = event.gatewayWirePort;
+	return typeof raw === "number" && Number.isInteger(raw) && raw > 0 && raw <= 65535 ? raw : null;
 }
 
 function prettyArgs(args: Record<string, unknown>): string {

@@ -1,5 +1,9 @@
 import type { ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent } from "@cornfield/ai";
+import type { AgentTodoDto } from "./results/agent-todos";
+import type { AgentCreateInput } from "./results/agents";
+import type { CronCreateInput, CronUpdateInput } from "./results/cron";
+import type { DelegateChildInput } from "./results/session-tree";
 
 /**
  * Wire 命令面 (multiplex 子集)。
@@ -88,6 +92,28 @@ export type WireEditEntry = WireReplaceEditEntry | WirePatchEditEntry | WireHash
 export type ConfigScope = "global" | "project";
 
 /**
+ * 单个 prompt 源（`get_agent_prompt_sources` 的一项）。
+ *
+ * `exists` 是这一项的必报字段：缺失的源也在清单里 —— 这个视图的用处就是看出「该建哪个 /
+ * 哪个没了」，只列存在的等于把缺失本身藏起来。
+ */
+export interface AgentPromptSourceDto {
+	/** agentDir 内相对路径。 */
+	path: string;
+	/** 展示名。 */
+	title: string;
+	/** 它在运行时真实起的作用。 */
+	description: string;
+	/** 该文件此刻在 agentDir 里是否存在。 */
+	exists: boolean;
+}
+
+/** `get_agent_prompt_sources` 响应：目标 agentDir 的 prompt 源清单（按骨架的写出顺序，不是按存在与否过滤）。 */
+export interface AgentPromptSourcesDto {
+	sources: AgentPromptSourceDto[];
+}
+
+/**
  * Multiplex 命令 — P3 升级后每条命令均可带 `sessionId` 参数定向 agent。
  */
 export type MultiplexCommand =
@@ -104,7 +130,12 @@ export type MultiplexCommand =
 	| { id?: string; type: "follow_up"; sessionId?: string; message: string; images?: ImageContent[] }
 	| { id?: string; type: "abort"; sessionId?: string }
 	| { id?: string; type: "abort_and_prompt"; sessionId?: string; message: string; images?: ImageContent[] }
-	| { id?: string; type: "new_session"; sessionId?: string; parentSession?: string }
+	/**
+	 * 新建会话。`projectId` 是**权威归属**：serve 按它解析工作根与边界根（coding-agent 的
+	 * session-workspace resolver），未声明的 id 直接 ok:false；缺省 = 这个会话没有声明归属
+	 * （行为与今天一致，**不**静默落回启动根）。
+	 */
+	| { id?: string; type: "new_session"; sessionId?: string; parentSession?: string; projectId?: string }
 	// P3：用户消息/自定义消息（不经 LLM 转发的直接入队）
 	| { id?: string; type: "send_user_message"; sessionId?: string; message: string }
 	| {
@@ -136,7 +167,14 @@ export type MultiplexCommand =
 	| { id?: string; type: "get_available_thinking_levels"; sessionId?: string }
 	| { id?: string; type: "cycle_role_models"; sessionId?: string; roleOrder: string[] }
 	// Thinking
-	| { id?: string; type: "set_thinking_level"; sessionId?: string; level: ThinkingLevel }
+	/**
+	 * 设置会话的 thinking level。
+	 *
+	 * `persist` 缺省 = 只改本次会话（与随时切档同语义）；`persist:true` = 把生效档位一并写进目标
+	 * agent 的 `<agentDir>/config.yml`（`defaultThinkingLevel`），重启后仍是它。内核只在档位真的
+	 * 发生变化时写盘（见 `AgentSession#setThinkingLevel`），所以 persist:true 也可能什么都不写。
+	 */
+	| { id?: string; type: "set_thinking_level"; sessionId?: string; level: ThinkingLevel; persist?: boolean }
 	| { id?: string; type: "cycle_thinking_level"; sessionId?: string }
 	// P3：plan mode 状态与上下文
 	| { id?: string; type: "set_plan_mode"; sessionId?: string; enabled: boolean; planFilePath?: string }
@@ -199,7 +237,95 @@ export type MultiplexCommand =
 	| { id?: string; type: "get_async_job_snapshot"; sessionId?: string; recentLimit?: number }
 	| { id?: string; type: "format_session_as_text"; sessionId?: string }
 	| { id?: string; type: "get_display_context"; sessionId?: string }
-	| { id?: string; type: "resolve_role_model"; sessionId?: string; role: string };
+	| { id?: string; type: "resolve_role_model"; sessionId?: string; role: string }
+	// Session Tree（T8）：父会话对被委派子会话的账本读取与结果带回
+	/**
+	 * 读一个会话的直接子会话账本（SessionTreeDto）。
+	 *
+	 * 账本归属父会话，存在它自己的会话 JSONL 里（`session_tree_manager` 的 custom entry），
+	 * 所以查询对象是「一个会话」，不是「一个 agent」。`sessionId` 定向注册表里的 agent
+	 * （lazy attach），缺省 = 本连接当前焦点会话。
+	 *
+	 * 只回答这一层：子会话的子孙在子会话自己的日志里，要展开就拿它的 sessionId 再查一次。
+	 * 未知 agent / 无附着会话 → ok:false（不返回空树冒充「没有子会话」）。
+	 */
+	| { id?: string; type: "get_session_tree"; sessionId?: string }
+	/**
+	 * 把某个子会话的结果带回父会话（BroughtBackChildResultDto）。
+	 *
+	 * 幂等：重复带回不报错，但 `firstTime:false`，且**不再**注入 —— 同一条结果注入两次
+	 * 就是把同一次工作算两遍。读取失败（结果指针不可读）整条命令 ok:false，不返回半份内容。
+	 */
+	| { id?: string; type: "bring_back_child_result"; sessionId?: string; childSessionId: string }
+	/**
+	 * 从当前会话委派一个子会话（delegate_child）。
+	 *
+	 * 这是会话树唯一的**写入口**：serve 侧真的起一个独立 cornfield 子进程并把
+	 * 它记进父会话的账本，成功才返回 DelegatedChildDto。子会话必须先完成注册门（它真的以
+	 * 本会话为 parent 挂上 broker）才算启动成功 —— 起不来或没挂上边一律 ok:false 带真实原因，
+	 * 绝不返回一条没人在跑的 started 记录。入参形状见 `DelegateChildInput`。
+	 */
+	| ({ id?: string; type: "delegate_child"; sessionId?: string } & DelegateChildInput)
+	// Project（T8）：客户端级 Project registry 的只读面
+	/**
+	 * 列出已声明的 Project，并给出被查询会话落在哪个 Project 里（ProjectListDto）。
+	 *
+	 * Project registry 是客户端 scope（跨 Agent 共享的业务边界），本身不依赖某个会话；
+	 * `sessionId` 可选，只用来算 `currentProjectId` + `currentProjectSource`（不 lazy attach）。
+	 * 不传 = 只要列表。
+	 *
+	 * 归属的权威是**会话自己的记录**（`SessionHeader.projectId`）：只有旧会话（没记过）才按它的
+	 * cwd 与 WP4 的 root 规则匹配回落。回复里带的来源（`currentProjectSource`）就是要让调用方
+	 * 看得出这次是「会话记的」还是「按目录算的」—— 两者不是一个可信度。
+	 *
+	 * 存储文件不存在 = 明确空集（projects: []）；文件在但读不出来 / 会话记录的 Project 在注册表里
+	 * 不存在 = ok:false，**不得**退化成空列表或「没归属」—— 「没声明过」与「声明过但坏了」是两件事。
+	 */
+	| { id?: string; type: "list_projects"; sessionId?: string }
+	/**
+	 * 声明或更新一个 Project（ProjectUpsertDto）。
+	 *
+	 * Project registry 是客户端 scope，不挂会话，所以本命令没有 `sessionId`：写入不需要会话上下文，
+	 * 写完之后要看的会话归属由下一次 `list_projects` 算。
+	 *
+	 * 权威在存储：一个 root 只能被一个 Project 声明（root 按 symlink 归一比较），
+	 * root 已被别的 Project 占用 → ok:false，不是静默改写别人的声明。声明成功回存储真正落盘的
+	 * 那一份（root 是归一后的路径）。
+	 */
+	| { id?: string; type: "set_project"; projectId: string; name: string; root: string; defaultAgentId?: string }
+	/**
+	 * 删掉一个已声明的 Project（ProjectDeleteDto）。
+	 *
+	 * 删一个**没声明过**的 projectId 是 ok:false，不是一次成功的空删除：报「删掉了」而实际上
+	 * 早就不在，就是在拿一个不是这次调用的结果冒充这次调用的结果。
+	 */
+	| { id?: string; type: "delete_project"; projectId: string }
+	// Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）
+	/**
+	 * 列出一个 Agent 的整块 Todo 板（AgentTodoListDto）。
+	 *
+	 * 板子归属 Agent，不是会话：`sessionId` 定向注册表里的 agent，缺省 = 本连接当前焦点。
+	 * 只读该 agent 的 `<agentDir>/.cornfield/agent-todos.json`，不 lazy attach（列一块板不该
+	 * 把 agent 拉起来）。目标 agent 未注册 → ok:false，不拿别人的板子冒充。
+	 *
+	 * 存储文件不存在 = 明确的空板；文件在但读不出来（损坏 / 版本不符 / 记录形状不对）或该
+	 * Agent 的 workspace 声明读不出内容 = ok:false，**不得**退化成空板 —— 「没记过」与
+	 * 「记过但坏了」是两件事。
+	 */
+	| { id?: string; type: "list_agent_todos"; sessionId?: string }
+	/**
+	 * 新建或更新一条 Todo（AgentTodoUpsertDto；按 `todo.id` upsert）。
+	 *
+	 * `id` 由调用方给（重试同一份记录更新同一条，而不是多出一条任务），`agentId` 必填且必须
+	 * 等于目标 Agent —— 一个 Agent 只能写自己的板子。`createdAt` / `updatedAt` / `sessionRefs`
+	 * 由存储拥有：前两者写入时盖章，后者只允许原样送回读到的值。
+	 *
+	 * ok:false 的几种情况都是真错误，不是「已忽略」：owner 不匹配、`projectId` 没声明过、
+	 * 超出该 Agent 的声明绑定范围、生命周期非法（终态不可重开）、存储坏了。
+	 */
+	| { id?: string; type: "set_agent_todo"; sessionId?: string; todo: AgentTodoDto }
+	/** 删除一条 Todo（AgentTodoDeleteDto）。幂等：本来就不在板上返回 deleted:false。 */
+	| { id?: string; type: "delete_agent_todo"; sessionId?: string; todoId: string };
 
 /** 多端专属命令（rpc-types 没有，wire 层新增）。 */
 export type WireExtensionCommand =
@@ -218,6 +344,18 @@ export type WireExtensionCommand =
 	/** P3 新增：列出所有已注册 agent 的元数据（不触发 attach）。 */
 	| { id?: string; type: "list_agents" }
 	/**
+	 * 建一个 agentDir（`cornfield agent init` 的 wire 面，入参见 `AgentCreateInput`）。
+	 *
+	 * 与 CLI 走**同一条实现**（`runAgentInit`）：真写盘（骨架文件 + `.cornfield/workspace.json`
+	 * 声明）并真进 `~/.cornfield/agent/registry.json`，所以命令成功后 `list_agents` 立刻看得见它。
+	 * 不挂会话也不 attach：建 agentDir 与哪个会话/附件无关（与 `set_project` 同类）。
+	 *
+	 * 失败是 `ok:false` 且 `error` 是**服务端原文**（名字含 NUL/`..`、未知 template、目录不可写、
+	 * mission 文件不存在 …）—— 客户端原样展示，不另编一套话术；收到 ok 就意味着盘上真的有它。
+	 * 答复是 `AgentCreateDto`（`created:false` = 同名目录本来就在、这次只补齐缺的文件）。
+	 */
+	| ({ id?: string; type: "create_agent" } & AgentCreateInput)
+	/**
 	 * P4 新增：历史会话索引（/records 列表页）。扫描 sessions 目录，返回按开始时间
 	 * 倒序的会话元数据列表。不实例化任何 session（纯文件索引）。
 	 *
@@ -234,9 +372,10 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_session_messages"; sessionFile: string }
 	/**
-	 * 只读列出 agent workspace 目录（Agent 详情页文件系统 tab）。
-	 * path 相对 agentDir；省略 = agentDir 根。返回条目（目录在前，名/类型/大小）。
-	 * 路径约束：必须解析在 agentDir 内（防任意读）；越界 ok:false + error。
+	 * 只读列出会话工作面里的目录（Agent 详情页文件系统 tab）。
+	 * path 是相对路径（省略 = 第一个存在的根）；返回条目（目录在前，名/类型/大小）。
+	 * 路径约束：必须落在会话的 workspace roots 内（Project root + agentDir 声明的 attachedRoots +
+	 * agentDir；未绑定 Project 的会话就是 [agentDir]）。`..` 逃逸与符号链接逃逸照旧拒；越界 ok:false + error。
 	 */
 	| { id?: string; type: "fs_list"; sessionId?: string; path?: string }
 	/** 只读读一个 workspace 文件（文本，utf-8；> 128KB 截断到 128KB）。路径约束同上。 */
@@ -264,15 +403,11 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "get_stats"; period?: "1d" | "7d" | "30d" | "90d" | "all" }
 	/**
-	 * W3 D3：只读拉取记忆投影（三分区：memory/user/project）。
-	 * - memory：self-evolution 记忆库（vector_embeddings 分区，按 importance 排序）
-	 * - user：~/.cornfield/user.md 内容（身份画像；缺失 → null）
-	 * - project：当前项目记忆目录的 MEMORY.md / memory_summary.md / raw_memories.md
-	 *   （canonical evolution 目录优先，旧版扁平目录 agentDir/memories 回落）
-	 * 不依赖任何 attached session（不定向，锚定 serve 进程 cwd 的 default agent）。
-	 * 文件内容 > 128KB 截断并标记 truncated；取不到的区返回 null，UI 渲染空态。
+	 * Agent 定向只读记忆投影；sessionId 缺省 = 当前连接焦点，有值 = 指定 Agent。
+	 * 返回 user / agent / project / session 分区、memoryStore 与 resolution；
+	 * 分区错误必须显式返回，不能把读取失败当成空内容。
 	 */
-	| { id?: string; type: "get_memory" }
+	| { id?: string; type: "get_memory"; sessionId?: string }
 	/**
 	 * W3 D5 + P2-W3-3：只读列出已加载技能 + 已停用名单。
 	 * skills = session.skills（discovery 按 settings 过滤后的「已启用」集）：name/description/
@@ -282,6 +417,17 @@ export type WireExtensionCommand =
 	 * - 无 sessionId：当前连接 active session；有 sessionId：定向该 agent（lazy attach）
 	 */
 	| { id?: string; type: "get_skills"; sessionId?: string }
+	/**
+	 * 只读列出**演化技能**（self-evolution 从会话里提炼出来的技能，EvolvedSkillsDto）。
+	 *
+	 * 与 `get_skills` 是两件事：那个答「这次会话加载了哪些技能」（磁盘发现 + 启用/停用），
+	 * 这个答「演化系统沉淀了哪些技能」（`evolution.db` 的 `skills` 表：提炼、评分、使用统计）。
+	 * 同一个名字可能两边都有，来源不同，不合并。
+	 *
+	 * `sessionId` 定向 agent（缺省 = 本连接焦点）—— 库位置由 serve 解析（按项目/用户库），
+	 * 客户端不送路径。库不存在 = 明确空集；库在但读不出来 → ok:false，不得退化成空清单。
+	 */
+	| { id?: string; type: "get_evolved_skills"; sessionId?: string }
 	/**
 	 * 协议批 B-2：取消最近一条排队消息（steer/followUp 队列，LIFO）。
 	 * 空队列返回 { cancelled:false }；成功返回 { cancelled:true, text }（被取消的文本）。
@@ -307,6 +453,11 @@ export type WireExtensionCommand =
 	 * 返回 { logs: [{ taskId, id, ts, status, exitCode, durationMs, output(截断), stderr(截断) }] }。
 	 */
 	| { id?: string; type: "get_cron_logs"; taskId?: string; days?: number; limit?: number }
+	/** T10C：沿用 gateway scheduler 的调度定义写面与 Agent 绑定解析。 */
+	| ({ id?: string; type: "cron_create" } & CronCreateInput)
+	| ({ id?: string; type: "cron_update"; taskId: string } & CronUpdateInput)
+	| { id?: string; type: "cron_remove"; taskId: string }
+	| { id?: string; type: "cron_test_run"; name: string; inMs?: number }
 	/**
 	 * P2-W3-3（B3 技能写协议）：启停一个技能。
 	 * serve 写 settings（~/.cornfield/agent/config.yml 的 skills.ignoredSkills 列表），随后
@@ -370,7 +521,7 @@ export type WireExtensionCommand =
 	/**
 	 * 产物列表（R-ARTIFACTS）：从该 agent 最近会话 JSONL 的工具调用（write / edit /
 	 * puppeteer screenshot）提取写出文件，返回可预览产物（html / image / markdown / text）。
-	 * 路径约束与 fs_read 同（resolveFsPath：必须解析在 agentDir 内）。
+	 * 路径约束与 fs_read 同（会话的 workspace roots 边界）。
 	 * 响应 { artifacts: ArtifactDto[] }；静态预览走 /preview/<agentId>/<relpath>（serve 端路由）。
 	 *
 	 * sessionFile（可选）：定向到单个会话文件，只提取该会话的产物（按会话隔离视图，
@@ -393,7 +544,7 @@ export type WireExtensionCommand =
 	| { id?: string; type: "test_mcp_server"; name: string }
 	/**
 	 * fs 写命令面（票 01）：整段写一个 workspace 文件（UTF-8）。
-	 * 路径约束与 fs_read 同（必须解析在 agentDir 内，越界 ok:false）；写后走 LSP
+	 * 路径约束与 fs_read 同（会话的 workspace roots 内，越界 ok:false）；写后走 LSP
 	 * writethrough（didChange 同步 + notifySaved），格式化/诊断状态不丢。
 	 */
 	| { id?: string; type: "fs_write"; sessionId?: string; path: string; content: string }
@@ -411,7 +562,7 @@ export type WireExtensionCommand =
 			input?: string;
 	  }
 	/**
-	 * 前后内容统一 diff（供前端 diff 视图）。path+content：agentDir 内文件 vs 待写 content；
+	 * 前后内容统一 diff（供前端 diff 视图）。path+content：会话工作面内的文件 vs 待写 content；
 	 * before+after：纯文本 diff（不落地）。
 	 */
 	| {
@@ -425,6 +576,17 @@ export type WireExtensionCommand =
 	  }
 	/** git 最小集（票 02）：当前分支 + staged/unstaged/untracked 列表。 */
 	| { id?: string; type: "git_status"; sessionId?: string }
+	/**
+	 * `git_status` 的逐条版本：工作区改动的**清单**（GitChangesDto）。
+	 *
+	 * `git_status` 给的是三个计数（staged/unstaged/untracked），答不了「改的是哪几个文件」；
+	 * 右栏的 Changes 视图要的是后者。两者各有各的用途，谁也不替代谁。
+	 *
+	 * `sessionId` 定向一个 agent（缺省 = 本连接焦点）—— 仓库是 serve 按目标 agent 解析出来的，
+	 * 客户端不送仓库路径（选哪个仓库不是调用方的权力）。不是 git 仓库 / git 失败 → ok:false，
+	 * **不得**退化成空清单：「没改动」与「读不到」是两件事。
+	 */
+	| { id?: string; type: "git_changes"; sessionId?: string }
 	/** working tree vs HEAD（或 staged）diff。 */
 	| { id?: string; type: "git_diff"; sessionId?: string; cached?: boolean; path?: string }
 	/** 最近 n 条 commit（hash/author/message）。 */
@@ -433,17 +595,29 @@ export type WireExtensionCommand =
 	| { id?: string; type: "git_show"; sessionId?: string; revision: string }
 	/** 分支列表（local + remote + current）。 */
 	| { id?: string; type: "git_branches"; sessionId?: string }
-	/** 配置读写（票 03）：读目标 agent 的 config.yml 域（sessionId 定向，缺省 active）。 */
+	/** 配置读写（票 03）：读目标 agent 的配置合并视图（project 压 global；sessionId 定向，缺省 active）。 */
 	| { id?: string; type: "get_config"; sessionId?: string; key?: string }
 	/**
 	 * 写指定域并持久化（sessionId 定向；与 set_skill_enabled/set_model_disabled 不双写）。
-	 * #05 起支持按作用域写：scope 缺省 = "global"（现行为，写 agentDir/config.yml）；
-	 * "project" 写 <cwd>/.cornfield/config.yml（文件不存在时创建）。record 值（如 modelRoles）
-	 * 整键替换，与 Settings.set 语义一致。
+	 * `scope` 缺省 = 跟随读侧优先级（有 project 层 `<cwd>/.cornfield/config.yml` 就写它，
+	 * 否则写该 agent 自己的 `config.yml`）；显式 "global"/"project" 点名一层。
+	 * record 值（如 modelRoutes）整键替换，与 Settings.set 语义一致。
 	 */
 	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown; scope?: ConfigScope }
 	/** 工具开关语义视图（get_config 的域化封装）：返回目标 agent 每个工具的 enabled 开关 + python 工具模式。 */
 	| { id?: string; type: "get_tool_switches"; sessionId?: string }
+	/**
+	 * 读目标 agent 的 prompt 源清单（AgentPromptSourcesDto）：agentDir 里哪些文件会进模型上下文。
+	 *
+	 * 清单来自 agentDir 文件的单一真相（`skeleton/agent-dir-files.ts` 的 `surface:"prompt"` 子集：
+	 * always-on 的 5 个 + 项目级人设 user.md + prompt-includes.json + .cornfield/SYSTEM.md），
+	 * 不是每个前端各抄一份会漂移的表。
+	 *
+	 * 每一项都报 `exists`（缺的那项仍在清单里）；只列存在的等于把缺失本身藏起来。
+	 * 不定向 attached session —— 工作面是 agentDir，`sessionId` 只用来定位 agent（与 get_config
+	 * 同一条定位逻辑，缺省 = 本连接焦点）。
+	 */
+	| { id?: string; type: "get_agent_prompt_sources"; sessionId?: string }
 	/**
 	 * 会话诊断（P5 会话诊断）：对一条历史会话触发异步诊断。
 	 * 流程：serve 派生独立 `cornfield --mode rpc` 子进程（默认配置模型）→ 子 agent 按

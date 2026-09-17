@@ -1,14 +1,14 @@
 import * as path from "node:path";
-import { getAgentDir } from "@cornfield/utils";
+import { getClientDir } from "@cornfield/utils";
 
 /** Paths that come from the developer's real user/agent config, not the test fixture. */
 function isExternalUserExtensionPath(extPath: string): boolean {
-	const userExtensionsDir = path.join(getAgentDir(), "extensions");
+	const userExtensionsDir = path.join(getClientDir(), "extensions");
 	if (extPath.startsWith(userExtensionsDir)) return true;
 	// Plugin marketplace installs into ~/.cornfield/plugins (user-level), and
 	// discoverAndLoadExtensions picks up their dist/extension.ts — these are
 	// real user extensions, not test fixtures.
-	const userPluginsDir = path.join(getAgentDir(), "..", "plugins");
+	const userPluginsDir = path.join(getClientDir(), "..", "plugins");
 	if (extPath.startsWith(userPluginsDir)) return true;
 	// Leftover settings.json paths into first-party packages (now inlined in sdk.ts).
 	if (extPath.includes(`${path.sep}packages${path.sep}moa-extension${path.sep}`)) return true;

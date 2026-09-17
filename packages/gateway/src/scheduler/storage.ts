@@ -47,6 +47,8 @@ type TaskRow = {
 	last_delivery_error: string | null;
 	account_id: string | null;
 	agent_dir: string | null;
+	/** Resolved Agent identity (registry key); null for rows written before T10C. */
+	agent_id: string | null;
 	delivery_channel: string | null;
 	delivery_account_id: string | null;
 	delivery_to_user_id: string | null;
@@ -99,6 +101,7 @@ const TASK_UPDATE_FIELDS = new Set<string>([
 	"lastDeliveryError",
 	"accountId",
 	"agentDir",
+	"agentId",
 	"deliveryChannel",
 	"deliveryAccountId",
 	"deliveryToUserId",
@@ -127,7 +130,6 @@ function toTask(row: TaskRow): ScheduledTask {
 	// agentDir: prefer the new column, fall back to legacy account_id for
 	// rows written before the agentDir migration.
 	const agentDir = row.agent_dir ?? row.account_id ?? undefined;
-
 	const delivery: ScheduledTask["delivery"] = row.delivery_channel
 		? {
 				channel: row.delivery_channel,
@@ -164,6 +166,7 @@ function toTask(row: TaskRow): ScheduledTask {
 		repeatCount: row.repeat_count ?? undefined,
 		repeatCompleted: row.repeat_completed ?? undefined,
 		agentDir,
+		agentId: row.agent_id ?? undefined,
 		delivery,
 		lastDeliveryError: row.last_delivery_error ?? undefined,
 		accountId: row.account_id ?? undefined,
@@ -256,10 +259,10 @@ export class SchedulerDbStorage implements SchedulerStorage {
 				created_at, updated_at, last_run_at, next_run_at,
 				run_count, fail_count, repeat_count, repeat_completed,
 				last_delivery_error, account_id,
-				agent_dir, delivery_channel, delivery_account_id,
+				agent_dir, agent_id, delivery_channel, delivery_account_id,
 				delivery_to_user_id, delivery_to_conversation_id, delivery_mode,
 				created_by_user_id, created_by_account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`);
 
 		this.#getTaskStmt = this.#db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -364,6 +367,8 @@ export class SchedulerDbStorage implements SchedulerStorage {
 		const hasDeliveryToConversationId = columns.some(c => c.name === "delivery_to_conversation_id");
 		const hasDeliveryMode = columns.some(c => c.name === "delivery_mode");
 		if (!hasAgentDir) this.#db.exec("ALTER TABLE tasks ADD COLUMN agent_dir TEXT;");
+		const hasAgentId = columns.some(c => c.name === "agent_id");
+		if (!hasAgentId) this.#db.exec("ALTER TABLE tasks ADD COLUMN agent_id TEXT;");
 		if (!hasDeliveryChannel) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_channel TEXT;");
 		if (!hasDeliveryAccountId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_account_id TEXT;");
 		if (!hasDeliveryToUserId) this.#db.exec("ALTER TABLE tasks ADD COLUMN delivery_to_user_id TEXT;");
@@ -408,6 +413,7 @@ export class SchedulerDbStorage implements SchedulerStorage {
 			task.lastDeliveryError ?? null,
 			task.accountId ?? null,
 			task.agentDir ?? null,
+			task.agentId ?? null,
 			task.delivery?.channel ?? null,
 			task.delivery?.accountId ?? null,
 			task.delivery?.toUserId ?? null,

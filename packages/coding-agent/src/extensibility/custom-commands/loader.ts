@@ -6,7 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir, getProjectDir, isEnoent, logger } from "@cornfield/utils";
+import { getDefaultAgentHome, getProjectDir, isEnoent, logger } from "@cornfield/utils";
 import * as typebox from "@sinclair/typebox";
 import { getConfigDirs } from "../../config";
 import { execCommand } from "../../exec/exec";
@@ -63,7 +63,7 @@ async function loadCommandModule(
 export interface DiscoverCustomCommandsOptions {
 	/** Current working directory. Default: getProjectDir() */
 	cwd?: string;
-	/** Agent config directory. Default: from getAgentDir() */
+	/** Agent home. Default: the default Agent's home */
 	agentDir?: string;
 }
 
@@ -80,7 +80,7 @@ export async function discoverCustomCommands(
 	options: DiscoverCustomCommandsOptions = {},
 ): Promise<DiscoverCustomCommandsResult> {
 	const cwd = options.cwd ?? getProjectDir();
-	const agentDir = options.agentDir ?? getAgentDir();
+	const agentDir = options.agentDir ?? getDefaultAgentHome();
 	const paths: Array<{ path: string; source: CustomCommandSource }> = [];
 	const seen = new Set<string>();
 
@@ -137,7 +137,7 @@ export async function discoverCustomCommands(
 export interface LoadCustomCommandsOptions {
 	/** Current working directory. Default: getProjectDir() */
 	cwd?: string;
-	/** Agent config directory. Default: from getAgentDir() */
+	/** Agent home. Default: the default Agent's home */
 	agentDir?: string;
 }
 
@@ -169,7 +169,7 @@ function loadBundledCommands(sharedApi: CustomCommandAPI): LoadedCustomCommand[]
  */
 export async function loadCustomCommands(options: LoadCustomCommandsOptions = {}): Promise<CustomCommandsLoadResult> {
 	const cwd = options.cwd ?? getProjectDir();
-	const agentDir = options.agentDir ?? getAgentDir();
+	const agentDir = options.agentDir ?? getDefaultAgentHome();
 
 	const { paths } = await discoverCustomCommands({ cwd, agentDir });
 

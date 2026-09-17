@@ -1,5 +1,5 @@
 /**
- * 共享 serve 就绪等待：轮询 /health，替代 stdout 扫 URL。
+ * 共享 serve 测试夹具：**等一个 serve 子进程就绪**。
  *
  * 为什么不用 stdout：子进程 stdout 接管道时 Bun 完全缓冲 console 输出
  * （winston Console transport 的行在进程退出前不刷出），父进程 30s 内
@@ -14,6 +14,12 @@
  *
  * 崩溃诊断保留：轮询间隙检测子进程退出，退出时把捕获到的输出带进报错
  * （stderr 在进程退出时会 flush，能拿到真实死因）。
+ *
+ * 本文件只管**就绪等待**（/health 轮询、输出捕获、预算）。起 serve 子进程与它的隔离 HOME 在
+ * `./wire-serve-fixture` 的 `spawnServeFixture`（全局唯一入口：HOME 隔离、端口探测、seed 钩子、
+ * 停摆重试都在那里）；需要额外参数/环境变量的用例用它的 `extraArgs` / `env` 两个口子传。
+ *
+ * 为什么空 HOME、为什么一并剔除 `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR`：见该文件的头注释。
  */
 
 /** 捕获缓冲保留的行数：够覆盖启动日志 + 崩溃栈，又不会把内存拖到无界。 */

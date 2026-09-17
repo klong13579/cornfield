@@ -37,6 +37,8 @@ export interface SessionSnapshot {
 	sessionId: string;
 	sessionName?: string;
 	sessionFile?: string;
+	/** 会话归属的 Project（header.projectId）；未记录 = undefined，不拿 cwd 反推。 */
+	projectId?: string;
 	// ── 模型 ──
 	model?: Model;
 	thinkingLevel?: ThinkingLevel;

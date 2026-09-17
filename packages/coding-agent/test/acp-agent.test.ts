@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentSideConnection, PromptRequest, SessionNotification } from "@agentclientprotocol/sdk";
 import type { Model } from "@cornfield/ai";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 import { AcpAgent } from "../src/modes/acp/acp-agent";
 import type { AgentSession, AgentSessionEvent } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
@@ -243,15 +243,15 @@ function getChunkMessageId(notification: SessionNotification): string | undefine
 }
 
 const cleanupRoots: string[] = [];
-const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 afterEach(async () => {
-	if (originalAgentDir) {
-		setAgentDir(originalAgentDir);
+	if (originalAgentHome) {
+		setDefaultAgentHome(originalAgentHome);
 	} else {
-		setAgentDir(fallbackAgentDir);
-		delete process.env.CORNFIELD_AGENT_DIR;
+		setDefaultAgentHome(fallbackAgentHome);
+		delete process.env.CORNFIELD_CLIENT_DIR;
 	}
 
 	for (const root of cleanupRoots.splice(0)) {
@@ -268,7 +268,7 @@ async function createHarness(emitMode: "first" | "late" | "never" = "first"): Pr
 	await fs.promises.mkdir(agentDir, { recursive: true });
 	await fs.promises.mkdir(cwdA, { recursive: true });
 	await fs.promises.mkdir(cwdB, { recursive: true });
-	setAgentDir(agentDir);
+	setDefaultAgentHome(agentDir);
 
 	const updates: SessionNotification[] = [];
 	const abortController = new AbortController();

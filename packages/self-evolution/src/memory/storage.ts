@@ -474,6 +474,54 @@ LIMIT ?
 	}));
 }
 
+export interface SessionMemoryRow {
+	threadId: string;
+	/** stage-1 原始记忆（本会话的逐字记忆）；尚无输出 = 空字符串。 */
+	rawMemory: string;
+	/** stage-1 会话摘要；尚无输出 = 空字符串。 */
+	summary: string;
+	/** stage-1 生成时间（秒）；尚无输出 = 0。 */
+	generatedAt: number;
+	/** 该输出对应的会话文件更新时间（秒）。 */
+	sourceUpdatedAt: number;
+}
+
+/**
+ * 一个会话的 stage-1 记忆（threads ⨝ stage1_outputs，按 `rollout_path` = 会话 JSONL 文件）。
+ *
+ * 返回 `undefined` 的语义是「记忆管线还没处理过这个会话」——与「处理过但记忆为空」
+ * （返回行 + 空 rawMemory）是两件事：前者该显示未沉淀，后者才能显示空。
+ * 读库失败不在这里吞掉：抛出去，由调用方渲染成错误而不是空态。
+ */
+export function readSessionMemory(db: Database, rolloutPath: string): SessionMemoryRow | undefined {
+	const row = db
+		.prepare(
+			`SELECT t.id AS thread_id, s.raw_memory, s.rollout_summary, s.generated_at, s.source_updated_at
+			 FROM threads t
+			 LEFT JOIN stage1_outputs s ON s.thread_id = t.id
+			 WHERE t.rollout_path = ?
+			 ORDER BY t.updated_at DESC
+			 LIMIT 1`,
+		)
+		.get(rolloutPath) as
+		| {
+				thread_id: string;
+				raw_memory: string | null;
+				rollout_summary: string | null;
+				generated_at: number | null;
+				source_updated_at: number | null;
+		  }
+		| undefined;
+	if (!row) return undefined;
+	return {
+		threadId: row.thread_id,
+		rawMemory: row.raw_memory ?? "",
+		summary: row.rollout_summary ?? "",
+		generatedAt: row.generated_at ?? 0,
+		sourceUpdatedAt: row.source_updated_at ?? 0,
+	};
+}
+
 export function markGlobalPhase2Succeeded(
 	db: Database,
 	params: { ownershipToken: string; newWatermark: number; nowSec: number; cwd: string },

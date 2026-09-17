@@ -8,7 +8,7 @@ export { StringEnum } from "@cornfield/ai";
 // Re-export TUI components for custom tool rendering
 export { Container, Markdown, Spacer, Text } from "@cornfield/tui";
 // Logging
-export { getAgentDir, logger, VERSION } from "@cornfield/utils";
+export { getClientDir, getDefaultAgentHome, logger, VERSION } from "@cornfield/utils";
 export * from "./config/keybindings";
 export * from "./config/model-registry";
 // Prompt templates

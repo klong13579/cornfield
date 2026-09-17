@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SessionManager } from "@cornfield/coding-agent/session/session-manager";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 
 /**
  * PI_SESSION_NAME fallback: the gateway injects the account id into its
@@ -14,23 +14,23 @@ import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
 describe("session name PI_SESSION_NAME fallback", () => {
 	let testAgentDir: string;
 	let cwd: string;
-	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
+	const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
 	const originalSessionName = process.env.PI_SESSION_NAME;
-	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+	const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(() => {
 		testAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-session-name-env-"));
 		cwd = path.join(testAgentDir, "cwd");
 		fs.mkdirSync(cwd, { recursive: true });
-		setAgentDir(testAgentDir);
+		setDefaultAgentHome(testAgentDir);
 	});
 
 	afterEach(() => {
-		if (originalAgentDir) {
-			setAgentDir(originalAgentDir);
+		if (originalAgentHome) {
+			setDefaultAgentHome(originalAgentHome);
 		} else {
-			setAgentDir(fallbackAgentDir);
-			delete process.env.CORNFIELD_AGENT_DIR;
+			setDefaultAgentHome(fallbackAgentHome);
+			delete process.env.CORNFIELD_CLIENT_DIR;
 		}
 		if (originalSessionName === undefined) {
 			delete process.env.PI_SESSION_NAME;

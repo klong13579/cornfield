@@ -254,6 +254,13 @@ export interface ExtensionContext {
 	hasUI: boolean;
 	/** Current working directory */
 	cwd: string;
+	/**
+	 * 配置/记忆的**项目根**（`Settings#getCwd()`）：config 的 project 层与记忆的 canonical 根都按它算。
+	 *
+	 * 与 `cwd`（会话在哪干活）是两件事：default Agent 在 serve 里两者不同（会话在工作中、配置根是它的家）。
+	 * 身份规则只在 `Settings` 里实现一处；扩展要用「记忆该跟谁走」时读这个，不要自己推一条。
+	 */
+	configRoot: string;
 	/** Session manager (read-only) */
 	sessionManager: ReadonlySessionManager;
 	/** Model registry for API key resolution */

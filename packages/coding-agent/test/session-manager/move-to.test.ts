@@ -9,7 +9,7 @@ import {
 	SessionManager,
 } from "@cornfield/coding-agent/session/session-manager";
 import { stripOuterDoubleQuotes } from "@cornfield/coding-agent/tools/path-utils";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 
 // -- helpers ----------------------------------------------------------------
 
@@ -65,12 +65,12 @@ describe("SessionManager.moveTo", () => {
 	let testAgentDir: string;
 	let cwdA: string;
 	let cwdB: string;
-	const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-	const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+	const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+	const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 	beforeEach(async () => {
 		testAgentDir = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-move-test-"));
-		setAgentDir(testAgentDir);
+		setDefaultAgentHome(testAgentDir);
 		cwdA = path.join(testAgentDir, "cwd-a");
 		cwdB = path.join(testAgentDir, "cwd-b");
 		fs.mkdirSync(cwdA, { recursive: true });
@@ -78,11 +78,11 @@ describe("SessionManager.moveTo", () => {
 	});
 
 	afterEach(async () => {
-		if (originalAgentDir) {
-			setAgentDir(originalAgentDir);
+		if (originalAgentHome) {
+			setDefaultAgentHome(originalAgentHome);
 		} else {
-			setAgentDir(fallbackAgentDir);
-			delete process.env.CORNFIELD_AGENT_DIR;
+			setDefaultAgentHome(fallbackAgentHome);
+			delete process.env.CORNFIELD_CLIENT_DIR;
 		}
 		await fsp.rm(testAgentDir, { recursive: true, force: true });
 	});
@@ -226,5 +226,24 @@ describe("SessionManager.moveTo", () => {
 		const newFile = session.getSessionFile()!;
 		const newArtifactDir = newFile.slice(0, -6); // strip .jsonl
 		expect(fs.existsSync(newArtifactDir)).toBe(true);
+	});
+
+	it("搬迁后不残留旧 Project 归属（那条记录是对旧 cwd 的断言）", async () => {
+		const session = SessionManager.create(cwdA);
+		await session.newSession({ project: { projectId: "repo", source: "session" } });
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+
+		expect(getHeader(await loadEntriesFromFile(session.getSessionFile()!))?.projectId).toBe("repo");
+
+		await session.moveTo(cwdB);
+
+		const header = getHeader(await loadEntriesFromFile(session.getSessionFile()!));
+		expect(header?.cwd).toBe(path.resolve(cwdB));
+		// 记录随 cwd 失效：留着就会让头声称一个它已经离开的 Project。
+		// 之后由 resolver 按新 cwd 重新推导，或在没人声明时诚实地回「没有」。
+		expect(header && "projectId" in header).toBe(false);
+		expect(header && "projectSource" in header).toBe(false);
 	});
 });

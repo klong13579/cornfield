@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Schedule 持久化 resolved agentId + 定时任务写面**（`src/scheduler/agent-binding.ts`, `src/scheduler/types.ts`, `src/scheduler/storage.ts`, `src/scheduler/file-store.ts`, `src/wire-endpoint.ts`）：`ScheduledTask` 落盘解析后的 Agent 身份（`agentId` + `agentDir`）——到点执行按自己存下来的身份走，不读 UI 当前选中；绑定三态 `registered` / `unregistered`（有 home 但认不出是哪个 Agent）/ `unbound` 分开上报，`accountId` 不再被 agentDir 冒充。`cron_create` / `cron_update` 的 agent 绑定由 agent-domain 解析（**声明的 agentId 不存在或 Agent home 不在 → `ok:false`，不写一条跑不起来的调度**；未声明绑定则允许创建、运行面拒执行）；`cron_update` / `cron_remove` 用 `taskId`（wire 的 `id` 是关联 id，不复用）。`get_cron_tasks` 行补 `agentId`/`agentDir`/`agentDisplayName`/`agentResolution`/`agentEnabled`/`agentError`/`projectIds`/`taskType`/`timeoutMs`/`retry`/`repeatCount`/`repeatCompleted`/`delivery`/`lastDeliveryError`/时间戳，`get_cron_logs` 补 `agentSessionPath`（执行到会话的权威链接）。
+
+### Changed
+
+- **执行路径不再静默换人做**（`src/scheduler/cron-service.ts`）：agent 任务的执行 home 改由绑定解析得出（只有 `agentId` 的任务也能找到家），且**无可用绑定 / Agent home 不在时不执行**——旧行为会带着空 cwd 退回冷启动子进程（在 gateway 自己的目录身份下干活）并报成功。拒绝时记 `failure` + 从行上可见原因（`docs/client/agent-hub.md` §1.6/§1.7）。shell 任务保持原行为（无身份可弄错）。
+
+- **改绑是“声明式”的：传什么就是什么**（`src/scheduler/agent-binding.ts`, `src/wire-endpoint.ts`, pi-wire `CronUpdateInput.unbind`）：写面用显式联合 `keep | unbind | bind` —— 不给字段=不动、`unbind:true`=清空（与 agentId/agentDir 互斥）、给了字段=整个绑定换成它。**只给 `agentDir` 时旧 `agentId` 被替换**（目录命中注册 Agent → 采用其身份；legacy 目录 → identity 清掉），不再隐式保留旧身份；`agentId` 与 `agentDir` 同时给且指向不同 Agent（或目录不是该 Agent 注册的家）→ `ok:false`，不静默采用目录。registry 读不出来 → 拒绝（不写未校验的绑定）。
+
+- **废弃 `accountId` 的退休路径定下：读仍兼容、写就清掉**（`src/wire-endpoint.ts`, `src/scheduler/agent-binding.ts`）：它还是执行 home 的回退来源，所以未被改写过的 legacy 行仍靠它执行（不做自动迁移）；但**现代改绑与 `unbind` 会一并清空 `accountId`** —— 否则这个回退会在下次 unbind 时“活回来”，即“清空”的行又回到上一个 Agent 的目录里跑。两个存储实现都会真的清（JSON 掉键 / SQLite 写 NULL），重启后依然无绑定。执行面同样作收敛：agent 任务无可用 home（或无绑定/Agent home 不在）时**记失败并不执行**（`src/scheduler/cron-service.ts`，含 run-path 测试）；shell 任务不受影响。
+
+### Fixed
+
+- **提示文案不再指向不存在的命令 / 旧产品名**（`src/doctor.ts`, `src/setup.ts`, `src/credential-resolver.ts`, `src/scheduler/cli-commands.ts`, `src/scheduler/cron-service.ts`）：`Run \`omp login\`` 指的是一个**没有的**子命令（登录是会话内斜杠命令 `/login`），`omp agent show/validate` 指的真命令是 `cornfield agent show/validate`。现在指向真入口、产品名统一为 `cornfield`。
+
+- **`TaskRowDto.accountId` 不再由 agentDir 顶替**（`src/wire-endpoint.ts`）：旧实现 `task.accountId ?? task.agentDir` 把目录当成账号上报，读的人无法区分两者；现在按原样透出，绑定事实一律走 agent 字段。
+
+- **`src/scheduler/file-store.ts` 的内联 import 类型清掉**（`import("./types").X` → 顶部 import）：仓库禁止内联 import，且这种写法让文件对工具链不可解析（无法做结构化编辑）。
+
 ## [1.1.4] - 2026-09-12
 
 ### Added

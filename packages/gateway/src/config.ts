@@ -28,6 +28,12 @@ const dingtalkAccountConfigSchema = z.object({
 	appSecret: z.string().min(1),
 	robotCode: z.string().optional(),
 	robotName: z.string().optional(),
+	/**
+	 * Registered Agent this account speaks for (`registry.json` key). Optional: an
+	 * account that only declares `agentDir` keeps resolving through the legacy path,
+	 * and an account that declares neither falls back to `accountId`.
+	 */
+	agentId: z.string().min(1).optional(),
 	agentDir: z.string().optional(),
 	deniedTools: z.array(z.string()).optional(),
 	/** Legacy fallback only — prefer `<agentDir>/.cornfield/config.yml`. */

@@ -20,6 +20,14 @@ export interface SessionRecordSummary {
 	sessionFile?: string;
 	/** 会话打开时的工作目录（header.cwd；cli 会话 = cornfield 启动目录，agent 会话 = agentDir）。 */
 	cwd?: string;
+	/**
+	 * 会话**自己记下的**归属（会话头的 `projectId`，list_sessions 带出）。
+	 *
+	 * 缺省 = 这条会话没有记录过归属（旧会话 / 建的时候没指定）——**不是**「不属于任何 Project」，
+	 * 更不等于「它的 cwd 落不到任何 root 下」。要看目录属于哪个 Project 是另一个问题
+	 * （byFolder 那一路），不要拿这个字段去回答它，也不要用 cwd 反推一个出来。
+	 */
+	projectId?: string;
 	/** 会话来源（SessionSidebar 双源 tab 按此区分）。 */
 	source: SessionSource;
 }
@@ -72,6 +80,26 @@ export function recordStatusLabel(status: RecordStatus): string {
 		default:
 			return "未知";
 	}
+}
+
+/**
+ * 一条会话**自己记下的**归属怎么显示（会话头的 `projectId`）。
+ *
+ * 它回答的是「这条会话的 JSONL 里写的是什么」，**不**回答「它的 cwd 落在哪个 Project 下」
+ * （那是目录的问题），也**不**回答「这条连接当前的会话归属是什么」（那是 serve 的
+ * `list_projects.currentProjectId`，且它自带来源）。三个问题不许互相顶替。
+ *
+ * 没记过就说没记过：不拿「未归属」顶（那是一个尚未成立的断言），也不拿 cwd 反推一个。
+ * 注册表还没读到只显示 id —— id 是会话里的事实，名字只是好看。
+ */
+export function sessionProjectLabel(
+	session: Pick<SessionRecordSummary, "projectId">,
+	projects: readonly { projectId: string; name: string }[] | undefined,
+): string {
+	const projectId = session.projectId;
+	if (projectId === undefined) return "会话未记录归属";
+	const name = projects?.find(item => item.projectId === projectId)?.name;
+	return name === undefined ? projectId : `${name}（${projectId}）`;
 }
 
 /**

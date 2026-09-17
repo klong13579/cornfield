@@ -1,11 +1,15 @@
 /**
  * `cornfield agent <subcommand>` — manage agentDir workspaces.
  *
- * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
- *   - init <name>     create a new agentDir
- *   - list            list agentDirs under ~/.cornfield/agents/
- *   - show <name>     print identity / tools / skills / cron summary
- *   - validate <dir>  check always-on files + runtime artifacts
+ * Subcommands (per `docs/gateway/agent-bridge.md`（Agent Design V1）§6.2):
+ *   - init <name>           create a new agentDir
+ *   - list                  list agentDirs under ~/.cornfield/agents/
+ *   - show <name>           print identity / tools / skills / cron summary
+ *   - validate --dir <dir>  check always-on files + runtime artifacts
+ *   - register <name>       add an existing agentDir to the registry (--dir <path>)
+ *   - unregister <name>     drop it from the registry (--delete-files also rm -rf)
+ *   - reconcile             re-scan the default location, prune stale entries
+ *   - migrate-default-home  move default's own state into its own home
  *
  * The heavy lifting lives in `../cli/agent-cli.ts` so each handler can be
  * unit-tested without going through the Command parser.
@@ -15,6 +19,7 @@ import * as path from "node:path";
 import { Args, Command, Flags, renderCommandHelp, writeStdout } from "@cornfield/utils/cli";
 import {
 	renderList,
+	renderMigrateDefaultHome,
 	renderReconcile,
 	renderRegister,
 	renderShow,
@@ -22,6 +27,7 @@ import {
 	renderValidate,
 	runAgentInit,
 	runAgentList,
+	runAgentMigrateDefaultHome,
 	runAgentReconcile,
 	runAgentRegister,
 	runAgentShow,
@@ -30,7 +36,17 @@ import {
 } from "../cli/agent-cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["init", "list", "show", "validate", "register", "unregister", "reconcile", "help"];
+const ACTIONS = [
+	"init",
+	"list",
+	"show",
+	"validate",
+	"register",
+	"unregister",
+	"reconcile",
+	"migrate-default-home",
+	"help",
+];
 
 export default class Agent extends Command {
 	static description =
@@ -62,11 +78,19 @@ export default class Agent extends Command {
 		}),
 		template: Flags.string({ description: "Template name (init). Only `default` is supported." }),
 		mission: Flags.string({ description: "Path to a custom mission.md (init)" }),
+		root: Flags.string({
+			description:
+				"Extra read/write root to declare on the agentDir (init; repeatable). Must be an existing directory.",
+			multiple: true,
+		}),
 		force: Flags.boolean({ description: "Allow overwriting an existing agentDir (init)" }),
 		fix: Flags.boolean({ description: "Auto-repair MECE violations (validate)" }),
 		semantic: Flags.boolean({ description: "Run LLM semantic audit (validate)" }),
 
 		deleteFiles: Flags.boolean({ description: "Also rm -rf the agentDir on disk (unregister). Off by default." }),
+		dryRun: Flags.boolean({
+			description: "Report what would move without touching the filesystem (migrate-default-home)",
+		}),
 		json: Flags.boolean({ description: "Output JSON" }),
 	};
 
@@ -76,6 +100,7 @@ export default class Agent extends Command {
 		"  cornfield agent init hr-bot                         Create ~/.cornfield/agents/hr-bot/ with default template",
 		"  cornfield agent init hr-bot --dir /opt/agents       Custom parent directory",
 		"  cornfield agent init hr-bot --mission ./mission.md  Seed from existing mission.md",
+		"  cornfield agent init hr-bot --root /srv/shared        Declare an extra read/write root (repeatable)",
 		"  cornfield agent init hr-bot --template default      Explicit template (default only, for now)",
 		"",
 		"  ======== 查看 ========",
@@ -131,7 +156,7 @@ export default class Agent extends Command {
 			case "init": {
 				if (!name) {
 					console.error(
-						"Usage: cornfield agent init <name> [--dir <path>] [--template default] [--mission <file>]",
+						"Usage: cornfield agent init <name> [--dir <path>] [--template default] [--mission <file>] [--root <path>]...",
 					);
 					process.exitCode = 1;
 					return;
@@ -143,6 +168,7 @@ export default class Agent extends Command {
 					mission: flags.mission as string | undefined,
 					force: flags.force as boolean | undefined,
 					json: flags.json as boolean | undefined,
+					roots: flags.root as string[] | undefined,
 				});
 				if (flags.json) {
 					writeStdout(JSON.stringify(result, null, 2));
@@ -154,6 +180,7 @@ export default class Agent extends Command {
 						: `✓ AgentDir exists at ${result.agentDir} (additive update — existing files preserved)`,
 				);
 				if (result.created) writeStdout(`  ${result.filesWritten} content files written`);
+				if (result.attachedRoots?.length) writeStdout(`  Extra roots: ${result.attachedRoots.join(", ")}`);
 				writeStdout(
 					`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`cornfield agent show ${name}\``,
 				);
@@ -224,6 +251,16 @@ export default class Agent extends Command {
 			case "reconcile": {
 				const result = await runAgentReconcile({ json: flags.json as boolean | undefined });
 				writeStdout(renderReconcile(result, Boolean(flags.json)));
+				return;
+			}
+			case "migrate-default-home": {
+				const result = await runAgentMigrateDefaultHome({
+					dryRun: flags.dryRun as boolean | undefined,
+					json: flags.json as boolean | undefined,
+				});
+				console.log(renderMigrateDefaultHome(result, Boolean(flags.json)));
+				const failed = result.entries.filter(entry => entry.status === "failed");
+				process.exitCode = failed.length > 0 ? 1 : 0;
 				return;
 			}
 			default:

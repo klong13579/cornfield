@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { setAgentDir, setConfigRootDir } from "@cornfield/utils";
+import { setConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 import type { ToolSession } from ".";
 import { IdentityTool } from "./identity";
 
 /**
  * Isolation: `setConfigRootDir(tempDir)` repoints `getConfigRootDir()` (where user.md lives)
- * at a per-test temp directory; `setAgentDir` is also redirected for any agentDir access.
+ * at a per-test temp directory; `setDefaultAgentHome` is also redirected for any agentDir access.
  * Restored in afterEach. No long-lived HOME / env mutation leaks across files.
  */
 let tmpDir: string;
-let originalAgentDir: string;
+let originalAgentHome: string;
 let originalEnv: string | undefined;
 
 function makeTool(): IdentityTool {
@@ -22,19 +22,19 @@ function makeTool(): IdentityTool {
 
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "identity-test-"));
-	originalAgentDir = (await import("@cornfield/utils")).getAgentDir();
-	originalEnv = process.env.CORNFIELD_AGENT_DIR;
+	originalAgentHome = (await import("@cornfield/utils")).getDefaultAgentHome();
+	originalEnv = process.env.CORNFIELD_CLIENT_DIR;
 
 	setConfigRootDir(tmpDir);
-	setAgentDir(tmpDir);
+	setDefaultAgentHome(tmpDir);
 });
 
 afterEach(async () => {
-	setAgentDir(originalAgentDir);
+	setDefaultAgentHome(originalAgentHome);
 	if (originalEnv === undefined) {
-		delete process.env.CORNFIELD_AGENT_DIR;
+		delete process.env.CORNFIELD_CLIENT_DIR;
 	} else {
-		process.env.CORNFIELD_AGENT_DIR = originalEnv;
+		process.env.CORNFIELD_CLIENT_DIR = originalEnv;
 	}
 	setConfigRootDir(undefined);
 	await fs.rm(tmpDir, { recursive: true, force: true });

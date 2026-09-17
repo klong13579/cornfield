@@ -57,7 +57,9 @@ export function resolveCredentialEnvVars(): Record<string, string> {
 	}
 
 	if (missing.length > 0) {
-		logger.warn("Credentials not found in agent.db; use cornfield login or ensure env var is set", { missing });
+		logger.warn("Credentials not found in agent.db; run `/login` in a cornfield session or ensure env var is set", {
+			missing,
+		});
 	}
 
 	return envVars;

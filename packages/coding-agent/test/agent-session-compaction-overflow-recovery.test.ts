@@ -98,6 +98,8 @@ describe("AgentSession overflow recovery (gateway-swallowed errors)", () => {
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			// 配置/记忆的项目根：测试里与 cwd 相同。
+			tempDir.path(),
 		);
 
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");

@@ -14,7 +14,7 @@ import type {
 import { getTerminalId } from "@cornfield/tui";
 import {
 	getBlobsDir,
-	getAgentDir as getDefaultAgentDir,
+	getDefaultAgentHome,
 	getProjectDir,
 	getSessionsDir,
 	getTerminalSessionsDir,
@@ -26,6 +26,8 @@ import {
 	Snowflake,
 	toError,
 } from "@cornfield/utils";
+import type { DefaultAgentSource, ResolvedAgentRef } from "../agent-domain/default-agent";
+import type { AgentId, ProjectId, ProjectSource, ResolvedProjectRef } from "../agent-domain/types";
 import { ArtifactManager } from "./artifacts";
 import {
 	type BlobPutResult,
@@ -63,12 +65,40 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	/**
+	 * Resolved Agent that serves this session (WP4, §10), fixed at creation.
+	 *
+	 * Additive to the v3 header: a session written before agent pinning (or by a
+	 * non-interactive writer that never resolved one) simply has no value here.
+	 * Readers must never substitute a UI selection for a missing value — resolve
+	 * explicitly through `../session/session-agent` instead.
+	 */
+	agentId?: AgentId;
+	/** Which scope named `agentId`. Persisted with it so provenance survives the process. */
+	agentSource?: DefaultAgentSource;
+	/**
+	 * Project this session works on, resolved by the caller and fixed at creation — recorded under
+	 * the same rule as `agentId` above.
+	 *
+	 * Absence means the session recorded no Project, which is *not* the same as belonging to the
+	 * default one: readers resolve through `./session-workspace`, and nothing infers a Project here.
+	 */
+	projectId?: ProjectId;
+	/** Which scope named `projectId`. Persisted with it so provenance survives the process. */
+	projectSource?: ProjectSource;
 }
 
 export interface NewSessionOptions {
 	parentSession?: string;
 	/** Skip flushing the current session and delete it instead of saving. */
 	drop?: boolean;
+	/** Resolved Agent to record in the new header. Absent = not pinned (see `SessionHeader.agentId`). */
+	agent?: ResolvedAgentRef;
+	/**
+	 * Resolved Project to record in the new header (`./session-workspace` produces it). Absent = the
+	 * session records no Project — not "the default Project".
+	 */
+	project?: ResolvedProjectRef;
 }
 
 export interface SessionEntryBase {
@@ -1694,8 +1724,8 @@ export class SessionManager {
 	}
 
 	/** Initialize with a new session (used by factory methods) */
-	#initNewSession(): void {
-		this.#newSessionSync();
+	#initNewSession(options?: NewSessionOptions): void {
+		this.#newSessionSync(options);
 	}
 
 	/** Switch to a different session file (used for resume and branching) */
@@ -1794,6 +1824,19 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: oldSessionId,
 		};
+		// A fork stays in the source session's Agent — the fork continues the same work,
+		// so its Agent is carried over rather than re-resolved.
+		if (oldHeader?.agentId) {
+			newHeader.agentId = oldHeader.agentId;
+			newHeader.agentSource = oldHeader.agentSource;
+		}
+		// The recorded Project travels with it for the same reason, and only because this fork keeps
+		// the cwd: the binding asserted a Project for *that* directory, and the directory has not
+		// changed. A fork that does move (`forkFrom`, whose cwd is the caller's) must not inherit it.
+		if (oldHeader?.projectId) {
+			newHeader.projectId = oldHeader.projectId;
+			newHeader.projectSource = oldHeader.projectSource;
+		}
 		this.#sessionName = newHeader.title;
 		this.#titleSource = newHeader.titleSource;
 
@@ -1886,6 +1929,12 @@ export class SessionManager {
 		const header = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
 		if (header) {
 			header.cwd = resolvedCwd;
+			// The recorded Project was an assertion about *that* cwd, so it does not survive the move:
+			// keeping it would make the header claim a Project the session has just left. Dropping the
+			// pair hands the question back to `./session-workspace`, which answers from the new cwd —
+			// or honestly says nothing named one.
+			delete header.projectId;
+			delete header.projectSource;
 		}
 
 		// Rewrite the session file at its new location with updated header.
@@ -1920,6 +1969,18 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
 		};
+		// Resolved by the caller (never derived here): the store records the Agent, it does
+		// not decide it (§10). Absent means "not pinned", not "no Agent".
+		if (options?.agent) {
+			header.agentId = options.agent.agentId;
+			header.agentSource = options.agent.source;
+		}
+		// Same rule for the Project binding: `./session-workspace` resolved it, this store only
+		// records it — including the provenance, so a reader never has to re-derive it.
+		if (options?.project) {
+			header.projectId = options.project.projectId;
+			header.projectSource = options.project.source;
+		}
 		this.#fileEntries = [header];
 		this.#byId.clear();
 		this.#labelsById.clear();
@@ -2247,12 +2308,59 @@ export class SessionManager {
 			header.titleSource = source;
 		}
 
-		// Update the session file header with the title (if already flushed)
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Record the resolved Agent on an existing header (WP4).
+	 *
+	 * Used when a session was not created through a resolving path — resumed from disk, or
+	 * created by a caller that had no resolution to pass (`--session-dir`). Writing it back
+	 * makes the resolution stick: the session and its forks stop depending on a re-resolution,
+	 * and a later process reads the recorded Agent instead of guessing (§10).
+	 *
+	 * A header that already records an Agent is left untouched: a session's Agent is history,
+	 * not a value to be re-decided. Returns true when the header changed.
+	 */
+	async setResolvedAgent(ref: ResolvedAgentRef): Promise<boolean> {
+		const header = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		if (!header || header.agentId) return false;
+		header.agentId = ref.agentId;
+		header.agentSource = ref.source;
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Record the resolved Project binding on an existing header — the Project counterpart of
+	 * {@link setResolvedAgent}, used the same way: a session that was not created through a
+	 * resolving path (resumed from disk, or assembled by a caller that had no binding to pass) gets
+	 * the resolution written back, so it and its forks stop depending on a re-resolution.
+	 *
+	 * A header that already records a Project is left untouched: the binding is history, not a value
+	 * to be re-decided. (A header whose binding has gone stale because the session *moved* loses it
+	 * in `moveTo`, which is a different operation: there the record became false.)
+	 * Returns true when the header changed.
+	 */
+	async setResolvedProject(ref: ResolvedProjectRef): Promise<boolean> {
+		const header = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		if (!header || header.projectId) return false;
+		header.projectId = ref.projectId;
+		header.projectSource = ref.source;
+		await this.#flushHeaderIfOnDisk();
+		return true;
+	}
+
+	/**
+	 * Rewrite the session file so the in-memory header reaches disk. No-op when the file was
+	 * never written (lazy persistence): the updated header then ships with the first flush.
+	 */
+	async #flushHeaderIfOnDisk(): Promise<void> {
 		const sessionFile = this.#sessionFile;
 		if (this.persist && sessionFile && this.storage.existsSync(sessionFile)) {
 			await this.#rewriteFile();
 		}
-		return true;
 	}
 
 	_persist(entry: SessionEntry): void {
@@ -2798,6 +2906,19 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: this.persist ? previousSessionFile : undefined,
 		};
+		// Same cwd, same session lineage: what this session recorded is still true for the branch, so it
+		// travels with it (as in `fork`). That includes the Agent — the session's Agent is history, not
+		// a value re-decided per run (WP4) — and the Project binding. Neither is re-resolved here, and
+		// a source header that recorded neither leaves both absent.
+		const sourceHeader = this.#fileEntries.find(e => e.type === "session") as SessionHeader | undefined;
+		if (sourceHeader?.agentId) {
+			header.agentId = sourceHeader.agentId;
+			header.agentSource = sourceHeader.agentSource;
+		}
+		if (sourceHeader?.projectId) {
+			header.projectId = sourceHeader.projectId;
+			header.projectSource = sourceHeader.projectSource;
+		}
 
 		// Collect labels for entries in the path
 		const pathEntryIds = new Set(pathWithoutLabels.map(e => e.id));
@@ -2877,11 +2998,18 @@ export class SessionManager {
 	 * Create a new session.
 	 * @param cwd Working directory (stored in session header)
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.cornfield/agent/sessions/<encoded-cwd>/).
+	 * @param agent Agent resolved for this session by the caller (see `../session/session-agent`).
+	 *              Omitted when the caller did not resolve one; the header then carries none.
 	 */
-	static create(cwd: string, sessionDir?: string, storage: SessionStorage = new FileSessionStorage()): SessionManager {
+	static create(
+		cwd: string,
+		sessionDir?: string,
+		storage: SessionStorage = new FileSessionStorage(),
+		agent?: ResolvedAgentRef,
+	): SessionManager {
 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
 		const manager = new SessionManager(cwd, dir, true, storage);
-		manager.#initNewSession();
+		manager.#initNewSession(agent ? { agent } : undefined);
 		return manager;
 	}
 
@@ -2906,6 +3034,14 @@ export class SessionManager {
 		const newHeader = manager.#fileEntries[0] as SessionHeader;
 		newHeader.title = sourceHeader?.title;
 		newHeader.titleSource = sourceHeader?.titleSource;
+		// Same as the in-place fork: the forked session belongs to the source's Agent.
+		if (sourceHeader?.agentId) {
+			newHeader.agentId = sourceHeader.agentId;
+			newHeader.agentSource = sourceHeader.agentSource;
+		}
+		// The source's Project is deliberately NOT copied: this fork's cwd is the caller's, so the
+		// binding the source asserted about its own directory says nothing about this one.
+		// `./session-workspace` answers for this cwd, or reports that nothing named one.
 		manager.#fileEntries = [newHeader, ...historyEntries];
 		manager.#sessionName = newHeader.title;
 		manager.#titleSource = newHeader.titleSource;
@@ -2992,7 +3128,7 @@ export class SessionManager {
 	 * List all sessions across all project directories.
 	 */
 	static async listAll(storage: SessionStorage = new FileSessionStorage()): Promise<SessionInfo[]> {
-		const sessionsRoot = path.join(getDefaultAgentDir(), "sessions");
+		const sessionsRoot = getSessionsDir(getDefaultAgentHome());
 		try {
 			const files: string[] = [];
 			// Each project is a cwd-encoded subdirectory; sessions live under

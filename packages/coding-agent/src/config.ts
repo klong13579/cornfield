@@ -1,7 +1,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir, getConfigAgentDirName, getProjectDir, isEnoent, logger } from "@cornfield/utils";
+import {
+	CONFIG_DIR_NAME,
+	getClientDir,
+	getConfigClientDirName,
+	getProjectDir,
+	isEnoent,
+	logger,
+} from "@cornfield/utils";
 import type { TSchema } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
@@ -9,7 +16,7 @@ import { JSONC, YAML } from "bun";
 import { expandTilde } from "./tools/path-utils";
 
 const priorityList = [
-	{ dir: CONFIG_DIR_NAME, globalAgentDir: getConfigAgentDirName },
+	{ dir: CONFIG_DIR_NAME, globalClientDir: getConfigClientDirName },
 	{ dir: ".claude" },
 	{ dir: ".codex" },
 	{ dir: ".gemini" },
@@ -145,7 +152,7 @@ export class ConfigFile<T> implements IConfigFile<T> {
 	constructor(
 		readonly id: string,
 		readonly schema: TSchema,
-		configPath: string = path.join(getAgentDir(), `${id}.yml`),
+		configPath: string = path.join(getClientDir(), `${id}.yml`),
 	) {
 		this.#basePath = configPath;
 		if (configPath.endsWith(".yml")) {
@@ -247,11 +254,11 @@ export class ConfigFile<T> implements IConfigFile<T> {
 
 /**
  * Config directory bases in priority order (highest first).
- * User-level: ~/.cornfield/agent, ~/.claude, ~/.codex, ~/.gemini
+ * User-level: ~/.cornfield/agent (the client dir), ~/.claude, ~/.codex, ~/.gemini
  * Project-level: .cornfield, .claude, .codex, .gemini
  */
-const USER_CONFIG_BASES = priorityList.map(({ dir, globalAgentDir }) => ({
-	base: () => path.join(os.homedir(), globalAgentDir ? globalAgentDir() : dir),
+const USER_CONFIG_BASES = priorityList.map(({ dir, globalClientDir }) => ({
+	base: () => path.join(os.homedir(), globalClientDir ? globalClientDir() : dir),
 	name: dir,
 }));
 

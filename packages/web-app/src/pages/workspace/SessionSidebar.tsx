@@ -1,20 +1,25 @@
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, Star } from "lucide-react";
+import { List, Network, PanelLeftClose, PanelLeftOpen, Plus, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionRecordSummary } from "../../lib/records";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
+import { SessionTree } from "./SessionTree";
 
 /**
  * 会话侧栏（S3，FR-1 会话工作区）—— 300px 会话列表：
  * - 新会话按钮 + 搜索过滤
- * - 双源 tab：WebUI 会话（source=agent，按 agent 分组）/ CLI 会话（source=cli，按项目目录分组）
+ * - 双源 tab：WebUI 会话（source=agent，按 agent 分组）/ CLI 会话（source=cli，按会话记下的归属分组）
  * - 会话按 agent 分组（session.agent → agent 显示名映射）
  * - pin 收藏（localStorage 本地持久化，组内置顶）
  *
  * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引，
  * 按 source 字段分源）。无 mock——任一源无数据不伪造，显示空态。
+ *
+ * 两个「新会话」钮（折叠薄栏与展开态）是**同一个动作**，且与顶栏表单走**同一条创建路径**
+ * （`SessionStore.newSession`：先等目标 Agent 切过去，再带显式目标建）。它们与表单的唯一区别是
+ * 不选项：直建就是「当前焦点 Agent 上建一个」——所以它们传空入参，由那条路径自己解析焦点。
  */
 
 type SourceId = "webui" | "cli";
@@ -37,34 +42,106 @@ function loadPinned(): Set<string> {
 }
 
 /** 当前会话展示项（不落 list_sessions，单独置顶）。 */
-interface CurrentRow {
+export interface CurrentRow {
 	id: string;
 	name: string;
 	agent: string;
 	current: true;
 }
 
-type Row = CurrentRow | SessionRecordSummary;
+/** 列表行：当前会话那一行，或 list_sessions 里的一条。 */
+export type SidebarRow = CurrentRow | SessionRecordSummary;
 
-function isCurrent(row: Row): row is CurrentRow {
+function isCurrent(row: SidebarRow): row is CurrentRow {
 	return "current" in row;
 }
 
 /**
- * CLI 会话的项目目录（从 sessionFile 的 <sessionsRoot>/<encoded-cwd>/by-date/ 布局提取）。
- * 解析失败回退 "CLI"——不伪造数据，仅作为分组键。
+ * 会话列表的分组键。两个轴各自是自己的东西，不合成一个字符串再拆：
+ *   - `cli` 源按**会话自己记下的**归属（`list_sessions[].projectId`）；
+ *   - `webui` 源按服务它的 Agent（那是另一个问题：谁干的）；
+ *   - 当前会话（不落 list_sessions 的那一行）单独置顶。
+ *
+ * CLI 源曾经拿 sessionFile 里的 encoded-cwd 当分组键 —— 那是**按路径猜**归属：同一个目录下的
+ * 会话被合成一组，而它们各自声明过的 Project 可能不同（也可能根本没声明过）。权威在会话记录里，
+ * 不在文件路径里。没记过归属的落到一个**明说出来的**桶里，不拿目录名冒充一个 Project。
  */
-function cliFolderOf(row: Row): string {
-	if (!("sessionFile" in row) || !row.sessionFile) return "CLI";
-	const segments = row.sessionFile.replaceAll("\\", "/").split("/");
-	const idx = segments.lastIndexOf("sessions");
-	const enc = idx >= 0 && idx + 1 < segments.length ? segments[idx + 1] : undefined;
-	if (!enc) return "CLI";
-	try {
-		return decodeURIComponent(enc);
-	} catch {
-		return enc;
+type SessionGroupKey =
+	| { kind: "current" }
+	| { kind: "unrecorded" }
+	| { kind: "project"; projectId: string }
+	| { kind: "agent"; agent: string };
+
+function groupKeyOf(row: SidebarRow, source: SourceId): SessionGroupKey {
+	if (isCurrent(row)) return { kind: "current" };
+	if (source === "cli") {
+		const projectId = "projectId" in row ? row.projectId : undefined;
+		return projectId === undefined ? { kind: "unrecorded" } : { kind: "project", projectId };
 	}
+	return { kind: "agent", agent: row.agent };
+}
+
+/** Map 用的稳定键：不同轴上的同一个 id 不会撞（`project:x` ≠ `agent:x`）。 */
+function groupIdOf(key: SessionGroupKey): string {
+	switch (key.kind) {
+		case "project":
+			return `project:${key.projectId}`;
+		case "agent":
+			return `agent:${key.agent}`;
+		default:
+			return key.kind;
+	}
+}
+
+export interface SessionGroup {
+	/** Map 用的稳定键（`project:x` / `agent:x` / `current` / `unrecorded`）。 */
+	key: string;
+	/** 组头的人读标签。 */
+	label: string;
+	rows: SidebarRow[];
+}
+
+/**
+ * 分组（纯函数：无 React、无 store）：行的顺序就是组的顺序 —— Map 保留插入顺序，
+ * 而行已经按「pin 置顶 → startedAt 倒序」排过，分组不该把它重排一遍。
+ */
+export function groupSessions(
+	rows: readonly SidebarRow[],
+	options: {
+		source: SourceId;
+		/** Agent id/name → 显示名（webui 源的组头用）。 */
+		agentLabel: (agent: string) => string;
+		/** 已声明的 Project（只用于把 projectId 显示成名字）；缺省 = 注册表未读到。 */
+		projects?: readonly { projectId: string; name: string }[];
+	},
+): SessionGroup[] {
+	/**
+	 * 分组键 → 人读标签。
+	 *
+	 * Project 名字取自注册表；注册表没读到 / 里边没有这个 id 就显示 id —— id 是会话里记下的事实，
+	 * 名字只是好看。没记过归属的聚到「未记录归属」，不拿目录名冒充一个 Project。
+	 */
+	const labelOf = (key: SessionGroupKey): string => {
+		switch (key.kind) {
+			case "current":
+				return "当前会话";
+			case "unrecorded":
+				return "未记录归属";
+			case "project":
+				return options.projects?.find(project => project.projectId === key.projectId)?.name ?? key.projectId;
+			case "agent":
+				return options.agentLabel(key.agent);
+		}
+	};
+	const map = new Map<string, SessionGroup>();
+	for (const row of rows) {
+		const key = groupKeyOf(row, options.source);
+		const id = groupIdOf(key);
+		const bucket = map.get(id);
+		if (bucket) bucket.rows.push(row);
+		else map.set(id, { key: id, label: labelOf(key), rows: [row] });
+	}
+	return [...map.values()];
 }
 
 export function SessionSidebar(): React.JSX.Element {
@@ -75,6 +152,7 @@ export function SessionSidebar(): React.JSX.Element {
 	// 折叠只在桌面静态形态生效；移动抽屉（<lg）恒为完整 300px 形态。
 	const collapsed = ui.sessionSidebarCollapsed && isLg;
 	const [source, setSource] = useState<SourceId>("webui");
+	const [treeView, setTreeView] = useState(false);
 	const [query, setQuery] = useState("");
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
 	const [pinned, setPinned] = useState<Set<string>>(loadPinned);
@@ -111,7 +189,7 @@ export function SessionSidebar(): React.JSX.Element {
 
 	const rows = useMemo(() => {
 		// 当前会话（attached）只在 WebUI 源展示
-		const current: Row[] =
+		const current: SidebarRow[] =
 			source === "webui" && view.sessionId
 				? [{ id: view.sessionId, name: view.sessionName ?? "当前会话", agent: "attached", current: true }]
 				: [];
@@ -131,20 +209,11 @@ export function SessionSidebar(): React.JSX.Element {
 		return [...current.filter(c => !q || c.name.toLowerCase().includes(q)), ...sorted];
 	}, [source, sessions, view.sessionId, view.sessionName, query, pinned]);
 
-	// 按 agent 分组（当前会话单独置顶组）；CLI 源按项目目录（sessionFile 首段）分组
-	const groups = useMemo(() => {
-		const order: string[] = [];
-		const map = new Map<string, Row[]>();
-		for (const row of rows) {
-			const key = isCurrent(row) ? "当前会话" : source === "cli" ? cliFolderOf(row) : agentLabel(row.agent);
-			if (!map.has(key)) {
-				map.set(key, []);
-				order.push(key);
-			}
-			map.get(key)?.push(row);
-		}
-		return order.map(k => ({ workspace: k, rows: map.get(k) ?? [] }));
-	}, [rows, agentLabel, source]);
+	// 按 agent 分组（webui 源：谁干的）；CLI 源按会话**记下的归属**分组（不再猜路径）
+	const groups = useMemo(
+		() => groupSessions(rows, { source, agentLabel, ...(view.projects ? { projects: view.projects } : {}) }),
+		[rows, agentLabel, source, view.projects],
+	);
 
 	return (
 		<aside
@@ -165,7 +234,7 @@ export function SessionSidebar(): React.JSX.Element {
 					<button
 						type="button"
 						className="nav-item"
-						onClick={() => store.newSession()}
+						onClick={() => void store.newSession()}
 						aria-label="新会话"
 						title="新会话"
 					>
@@ -181,81 +250,106 @@ export function SessionSidebar(): React.JSX.Element {
 						<button
 							type="button"
 							className="flex w-full items-center justify-center gap-2 rounded-md border border-hairline bg-accent px-3 py-2 text-[13px] font-semibold text-on-accent transition-colors hover:bg-accent-hover"
-							onClick={() => store.newSession()}
+							onClick={() => void store.newSession()}
 						>
 							<Plus size={14} strokeWidth={2} />
 							新会话
 						</button>
 					</div>
 
-					{/* 搜索 */}
-					<div className="px-3 pb-2">
-						<div className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-surface-2 px-2.5 focus-within:border-hairline-strong">
-							<Search size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
-							<input
-								value={query}
-								onChange={e => setQuery(e.target.value)}
-								placeholder="过滤会话…"
-								className="w-full border-none bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
-							/>
-						</div>
-					</div>
-
-					{/* 双源 tab */}
+					{/* 视图切换（§8：时间列表 / 会话树）*/}
 					<div className="flex gap-1 px-3 pb-2">
-						{SOURCES.map(([id, label]) => (
+						{[
+							{ id: false, label: "列表", Icon: List },
+							{ id: true, label: "树", Icon: Network },
+						].map(item => (
 							<button
-								key={id}
+								key={item.label}
 								type="button"
-								className={`rounded-full border px-3 py-1 text-[11.5px] transition-colors ${source === id ? "border-hairline-strong bg-accent-dim text-ink font-medium" : "border-hairline text-ink-subtle hover:text-ink"}`}
-								onClick={() => setSource(id)}
+								aria-pressed={treeView === item.id}
+								className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-[11.5px] transition-colors ${treeView === item.id ? "border-hairline-strong bg-accent-dim font-medium text-ink" : "border-hairline text-ink-subtle hover:text-ink"}`}
+								onClick={() => setTreeView(item.id)}
 							>
-								{label}
+								<item.Icon size={12} strokeWidth={1.5} />
+								{item.label}
 							</button>
 						))}
 					</div>
 
-					{view.historyLoading && (
-						<div className="mx-3 mb-1 rounded-md bg-surface-2 px-3 py-2 text-[12px] text-ink-subtle">
-							加载会话记录中…
-						</div>
-					)}
-					{view.historyError && (
-						<div className="mx-3 mb-1 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
-							{view.historyError}
-						</div>
-					)}
-					{/* 会话列表 */}
-					<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-						{groups.length === 0 && (
-							<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
-								{view.connected
-									? source === "cli"
-										? "暂无 CLI 会话——本地交互会话索引（list_sessions source=cli）"
-										: "暂无历史会话"
-									: "未连接——会话索引不可用"}
-							</div>
-						)}
-						{groups.map(g => (
-							<div key={g.workspace} className="mb-1">
-								<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-									<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
-									{g.workspace}
-									<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
-								</div>
-								{g.rows.map(row => (
-									<SessionRow
-										key={row.id}
-										row={row}
-										pinned={pinned.has(row.id)}
-										active={!isCurrent(row) && row.id === view.sessionId}
-										onTogglePin={() => togglePin(row.id)}
-										onClick={isCurrent(row) ? undefined : () => store.openHistorySession(row)}
+					{treeView ? (
+						<SessionTree />
+					) : (
+						<>
+							{/* 搜索 */}
+							<div className="px-3 pb-2">
+								<div className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-surface-2 px-2.5 focus-within:border-hairline-strong">
+									<Search size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
+									<input
+										value={query}
+										onChange={e => setQuery(e.target.value)}
+										placeholder="过滤会话…"
+										className="w-full border-none bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
 									/>
+								</div>
+							</div>
+
+							{/* 双源 tab */}
+							<div className="flex gap-1 px-3 pb-2">
+								{SOURCES.map(([id, label]) => (
+									<button
+										key={id}
+										type="button"
+										className={`rounded-full border px-3 py-1 text-[11.5px] transition-colors ${source === id ? "border-hairline-strong bg-accent-dim text-ink font-medium" : "border-hairline text-ink-subtle hover:text-ink"}`}
+										onClick={() => setSource(id)}
+									>
+										{label}
+									</button>
 								))}
 							</div>
-						))}
-					</div>
+
+							{view.historyLoading && (
+								<div className="mx-3 mb-1 rounded-md bg-surface-2 px-3 py-2 text-[12px] text-ink-subtle">
+									加载会话记录中…
+								</div>
+							)}
+							{view.historyError && (
+								<div className="mx-3 mb-1 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+									{view.historyError}
+								</div>
+							)}
+							{/* 会话列表 */}
+							<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+								{groups.length === 0 && (
+									<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
+										{view.connected
+											? source === "cli"
+												? "暂无 CLI 会话——本地交互会话索引（list_sessions source=cli）"
+												: "暂无历史会话"
+											: "未连接——会话索引不可用"}
+									</div>
+								)}
+								{groups.map(g => (
+									<div key={g.key} className="mb-1">
+										<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+											<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
+											{g.label}
+											<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
+										</div>
+										{g.rows.map(row => (
+											<SessionRow
+												key={row.id}
+												row={row}
+												pinned={pinned.has(row.id)}
+												active={!isCurrent(row) && row.id === view.sessionId}
+												onTogglePin={() => togglePin(row.id)}
+												onClick={isCurrent(row) ? undefined : () => store.openHistorySession(row)}
+											/>
+										))}
+									</div>
+								))}
+							</div>
+						</>
+					)}
 
 					{/* 底部状态 */}
 					<div className="flex shrink-0 items-center gap-2 border-t border-hairline px-3 py-2.5 text-[12px] text-ink-subtle">
@@ -293,7 +387,7 @@ function SessionRow({
 	onTogglePin,
 	onClick,
 }: {
-	row: Row;
+	row: SidebarRow;
 	pinned: boolean;
 	active: boolean;
 	onTogglePin: () => void;

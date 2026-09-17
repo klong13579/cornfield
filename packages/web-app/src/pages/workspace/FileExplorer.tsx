@@ -1,9 +1,23 @@
 import { useEffect, useState } from "react";
+import { getFileWorkflow } from "../../state/file-workflow-store";
 import { useSessionStore } from "../../state/session-store";
+import { FilePreviewPane } from "./FilePreviewPane";
 
 /**
- * 文件系统浏览器（fs_list/fs_read 懒加载目录树）——AgentDetailView 与工作台
+ * 文件系统浏览器（fs_list 懒加载目录树）——AgentDetailView 与工作台
  * 右栏 Files tab 共用（S5 复用，不重写 fs 目录树逻辑）。
+ *
+ * 右侧预览/编辑交给 FilePreviewPane：文本文件的打开状态（内容/草稿/归属）归 file-workflow
+ * store，本组件只负责「点了哪个节点」和目录树本身的展开收起。
+ *
+ * ## 两个身份，不要揉
+ *
+ *   `attachmentAddress` —— **wire 身份**（会话身份）：fs_list/fs_read/fs_write 的 `sessionId`
+ *     （服务端叫附件地址）。它回答「列哪一个工作根」；未绑 Project 的会话地址就是 Agent 名。
+ *   `agentId` —— **展示/归属 Agent**：它回答「这些文件是谁的」，给打开记录的归属与范围用。
+ *
+ * 拿 Agent 名当 wire 身份指向的是「那个 Agent 自己根上的附件」——绑了 Project 的会话因此
+ * 会列到另一个根（本次修的缺陷）。
  *
  * variant:
  * - "wide"（默认）：详情页左右双栏（目录树 | 文件预览）
@@ -19,38 +33,43 @@ interface FsTreeNode {
 	loaded?: boolean;
 }
 
-const FS_MAX_READ_HINT = ">128KB 仅显示前段";
-
 function fmtSize(n: number): string {
 	if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}M`;
 	if (n >= 1024) return `${(n / 1024).toFixed(0)}K`;
 	return String(n);
 }
 
-type SelectedFile =
-	| { path: string; kind: "text"; text: string; truncated: boolean }
-	| { path: string; kind: "image"; dataUrl: string };
+/** 图片预览（二进制，不进编辑器：它不是可编辑文本）。 */
+interface PreviewImage {
+	path: string;
+	dataUrl: string;
+}
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
 
 export function FileExplorer({
+	attachmentAddress,
 	agentId,
 	variant = "wide",
 }: {
+	/** wire 身份（会话身份）：fs_* 命令的 `sessionId`（附件地址）。 */
+	attachmentAddress: string;
+	/** 展示/归属 Agent：这些文件是谁的（打开记录的归属与范围锚点）。 */
 	agentId: string;
 	variant?: "wide" | "narrow";
 }): React.JSX.Element {
 	const store = useSessionStore();
 	const [root, setRoot] = useState<FsTreeNode | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [selected, setSelected] = useState<SelectedFile | null>(null);
+	const [image, setImage] = useState<PreviewImage | null>(null);
 
 	const loadDir = async (node: FsTreeNode): Promise<void> => {
 		try {
-			const { entries } = await store.fsList(agentId, node.path);
+			const { entries } = await store.fsList(attachmentAddress, node.path);
 			node.children = entries.map(e => ({ ...e, path: node.path ? `${node.path}/${e.name}` : e.name }));
 			node.loaded = true;
-			setRoot(prev => (prev ? { ...prev } : { ...node })); // 首载：root 落地
+			// 根节点加载（path 为空串）= 整棵树换人；子目录只是它自己的 children 变了。
+			setRoot(prev => (node.path === "" ? { ...node } : prev ? { ...prev } : prev));
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		}
@@ -59,11 +78,14 @@ export function FileExplorer({
 	const readFile = async (node: FsTreeNode): Promise<void> => {
 		try {
 			if (IMAGE_EXT.test(node.path)) {
-				const { dataUrl } = await store.fsReadImage(agentId, node.path);
-				setSelected({ path: node.path, kind: "image", dataUrl });
+				const { dataUrl } = await store.fsReadImage(attachmentAddress, node.path);
+				// 换到图片会把文本编辑器关掉：一个预览区只显示一件事，两份内容叠着就是两个真相
+				getFileWorkflow().close();
+				setImage({ path: node.path, dataUrl });
 			} else {
-				const result = await store.fsRead(agentId, node.path);
-				setSelected({ path: node.path, kind: "text", text: result.text, truncated: result.truncated });
+				setImage(null);
+				// 文本文件进编辑器（走 fs_read/fs_write 唯一的那条路；未保存修改由 store 挂起确认）
+				getFileWorkflow().requestOpen({ attachmentAddress, agentId, path: node.path });
 			}
 			setError(null);
 		} catch (err) {
@@ -71,9 +93,14 @@ export function FileExplorer({
 		}
 	};
 
+	// 换会话身份 = 换一个工作根：上一棵树的路径在新根下指的是另一些文件，必须整棵丢掉重载
+	// （留着它就是让上一个会话的目录树挂在新会话的文件面上）。
 	useEffect(() => {
+		setRoot(null);
+		setError(null);
+		setImage(null);
 		void loadDir({ name: "", type: "dir", size: 0, path: "" } as FsTreeNode);
-	}, [agentId]);
+	}, [attachmentAddress]);
 
 	const flatVisible = (node: FsTreeNode | null): FsTreeNode[] => {
 		if (!node) return [];
@@ -191,35 +218,7 @@ export function FileExplorer({
 		</div>
 	);
 
-	const preview = (
-		<div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-hairline bg-surface px-4 py-3">
-			{selected ? (
-				<>
-					<div className="mb-2 flex shrink-0 items-center gap-2">
-						<span className="truncate font-mono text-[12px] text-ink">{selected.path}</span>
-						{selected.kind === "text" && selected.truncated && (
-							<span className="badge fail">截断（{FS_MAX_READ_HINT}）</span>
-						)}
-					</div>
-					{selected.kind === "image" ? (
-						<div className="min-h-0 flex-1 overflow-auto">
-							<img
-								src={selected.dataUrl}
-								alt={selected.path}
-								className="block max-w-full rounded-md border border-hairline"
-							/>
-						</div>
-					) : (
-						<pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">
-							{selected.text}
-						</pre>
-					)}
-				</>
-			) : (
-				<div className="py-10 text-center text-[12px] text-ink-faint">点击左侧目录展开，点文件查看内容</div>
-			)}
-		</div>
-	);
+	const preview = <FilePreviewPane image={image} />;
 
 	if (variant === "narrow") {
 		return (

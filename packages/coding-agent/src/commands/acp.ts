@@ -47,7 +47,7 @@ export default class Acp extends Command {
 			const authStorage = await discoverAuthStorage();
 			const modelRegistry = new ModelRegistry(authStorage);
 			Bun.env.PI_NO_TITLE = "1";
-			await Settings.init({ cwd });
+			await Settings.init();
 			await modelRegistry.refresh("online-if-uncached");
 
 			const parsed = parseArgs(buildLaunchArgv(flags));

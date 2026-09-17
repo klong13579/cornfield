@@ -14,7 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
+import { getClientDir, isEnoent, logger } from "@cornfield/utils";
 import type {
 	DiagnosisReportListItemDto,
 	DiagnosisSummaryDto,
@@ -25,7 +25,7 @@ import { upsertDiagnosisReport } from "./diagnosis-aggregation";
 
 /** 诊断报告根目录 ~/.cornfield/agent/diagnosis-reports/ */
 function reportsDir(): string {
-	return path.join(getAgentDir(), "diagnosis-reports");
+	return path.join(getClientDir(), "diagnosis-reports");
 }
 
 /** 生成 reportId：<safeSessionId>_<YYYYMMDD-HHMMSS> */

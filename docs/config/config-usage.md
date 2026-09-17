@@ -136,8 +136,8 @@ Legacy migration still supported:
 
 The runtime settings model is layered:
 
-1. Global settings: `~/.cornfield/agent/config.yml`
-2. Project settings: discovered via settings capability (`settings.json` from providers)
+1. Global settings: `<agentDir>/config.yml` (for the default agent, `~/.cornfield/agent/config.yml`)
+2. Project settings: `<cwd>/.cornfield/config.yml` when that file exists, plus project-level settings capability items
 3. Runtime overrides: in-memory, non-persistent
 4. Schema defaults: from `SETTINGS_SCHEMA`
 
@@ -147,8 +147,9 @@ Effective read path:
 
 Write behavior:
 
-- `settings.set(...)` writes to the **global** layer (`config.yml`) and queues background save.
-- Project settings are read-only from capability discovery.
+- `settings.set(...)` always writes **this instance's** `config.yml` (global layer) and queues a background save — TUI / startup semantics.
+- Configuration that is read back (model routes `modelRoutes`, `defaultThinkingLevel`, disabled provider/model lists, the config board's tool switches via `set_config`) goes through `settings.setEffective(...)`: **the project layer when it exists, otherwise global**. That rule lives in exactly one place (`getEffectiveScope()`), so writers and readers cannot derive two different answers. Explicit `set_config` `scope` names a layer instead of using the rule; the response reports the layer the value actually landed in.
+- Project-layer saves are partial (only the keys this session changed are applied onto the current file), like the global save path.
 
 ## Migration behavior still active
 

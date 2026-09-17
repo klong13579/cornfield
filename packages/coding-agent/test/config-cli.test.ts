@@ -2,28 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
 import { runConfigCommand } from "../src/cli/config-cli";
 import { _resetSettingsForTest } from "../src/config/settings";
 
 let testAgentDir = "";
-const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+const originalAgentHome = process.env.CORNFIELD_CLIENT_DIR;
+const fallbackAgentHome = path.join(getConfigRootDir(), "agent");
 
 beforeEach(async () => {
 	_resetSettingsForTest();
 	testAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-config-cli-"));
-	setAgentDir(testAgentDir);
+	setDefaultAgentHome(testAgentDir);
 });
 
 afterEach(async () => {
 	vi.restoreAllMocks();
 	_resetSettingsForTest();
-	if (originalAgentDir) {
-		setAgentDir(originalAgentDir);
+	if (originalAgentHome) {
+		setDefaultAgentHome(originalAgentHome);
 	} else {
-		setAgentDir(fallbackAgentDir);
-		delete process.env.CORNFIELD_AGENT_DIR;
+		setDefaultAgentHome(fallbackAgentHome);
+		delete process.env.CORNFIELD_CLIENT_DIR;
 	}
 	await fs.rm(testAgentDir, { recursive: true, force: true });
 });

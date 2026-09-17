@@ -12,27 +12,3 @@
 .msg-actions:focus-within {
 	opacity: 1;
 }
-
-.mact {
-	width: 24px;
-	height: 24px;
-	border-radius: 5px;
-	display: grid;
-	place-items: center;
-	color: var(--color-ink-subtle);
-	background: none;
-	border: none;
-	cursor: pointer;
-	padding: 0;
-	transition:
-		background var(--ease),
-		color var(--ease);
-}
-.mact:hover:not(:disabled) {
-	color: var(--color-ink);
-	background: var(--color-surface-2);
-}
-.mact:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
-}

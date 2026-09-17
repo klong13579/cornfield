@@ -36,6 +36,14 @@ const TARGET_MODEL_ID = "claude-haiku-4-5-20251001";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
+
 function freePort(): Promise<number> {
 	return new Promise(resolve => {
 		const srv = net.createServer();
@@ -119,7 +127,13 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		],
 		{
 			cwd: isoHome,
-			env: { ...process.env, HOME: isoHome, PI_NO_TITLE: "1", CORNFIELD_AGENT_DIR: isoAgentDir },
+			env: {
+				...process.env,
+				HOME: isoHome,
+				PI_NO_TITLE: "1",
+				CORNFIELD_AGENT_DIR: isoAgentDir,
+				CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT,
+			},
 			stdio: ["ignore", serveLogFile.fd, serveLogFile.fd],
 		},
 	);
@@ -208,7 +222,18 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		// API Key 保存闭环（写在隔离副本上）：展开 narwal-plan 卡片 → 替换 → 保存 → 表单关闭
 		const planCard = page.locator("div.overflow-hidden.rounded-xl", { hasText: "narwal-plan" }).first();
 		await planCard.getByRole("button", { name: "管理" }).click();
-		await planCard.getByRole("button", { name: "替换" }).click();
+		// 这一栏的文案由「是否已有存凭据」决定：有 → 「替换」，无 → 「录入 API Key」。凭据来自真实库里被拷进来的
+		// agent.db，所以环境不对时（例：跑测试的 shell 里 HOME 被污染成临时目录 → 拷到的是空库）
+		// 它会把 4 分钟后的 locator 超时说清楚成一句前置依赖说明。
+		const replaceButton = planCard.getByRole("button", { name: "替换" });
+		if (!(await replaceButton.isVisible({ timeout: 3_000 }).catch(() => false))) {
+			throw new Error(
+				"narwal-plan 没有已存凭据（这一栏显示的是「录入 API Key」）。本 spec 需要开发机真实的 " +
+					"~/.cornfield/agent/agent.db 里有 narwal-plan 的 api_key，并拷贝进隔离 HOME；" +
+					"先确认 shell 的 HOME 是真实用户目录（不是被污染/临时覆盖的）。",
+			);
+		}
+		await replaceButton.click();
 		const keyInput = planCard.getByPlaceholder("API Key", { exact: true });
 		const keyConfirm = planCard.getByPlaceholder("再次输入确认");
 		await keyInput.fill("sk-e2e-closedloop-0123456789abcdef");
@@ -269,27 +294,33 @@ test("模型控制中心闭环：目录 / Provider / 运行配置", async ({ pag
 		expect(projectConfig).toContain("modelRoutes");
 		expect(projectConfig).toContain(TARGET_MODEL);
 
-		// 快捷隐藏（#05 补充）：模型选择区两步确认隐藏 provider → 写全局停用名单，选择器分组消失。
+		// 快捷隐藏（#05 补充）：模型选择区两步确认隐藏 provider → 写入**生效的那一层**，选择器分组消失。
 		// 放在最后：隐藏后该 provider 不再可用，不影响前面的目录/角色断言
 		const hiddenProvider = "alibaba-coding-plan";
 		await page.getByRole("button", { name: `隐藏 ${hiddenProvider}` }).click();
 		await page.getByRole("button", { name: `确认隐藏 ${hiddenProvider}？` }).click();
 		await expect(page.getByText(`已隐藏 provider「${hiddenProvider}」`)).toBeVisible({ timeout: 15_000 });
 		await expect(page.getByRole("button", { name: `隐藏 ${hiddenProvider}` })).toHaveCount(0);
-		// Settings 落盘是 100ms debounce 后台写，不能读后即断言——轮询直到写盘完成
-		const globalConfigPath = path.join(isoHome, ".cornfield", "agent", "config.yml");
+		// 落点跟随读侧优先级（F6）：serve cwd 里已经有项目级 `<cwd>/.cornfield/config.yml`（上面第 E 步写的），
+		// 所以停用名单落**项目层**，不是全局层——写进读侧不看的那一层就是「写进去、读不到」。
+		// Settings 落盘是 100ms debounce 后台写，不能读后即断言：轮询直到写盘完成。
+		const effectiveConfigPath = path.join(isoHome, ".cornfield", "config.yml");
 		await expect
 			.poll(
 				async () => {
 					try {
-						return await fsp.readFile(globalConfigPath, "utf8");
+						return await fsp.readFile(effectiveConfigPath, "utf8");
 					} catch {
 						return ""; // debounce 未落盘
 					}
 				},
 				{ timeout: 10_000 },
 			)
-			.toContain(hiddenProvider); // disabledProviders 已落盘全局配置
+			.toContain(hiddenProvider); // disabledProviders 已落盘生效层（项目级）
+		// 全局层一个字节都不该多出这条：一层写、一层读，不是两份。
+		const globalConfigPath = path.join(isoHome, ".cornfield", "agent", "config.yml");
+		const globalConfig = await fsp.readFile(globalConfigPath, "utf8").catch(() => "");
+		expect(globalConfig).not.toContain(hiddenProvider);
 
 		await page.screenshot({ path: "test-results/mcc-final.png", fullPage: true });
 	} catch (err) {

@@ -25,6 +25,14 @@ import { expect, test } from "@playwright/test";
 const APP_PORT = 4173;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
+
 // 种子会话：真实用户级会话（aborted + 35 个工具错误 → dim tool=fail，dimensionReports.tool 有行）
 const SEED_SESSION = path.join(
 	os.homedir(),
@@ -106,7 +114,14 @@ test("诊断大盘工具维度点击下钻 + 详情页展开", async ({ page }) 
 			"127.0.0.1",
 			"--no-extensions",
 		],
-		{ env: { ...process.env, PI_NO_TITLE: "1", CORNFIELD_AGENT_DIR: isoDir } },
+		{
+			env: {
+				...process.env,
+				PI_NO_TITLE: "1",
+				CORNFIELD_AGENT_DIR: isoDir,
+				CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT,
+			},
+		},
 	);
 	const preview = spawn(
 		"bun",

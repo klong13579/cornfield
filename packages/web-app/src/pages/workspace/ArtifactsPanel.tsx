@@ -9,15 +9,26 @@ import { useSession } from "../../state/use-session";
 /**
  * Artifacts 产物面板（工作台右栏 Artifacts tab，R-ARTIFACTS 接真数据）。
  *
- * 数据源：store.listArtifacts(agentId, sessionFile)——有 sessionFile 时按会话隔离视图
- * （只提当前会话的产物），缺省 agent 维度。
+ * 数据源：store.listArtifacts(attachmentAddress, sessionFile) —— 第一个入参是**会话身份**
+ * （`view.attachmentAddress`，焦点附件的地址），不是屏幕上那个 Agent 名：
+ * - 列表：wire 拿它 + `sessionFile` 解出那个会话的工作面（产物路径就是相对它报的）
+ * - 预览：/preview 的第一段也是它 —— 拿 Agent 名指过去，服务端解到的是该 Agent **未绑定**的
+ *   附件（另一个根），Project 根里的产物会 404
+ * - markdown/text：fs_read 同样按会话身份定向
  * 预览（点条目）：
- * - html → iframe（/preview 静态路由，serve 端 agentDir docroot）
+ * - html → iframe（/preview 静态路由，serve 端按那个附件的工作面当 docroot）
  * - image → img（同路由；比 fs_read_image dataUrl 支持更大文件）
  * - markdown → fs_read + Markdown 渲染
  * - text → fs_read + 纯文本
  *
- * agentId 未挂载（undefined）→ 空态提示；加载中/失败 → loading/error 态。
+ * ## 三种「没有」必须分开说（与右栏文件/改动两 tab 同一套）
+ *
+ *   未连接   —— 连不上 serve，清单读不到（同「未连接——文件系统不可用」「未连接——读不到工作区改动」）
+ *   未挂载   —— 连上了但会话身份还没到（附件地址空串）：还不知道该问谁
+ *   没有产物 —— 真读到了，这本账本里确实没有产物
+ *
+ * 前两种**都不是**「没有产物」：把「没问过」渲染成「一条都没有」，用户会据此以为 agent 什么都没写。
+ * 加载中/读失败另有 loading/error 两态。
  */
 
 type PreviewState =
@@ -28,13 +39,21 @@ type PreviewState =
 	| { kind: "markdown"; path: string; text: string; truncated: boolean }
 	| { kind: "error"; path: string; error: string };
 
-type ArtifactsStatus = "loading" | "error" | "ready";
-
-interface ArtifactsState {
-	status: ArtifactsStatus;
-	entries: ArtifactDto[];
-	error: string | null;
-}
+/**
+ * 产物清单的读取状态。
+ *
+ * 五种而不是三种：`list_artifacts` 之外还有两个**没有问过**的前提（未连接 / 会话身份未挂载），
+ * 它们既不是「没有产物」也不是「读不到」——各自有名字，「有没有问过」这件事因此不能靠
+ * 「清单是空的」反推（这正是上一版把未挂载渲染成「暂无产物」的形状）。
+ */
+type ArtifactsState =
+	/** 连不上 serve：清单读不到（不是「没有产物」）。 */
+	| { status: "disconnected" }
+	/** 连上了、会话身份还没挂载（附件地址空串）：还不知道该问谁。 */
+	| { status: "unmounted" }
+	| { status: "loading" }
+	| { status: "ready"; entries: ArtifactDto[] }
+	| { status: "error"; error: string };
 
 function fmtTime(ts: number): string {
 	return new Date(ts).toLocaleString("zh-CN", {
@@ -51,70 +70,85 @@ function fmtSize(n: number): string {
 	return String(n);
 }
 
+/**
+ * 读产物清单。
+ *
+ * 只有「连上了 **且** 会话身份已挂载」才发请求：另外两个前提（未连接 / 身份未挂载）在这里
+ * **不发请求、也不返回空清单**，而是各自给出自己的状态名（见 {@link ArtifactsState}）。
+ * `connected` 与 `attachmentAddress` 由调用方从**与右栏文件/改动两 tab 同一处**取
+ * （`view.connected` / `view.attachmentAddress`），三个 tab 因此说的是同一件事。
+ */
 function useArtifacts(
-	agentId: string | undefined,
+	connected: boolean,
+	attachmentAddress: string,
 	sessionFile: string | undefined,
 	isStreaming: boolean,
 ): ArtifactsState {
 	const store = useSessionStore();
-	const [state, setState] = useState<ArtifactsState>({ status: "loading", entries: [], error: null });
+	const [state, setState] = useState<ArtifactsState>({ status: "loading" });
 
 	useEffect(() => {
 		let cancelled = false;
-		if (!agentId) {
-			setState({ status: "ready", entries: [], error: null });
-			return;
-		}
-		setState(prev => ({ ...prev, status: "loading", error: null }));
+		if (!connected || attachmentAddress === "") return;
+		setState({ status: "loading" });
 		store
-			.listArtifacts(agentId, sessionFile)
+			.listArtifacts(attachmentAddress, sessionFile)
 			.then(({ artifacts }) => {
 				if (cancelled) return;
-				setState({ status: "ready", entries: artifacts, error: null });
+				setState({ status: "ready", entries: artifacts });
 			})
 			.catch((err: unknown) => {
 				if (cancelled) return;
-				setState({ status: "error", entries: [], error: err instanceof Error ? err.message : String(err) });
+				setState({ status: "error", error: err instanceof Error ? err.message : String(err) });
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [agentId, sessionFile, store, isStreaming]);
+	}, [connected, attachmentAddress, sessionFile, store, isStreaming]);
 
+	// 两个前提在**渲染时**判定（不是 effect 里补写状态）：连不上的那一帧就已经是「未连接」，
+	// 不会先闪一下「加载中」或「暂无产物」。
+	if (!connected) return { status: "disconnected" };
+	if (attachmentAddress === "") return { status: "unmounted" };
 	return state;
 }
 
 export function ArtifactsPanel({
-	agentId,
+	attachmentAddress,
 	sessionFile,
+	connected,
 }: {
-	agentId?: string;
+	/** **会话身份**（`view.attachmentAddress`）：list_artifacts / fs_read / /preview 的定向身份。 */
+	attachmentAddress: string;
 	sessionFile?: string;
+	/** 本连接是否连上 serve（与文件/改动两 tab 同一处取：`view.connected`）。
+	 * 未连接 ≠ 没有产物（见文件头「三种「没有」」）。 */
+	connected: boolean;
 }): React.JSX.Element {
 	const store = useSessionStore();
 	const view = useSession();
-	const { status, entries, error } = useArtifacts(agentId, sessionFile, view.isStreaming);
+	const state = useArtifacts(connected, attachmentAddress, sessionFile, view.isStreaming);
 	const [selected, setSelected] = useState<ArtifactDto | null>(null);
 	const [preview, setPreview] = useState<PreviewState | null>(null);
 	const [zoomed, setZoomed] = useState(false);
 
-	// 产物列表刷新/切换 agent/切换会话时清选择态
+	// 产物列表刷新/换会话身份时清选择态
 	useEffect(() => {
 		setSelected(null);
 		setPreview(null);
-	}, [agentId, sessionFile]);
+	}, [attachmentAddress, sessionFile]);
 
 	const openPreview = (entry: ArtifactDto): void => {
 		setSelected(entry);
 		if (entry.type === "html" || entry.type === "image") {
-			const url = agentId ? store.artifactPreviewUrl(agentId, entry.path) : "";
+			const url = attachmentAddress === "" ? "" : store.artifactPreviewUrl(attachmentAddress, entry.path);
 			setPreview({ kind: entry.type === "html" ? "iframe" : "image", path: entry.path, url });
 			return;
 		}
 		setPreview({ kind: "loading", path: entry.path });
-		if (!agentId) return;
+		if (attachmentAddress === "") return;
 		store
-			.fsRead(agentId, entry.path)
+			.fsRead(attachmentAddress, entry.path)
 			.then(({ text, truncated }) => {
 				setPreview({
 					kind: entry.type === "markdown" ? "markdown" : "text",
@@ -173,11 +207,27 @@ export function ArtifactsPanel({
 		<div className="flex h-full min-h-0 flex-col gap-3">
 			{/* 列表 */}
 			<div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-hairline bg-surface">
-				{status === "loading" && <div className="px-3 py-10 text-center text-[12px] text-ink-faint">加载中…</div>}
+				{state.status === "disconnected" && (
+					<div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+						<Files size={24} strokeWidth={1.25} className="text-ink-faint" />
+						<div className="text-[12px] text-ink-faint">未连接——读不到产物清单</div>
+						<div className="px-2 text-[11px] leading-relaxed text-ink-subtle">
+							连上 serve 后这里会列出 agent 生成的产物
+						</div>
+					</div>
+				)}
 
-				{status === "error" && <div className="px-3 py-2 text-[12px] text-danger">{error ?? "产物加载失败"}</div>}
+				{state.status === "unmounted" && (
+					<div className="py-10 text-center text-[12px] text-ink-faint">等待会话挂载…</div>
+				)}
 
-				{status === "ready" && entries.length === 0 && (
+				{state.status === "loading" && (
+					<div className="px-3 py-10 text-center text-[12px] text-ink-faint">加载中…</div>
+				)}
+
+				{state.status === "error" && <div className="px-3 py-2 text-[12px] text-danger">{state.error}</div>}
+
+				{state.status === "ready" && state.entries.length === 0 && (
 					<div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
 						<Files size={24} strokeWidth={1.25} className="text-ink-faint" />
 						<div className="text-[12px] text-ink-faint">暂无产物</div>
@@ -187,9 +237,9 @@ export function ArtifactsPanel({
 					</div>
 				)}
 
-				{status === "ready" && entries.length > 0 && (
+				{state.status === "ready" && state.entries.length > 0 && (
 					<ul className="divide-y divide-hairline">
-						{entries.map(entry => (
+						{state.entries.map(entry => (
 							<li key={entry.id}>
 								<button
 									type="button"

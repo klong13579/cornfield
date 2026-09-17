@@ -2,7 +2,7 @@
  * Session file path builder.
  *
  * Sessions are stored as `<agentDir>/sessions/cid_<safeConvId>.jsonl` per
- * `packages/coding-agent/docs/agent-design-v1.md` §2. The `cid_` prefix and the
+ * `docs/gateway/agent-bridge.md`（Agent Design V1）§2. The `cid_` prefix and the
  * safeConvId transform are kept stable for backwards-compatibility with
  * existing gateways and tools that parse the path.
  */

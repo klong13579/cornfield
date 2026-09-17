@@ -132,7 +132,8 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
   不阻塞子自身流程。
 
   **gateway 账号当子**:`~/.cornfield/gateway.json` 的账号配置加 `intercomParent`
-  (父的目标名或 stableId,通常是操作者 TUI 会话的 `/name` 或 `stableId`),该账号
+  (父的目标名或会话 id,通常是操作者 TUI 会话的 `/name` 或会话 id;父若用
+  `PI_INTERCOM_STABLE_ID` 钉了地址,填那个),该账号
   的 agent cornfield 启动时即注入 `PI_SUBAGENT_*` 元数据并注册为父的子——主会话同样
   `children` 可见、收到自动完成报告、可裁决其 `contact_supervisor` 升级。
 
@@ -158,8 +159,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
   "confirmSend": false,
   "inboundTrigger": "always",
   "inboundMode": "queue",
-  "replyHint": true,
-  "stableId": "optional-stable-session-id"
+  "replyHint": true
 }
 ```
 
@@ -170,9 +170,15 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 | `inboundTrigger` | `"always"` | `always`/`replies`/`never`:收消息是否自动触发模型 turn |
 | `inboundMode` | `"queue"` | `queue`/`interrupt`:忙时收消息的处理策略——`queue` 排到当前回合结束(默认,不打断),`interrupt` 立即 steer 打断(旧行为,会 abort 在途工具并跳过剩余工具) |
 | `replyHint` | true | 收到的 ask 附回复指引(始终携带显式 `replyTo`) |
-| `stableId` | — | 重启后保持的会话地址 |
 
-环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)。
+**身份属于进程,不属于文件。** 一个 intercom id 只能由一个活着的进程持有:要跨重启保持地址,
+由启动方给**那个进程**设 `PI_INTERCOM_STABLE_ID`;`config.json` 是机器全局的,同机每个会话都会读到,
+写在那里等于让所有会话来抢同一个地址(后注册的会把前一个顶掉,父会话于是再也找不到还在跑的子会话)。
+没有钉地址就用自己的会话 id,resume 之后仍可被寻址。
+broker 守住这条:以一个**活着**的会话正在持有的 id 注册,会被拒绝并回 `error` 帧(帧内点名 id 与持有者 pid),
+只有持有者已经没了(连接已关)的 id 才能被下一个进程接管——这正是 resume 依赖的那条路。
+
+环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)、`PI_INTERCOM_STABLE_ID`(本进程钉住的 intercom 地址)。
 
 ## 7. 前置条件与排障
 

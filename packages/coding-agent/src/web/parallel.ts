@@ -291,7 +291,7 @@ export async function searchWithParallel(
 	const apiKey = await findParallelApiKey();
 	if (!apiKey) {
 		throw new ParallelApiError(
-			"Parallel credentials not found. Set PARALLEL_API_KEY or login with 'omp /login parallel'.",
+			"Parallel credentials not found. Set PARALLEL_API_KEY or login with 'cornfield /login parallel'.",
 		);
 	}
 
@@ -326,7 +326,7 @@ export async function extractWithParallel(
 	const apiKey = await findParallelApiKey();
 	if (!apiKey) {
 		throw new ParallelApiError(
-			"Parallel credentials not found. Set PARALLEL_API_KEY or login with 'omp /login parallel'.",
+			"Parallel credentials not found. Set PARALLEL_API_KEY or login with 'cornfield /login parallel'.",
 		);
 	}
 

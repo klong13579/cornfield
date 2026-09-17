@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { setAgentDir, setConfigRootDir } from "@cornfield/utils";
+import { getClientDir, setClientDir, setConfigRootDir } from "@cornfield/utils";
 import { buildSystemPrompt } from "../src/system-prompt";
 
 /**
@@ -15,19 +15,19 @@ import { buildSystemPrompt } from "../src/system-prompt";
  * cost one agent six weeks of Python execution before anyone noticed.
  */
 let tmpDir: string;
-let originalAgentDir: string;
+let originalClientDir: string;
 let originalEnv: string | undefined;
 
 beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "sp-python-unavailable-"));
-	originalAgentDir = (await import("@cornfield/utils")).getAgentDir();
+	originalClientDir = getClientDir();
 	originalEnv = process.env.CORNFIELD_AGENT_DIR;
 	setConfigRootDir(tmpDir);
-	setAgentDir(tmpDir);
+	setClientDir(tmpDir);
 });
 
 afterEach(async () => {
-	setAgentDir(originalAgentDir);
+	setClientDir(originalClientDir);
 	if (originalEnv === undefined) {
 		delete process.env.CORNFIELD_AGENT_DIR;
 	} else {

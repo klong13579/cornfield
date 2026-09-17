@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { createServer } from "node:net";
 import * as path from "node:path";
-import { $flag, getAgentDir, isEnoent, logger, procmgr } from "@cornfield/utils";
+import { $flag, getClientDir, isEnoent, logger, procmgr } from "@cornfield/utils";
 import type { Subprocess } from "bun";
 import { Settings } from "../config/settings";
 import { getOrCreateSnapshot } from "../utils/shell-snapshot";
@@ -66,7 +66,7 @@ async function allocatePort(): Promise<number> {
 }
 
 function getGatewayDir(): string {
-	return path.join(getAgentDir(), GATEWAY_DIR_NAME);
+	return path.join(getClientDir(), GATEWAY_DIR_NAME);
 }
 
 function getGatewayInfoPath(): string {

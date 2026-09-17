@@ -66,6 +66,19 @@ interface ConnectedSession {
 	extensions?: ExtensionCapability[];
 }
 
+/**
+ * Whether a registered session's socket is still a live claim on its identity.
+ *
+ * Same condition the client uses to call its own socket usable
+ * (`coding-agent/intercom-extension/broker/client.ts`, `requireActiveSocket`):
+ * a socket that is destroyed, finished writing, or no longer writable cannot
+ * carry another message. Such a row is only waiting for its close event, so the
+ * identity is free for its next owner — which is what makes resume work.
+ */
+function holdsIdentity(socket: net.Socket): boolean {
+	return !socket.destroyed && !socket.writableEnded && socket.writable;
+}
+
 interface NamespaceOwner {
 	sessionId: string;
 	socket: net.Socket;
@@ -601,6 +614,19 @@ export class IntercomBroker {
 				this.pruneDisconnectedSessions();
 				this.pruneMailboxMessages();
 				const previous = this.sessions.get(id);
+				if (previous && holdsIdentity(previous.socket)) {
+					// An identity belongs to one live process. Accepting the
+					// registration would end the holder's socket and replace its
+					// whole `SessionInfo` (including its parent edge) — a takeover the
+					// holder never learns about, which is how a running child used to
+					// vanish from its parent's roster. Refuse, and say who holds it.
+					writeMessage(socket, {
+						type: "error",
+						error: `Session id "${id}" is already held by a live session (pid ${previous.info.pid}); a process cannot claim an identity that is in use`,
+					});
+					socket.destroy();
+					break;
+				}
 				if (!previous && this.sessions.size >= MAX_SESSIONS) {
 					writeMessage(socket, { type: "error", error: "Too many registered intercom sessions" });
 					socket.destroy();

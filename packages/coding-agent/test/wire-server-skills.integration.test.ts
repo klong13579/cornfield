@@ -116,7 +116,8 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 			expect(dropped).toBeDefined();
 			expect(dropped?.description).toContain("用户级技能 seed");
 
-			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入
+			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入。
+			// 落点是 default agent 的 **global 层** = 客户端目录那份（票 24 的层定案）。
 			const cfgPath = path.join(fixture!.home, ".cornfield", "agent", "config.yml");
 			let cfg = "";
 			const cfgDeadline = Date.now() + 3000;

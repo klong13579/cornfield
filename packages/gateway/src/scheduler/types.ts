@@ -113,6 +113,18 @@ export interface ScheduledTask {
 	failCount: number;
 	/** Agent execution directory (replaces accountId for execution routing) */
 	agentDir?: string;
+	/**
+	 * Resolved Agent identity (registry key). Persisted at creation time, never
+	 * re-derived from whatever the UI has selected: a schedule firing must run as the
+	 * Agent it was bound to (`docs/client/agent-hub.md` §1.7/§1.8 —
+	 * `CronDefinition = { id, agentDir, … }`; “无绑定 agentDir 不执行”).
+	 *
+	 * `agentDir` alone is not an identity (it is a path), so both are stored: `agentId`
+	 * names the Agent, `agentDir` is its home. Legacy rows carry only
+	 * `agentDir`/`accountId`; {@link resolveScheduleAgentBinding} reverse-looks-up the
+	 * registry for them and reports the id without rewriting storage.
+	 */
+	agentId?: string;
 	/** Delivery configuration (replaces deliver + deliverUser) */
 	delivery?: {
 		channel: string;
@@ -173,6 +185,8 @@ export interface TaskFileDefinition {
 	attachToSession?: boolean;
 	/** Agent execution directory (replaces accountId for execution routing) */
 	agentDir?: string;
+	/** Resolved Agent identity (registry key); see {@link ScheduledTask.agentId}. */
+	agentId?: string;
 	/** Delivery configuration (replaces deliver + deliverUser) */
 	delivery?: {
 		channel: string;

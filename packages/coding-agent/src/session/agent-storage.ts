@@ -2,7 +2,7 @@ import { Database, type Statement } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { type AuthCredential, AuthCredentialStore, type StoredAuthCredential } from "@cornfield/ai";
-import { getAgentDbPath, isRecord, logger } from "@cornfield/utils";
+import { getAgentStorageDbPath, getDefaultAgentHome, isRecord, logger } from "@cornfield/utils";
 import type { RawSettings as Settings } from "../config/settings";
 
 /** Row shape for settings table queries */
@@ -207,7 +207,7 @@ FROM model_usage_legacy
 	 * @param dbPath - Path to the SQLite database file (defaults to config path)
 	 * @returns AgentStorage instance for the given path
 	 */
-	static async open(dbPath: string = getAgentDbPath()): Promise<AgentStorage> {
+	static async open(dbPath: string = getAgentStorageDbPath(getDefaultAgentHome())): Promise<AgentStorage> {
 		const existing = instances.get(dbPath);
 		if (existing) return existing;
 

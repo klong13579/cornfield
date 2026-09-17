@@ -7,7 +7,7 @@
  */
 import type { Database } from "bun:sqlite";
 import type { ExtensionAPI, ExtensionCommandContext } from "@cornfield/coding-agent/extensibility/extensions";
-import { getAgentDir, getSessionsDir, logger } from "@cornfield/utils";
+import { getSessionsDir, logger } from "@cornfield/utils";
 import { queryAdmissionAuditStats } from "./audit-admission-stats";
 import { formatAuditReport } from "./audit-report";
 import { refreshBenefitAdmissionState } from "./benefit-admission-refresh";
@@ -642,7 +642,7 @@ async function handleLearnings(stores: CommandStores, ctx: ExtensionCommandConte
 				}
 				const result = await applyLearningsSeed(store, ctx.cwd, entries);
 				await projectLearnings(stores.db(), { outputDir });
-				const memoryRoot = getMemoryRoot(getAgentDir(), ctx.cwd, {
+				const memoryRoot = getMemoryRoot(ctx.configRoot, {
 					globalStore: stores.flags().globalStore,
 				});
 				const summary = await ensureMemorySummaryFromMemory(memoryRoot);

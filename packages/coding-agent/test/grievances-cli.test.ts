@@ -18,30 +18,30 @@ import {
 	parseSinceCutoff,
 } from "@cornfield/coding-agent/cli/grievances-cli";
 import { getAutoQaDbPath } from "@cornfield/coding-agent/tools/report-tool-issue";
-import { getConfigRootDir, setAgentDir } from "@cornfield/utils";
+import { getConfigRootDir, setClientDir } from "@cornfield/utils";
 
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-09-15T12:00:00.000Z");
 
-let testAgentDir = "";
-const originalAgentDir = process.env.CORNFIELD_AGENT_DIR;
-const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+let testClientDir = "";
+const originalClientDir = process.env.CORNFIELD_CLIENT_DIR;
+const fallbackClientDir = path.join(getConfigRootDir(), "agent");
 
 beforeEach(async () => {
-	testAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-grievances-"));
-	setAgentDir(testAgentDir);
+	testClientDir = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-grievances-"));
+	setClientDir(testClientDir);
 });
 
 afterEach(async () => {
 	vi.restoreAllMocks();
 	vi.useRealTimers();
-	if (originalAgentDir) {
-		setAgentDir(originalAgentDir);
+	if (originalClientDir) {
+		setClientDir(originalClientDir);
 	} else {
-		setAgentDir(fallbackAgentDir);
-		delete process.env.CORNFIELD_AGENT_DIR;
+		setClientDir(fallbackClientDir);
+		delete process.env.CORNFIELD_CLIENT_DIR;
 	}
-	await fs.rm(testAgentDir, { recursive: true, force: true });
+	await fs.rm(testClientDir, { recursive: true, force: true });
 });
 
 interface SeedRow {
@@ -308,7 +308,7 @@ describe("exportGrievances", () => {
 			{ tool: "bash", report: "first report", createdAt: NOW - DAY, sessionId: "sess-a" },
 			{ tool: "write", report: "second report", createdAt: NOW, sessionId: "sess-b" },
 		]);
-		const out = path.join(testAgentDir, "digest.md");
+		const out = path.join(testClientDir, "digest.md");
 
 		const lines = await capture(() => exportGrievances({ out }));
 
@@ -341,7 +341,7 @@ describe("exportGrievances", () => {
 			{ tool: "bash", report: "recent", createdAt: NOW - DAY },
 		]);
 		vi.spyOn(Date, "now").mockReturnValue(NOW);
-		const out = path.join(testAgentDir, "window.md");
+		const out = path.join(testClientDir, "window.md");
 
 		await capture(() => exportGrievances({ out, since: "7d" }));
 
@@ -358,7 +358,7 @@ describe("exportGrievances", () => {
 		seed([{ tool: "bash", report: "no timestamp", createdAt: null }]);
 		vi.spyOn(Date, "now").mockReturnValue(NOW);
 
-		const lines = await capture(() => exportGrievances({ out: path.join(testAgentDir, "empty.md"), since: "7d" }));
+		const lines = await capture(() => exportGrievances({ out: path.join(testClientDir, "empty.md"), since: "7d" }));
 
 		expect(lines.join("\n")).toContain("No new reports to export.");
 		expect(lines.join("\n")).toContain("1 report(s) have no timestamp and are excluded by --since.");
@@ -369,13 +369,13 @@ describe("exportGrievances", () => {
 		seed([{ tool: "bash", report: "stays queued", createdAt: NOW }]);
 
 		// A directory is not a writable destination.
-		await expect(exportGrievances({ out: testAgentDir })).rejects.toThrow();
+		await expect(exportGrievances({ out: testClientDir })).rejects.toThrow();
 		expect(readAll().map(row => row.exported)).toEqual([0]);
 	});
 
 	it("reports the export result as JSON when a destination is given", async () => {
 		seed([{ tool: "bash", report: "x", createdAt: NOW }]);
-		const out = path.join(testAgentDir, "digest.md");
+		const out = path.join(testClientDir, "digest.md");
 
 		const lines = await capture(() => exportGrievances({ json: true, out }));
 

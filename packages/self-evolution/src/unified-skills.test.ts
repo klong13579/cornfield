@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, setAgentDir } from "@cornfield/utils";
+import { getDefaultAgentHome, setDefaultAgentHome } from "@cornfield/utils";
 import { getUnifiedSkillsDir } from "./skill-storage";
 import { SqliteSkillStore } from "./storage/skills";
 import { loadUnifiedSkillsForInjection } from "./unified-skills";
@@ -41,16 +41,16 @@ describe("loadUnifiedSkillsForInjection", () => {
 	}
 
 	afterEach(async () => {
-		setAgentDir(previousAgentDir);
+		setDefaultAgentHome(previousAgentDir);
 		if (tempAgentDir) await fs.rm(tempAgentDir, { recursive: true, force: true });
 		if (tempCwd) await fs.rm(tempCwd, { recursive: true, force: true });
 	});
 
 	test("loads from single unified skills directory", async () => {
-		previousAgentDir = getAgentDir();
+		previousAgentDir = getDefaultAgentHome();
 		tempAgentDir = await fs.mkdtemp("/tmp/unified-skills-agent-");
 		tempCwd = await fs.mkdtemp("/tmp/unified-skills-cwd-");
-		setAgentDir(tempAgentDir);
+		setDefaultAgentHome(tempAgentDir);
 
 		const unifiedDir = getUnifiedSkillsDir(tempCwd, false);
 		await fs.mkdir(unifiedDir, { recursive: true });
@@ -97,10 +97,10 @@ From unified dir.
 	});
 
 	test("migrates legacy memory skills dir into unified directory", async () => {
-		previousAgentDir = getAgentDir();
+		previousAgentDir = getDefaultAgentHome();
 		tempAgentDir = await fs.mkdtemp("/tmp/unified-skills-agent-");
 		tempCwd = await fs.mkdtemp("/tmp/unified-skills-cwd-");
-		setAgentDir(tempAgentDir);
+		setDefaultAgentHome(tempAgentDir);
 
 		const { resolveGlobalMemoryRoot } = await import("./paths");
 		const memoryRoot = resolveGlobalMemoryRoot(tempAgentDir, tempCwd);

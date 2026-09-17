@@ -5,28 +5,46 @@
  * standing up the CLI parser. The Command class in `../commands/agent.ts`
  * is a thin dispatcher that calls these.
  *
- * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
- *   - init <name>     create a new agentDir
- *   - list            list agentDirs under ~/.cornfield/agents/
- *   - show <name>     print identity / tools / skills / cron summary
- *   - validate <dir>  check always-on files + runtime artifacts
+ * Subcommands (per `docs/gateway/agent-bridge.md`（Agent Design V1）§6.2):
+ *   - init <name>           create a new agentDir
+ *   - list                  list agentDirs under ~/.cornfield/agents/
+ *   - show <name>           print identity / tools / skills / cron summary
+ *   - validate --dir <dir>  check always-on files + runtime artifacts
+ *   - register <name>       add an existing agentDir to the registry (--dir <path>)
+ *   - unregister <name>     drop it from the registry (--delete-files also rm -rf)
+ *   - reconcile             re-scan the default location, prune stale entries
+ *   - migrate-default-home  move default's own state into its own home
  */
 
+import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	checkDefaultAgentHome,
+	type DefaultHomeMigrationReport,
 	ensureAgentDir,
 	findAgent,
+	migrateDefaultAgentHome,
 	pruneStaleEntries,
+	readWorkspaceDeclaration,
 	reconcileSkeletonFiles,
 	registerAgent,
 	resolveAgentDir,
 	SKELETON_FILES,
 	unregisterAgent,
 } from "@cornfield/coding-agent/skeleton";
+import { APP_NAME } from "@cornfield/utils";
 import { migrateLegacyModelConfig } from "../config/model-routes";
-import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
+import { agentDirFilesWithRequirement } from "../skeleton/agent-dir-files";
+import {
+	MECE_FILES,
+	type MeceContext,
+	type MeceRepair,
+	type MeceViolation,
+	runMeceChecks,
+	runMeceRepairs,
+} from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -40,6 +58,8 @@ export interface InitArgs {
 	mission?: string;
 	force?: boolean;
 	json?: boolean;
+	/** Extra read/write roots to declare on the agentDir (repeatable). Must exist as directories. */
+	roots?: readonly string[];
 }
 
 export interface InitResult {
@@ -47,6 +67,8 @@ export interface InitResult {
 	agentDir: string;
 	created: boolean;
 	filesWritten: number;
+	/** Resolved absolute roots declared on the agentDir, when `roots` was given. */
+	attachedRoots?: string[];
 }
 
 export async function runAgentInit(args: InitArgs): Promise<InitResult> {
@@ -104,9 +126,15 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 
 	// Write the workspace declaration (`.cornfield/workspace.json`) so the agentDir
 	// carries its structured metadata with it (registry stays a thin index).
-	const { ensureWorkspace } = await import("../skeleton/workspace");
+	const { attachRoots, ensureWorkspace } = await import("../skeleton/workspace");
 	await ensureWorkspace(agentDir, { name: args.name });
 
+	// `roots`: extra read/write roots land in the same declaration. Written before registerAgent
+	// so the registry's workspaceUpdatedAt cache matches the file it just read. A root that is not
+	// a real directory throws here -- declaring it would make every session of this agent fail to
+	// resolve its work surface, which is worse than a failed init.
+	const attachedRoots =
+		args.roots && args.roots.length > 0 ? (await attachRoots(agentDir, args.roots)).attachedRoots : undefined;
 	// Persist the (name, path) mapping so `cornfield agent list` / `show` can find
 	// this agentDir regardless of where it lives (default `~/.cornfield/agents/`,
 	// custom `--dir`, nested account id like `ops/hr`).
@@ -114,7 +142,13 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	// declaration just written.
 	await registerAgent(args.name, agentDir, args.template ?? "default");
 
-	return { name: args.name, agentDir, created: effectiveCreated, filesWritten };
+	return {
+		name: args.name,
+		agentDir,
+		created: effectiveCreated,
+		filesWritten,
+		...(attachedRoots ? { attachedRoots } : {}),
+	};
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -158,7 +192,7 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 	// This picks up legacy agentDirs created before the registry existed and entries
 	// the user dropped into the default location without going through `cornfield agent init`.
 	const root = path.resolve(args.dir ?? path.join(homeDir(), ".cornfield", "agents"));
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(root, { withFileTypes: true });
 	} catch (err) {
@@ -355,7 +389,7 @@ async function readToolsList(toolsPath: string): Promise<string[]> {
 }
 
 async function readSkills(skillsDir: string): Promise<Array<{ name: string; description?: string }>> {
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(skillsDir, { withFileTypes: true });
 	} catch {
@@ -401,7 +435,7 @@ async function countJsonlFiles(dir: string): Promise<number> {
 }
 
 async function countFilesWithExt(dir: string, exts: string[]): Promise<number> {
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(dir, { withFileTypes: true });
 	} catch {
@@ -439,8 +473,8 @@ export interface ValidateResult {
 	issues: ValidateIssue[];
 	valid: boolean;
 	mece?: {
-		violations: import("./mece-rules").MeceViolation[];
-		repaired: import("./mece-rules").MeceRepair[];
+		violations: MeceViolation[];
+		repaired: MeceRepair[];
 	};
 	semantic?: {
 		violations: SemanticViolation[];
@@ -449,17 +483,13 @@ export interface ValidateResult {
 	};
 }
 
-const ALWAYS_ON: ReadonlyArray<string> = [
-	"AGENTS.md",
-	"mission.md",
-	"TOOLS.md",
-	"TODO.md",
-	"knowledge/external-workspaces.md",
-];
+// 三个校验集从 agentDir 文件的单一真相推导（`skeleton/agent-dir-files.ts`），
+// 而不是在这里再手抄一份会漂移的清单。元素与顺序即骨架的写出顺序。
+const ALWAYS_ON: ReadonlyArray<string> = agentDirFilesWithRequirement("always-on");
 
-const RUNTIME_HARD_DEPS: ReadonlyArray<string> = [".cornfield/config.yml"];
+const RUNTIME_HARD_DEPS: ReadonlyArray<string> = agentDirFilesWithRequirement("hard-dep");
 
-const RUNTIME_RECOMMENDED: ReadonlyArray<string> = ["prompt-includes.json", ".gitignore", ".cornfield/SYSTEM.md"];
+const RUNTIME_RECOMMENDED: ReadonlyArray<string> = agentDirFilesWithRequirement("recommended");
 
 export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResult> {
 	const agentDir = path.resolve(args.agentDir);
@@ -493,6 +523,47 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		if (!(await pathExists(p))) {
 			issues.push({ level: "warning", file: rel, message: "Missing recommended runtime file" });
 		}
+	}
+
+	// 3b. declared extra roots. `session/session-workspace.ts` folds every declared root into the
+	// session's work surface, so a declared root that is gone makes this agent's sessions fail to
+	// resolve. Saying `valid: true` here would be a lie about a directory that cannot be used.
+	const declarationRead = await readWorkspaceDeclaration(agentDir);
+	if (declarationRead.state === "invalid") {
+		issues.push({
+			level: "error",
+			file: ".cornfield/workspace.json",
+			message: `Invalid workspace declaration: ${declarationRead.reason}`,
+		});
+	} else if (declarationRead.state === "declared") {
+		for (const root of declarationRead.declaration.attachedRoots ?? []) {
+			const isDir = await fs.stat(root).then(
+				stat => stat.isDirectory(),
+				() => false,
+			);
+			if (!isDir) {
+				issues.push({
+					level: "error",
+					file: ".cornfield/workspace.json",
+					message: `Declared attached root is missing or not a directory: ${root}`,
+				});
+			}
+		}
+	}
+
+	// 3c. the default Agent's home must be the directory the registry declares. A session
+	// belongs to exactly one home; when `default` points elsewhere, every session this client
+	// starts lands somewhere the registry does not know. `serve` / `main` refuse to start on the
+	// same disagreement — this is where it is visible without starting a session.
+	const defaultHome = await checkDefaultAgentHome();
+	if (!defaultHome.ok) {
+		issues.push({
+			level: "error",
+			file: "registry.json",
+			message: defaultHome.message ?? "default Agent home mismatch",
+			rule: "default-agent-home-mismatch",
+			repairable: false,
+		});
 	}
 
 	// 4. prompt-includes.json must be valid JSON if present
@@ -558,7 +629,7 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 	}
 
 	const meceViolations = await runMeceChecks(meceCtx);
-	let meceRepaired: import("./mece-rules").MeceRepair[] = [];
+	let meceRepaired: MeceRepair[] = [];
 
 	if (args.fix && meceViolations.some(v => v.repairable)) {
 		meceRepaired = runMeceRepairs(meceCtx, meceViolations);
@@ -844,7 +915,7 @@ export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<Reco
 	const registered: string[] = [];
 	const skipped: string[] = [];
 	const defaultRoot = path.join(homeDir(), ".cornfield", "agents");
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(defaultRoot, { withFileTypes: true });
 	} catch {
@@ -872,7 +943,7 @@ export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<Reco
 export function renderList(summaries: AgentSummary[], json: boolean): string {
 	if (json) return JSON.stringify(summaries, null, 2);
 	if (summaries.length === 0) {
-		return "No agents found. Run `cornfield agent init <name>` to create one.";
+		return `No agents found. Run \`${APP_NAME} agent init <name>\` to create one.`;
 	}
 	const colGap = 2;
 	const header: [string, string, string, string] = ["NAME", "AGENT_DIR", "STATUS", "REG"];
@@ -930,6 +1001,70 @@ export function renderShow(detail: AgentDetail, json: boolean): string {
 	lines.push(`  Cron tasks: ${detail.cronTaskCount}`);
 	lines.push(`  Sessions:   ${detail.sessionCount}`);
 	return lines.join("\n");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// migrate-default-home
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface MigrateDefaultHomeArgs {
+	/** Report what would change without touching the filesystem. */
+	dryRun?: boolean;
+	json?: boolean;
+}
+
+/**
+ * Move the default Agent's own state out of the client dir into its home (`~/.cornfield/agents/default`).
+ * Thin wrapper over `skeleton/default-home#migrateDefaultAgentHome` so the CLI path and the
+ * library share one implementation (and one idempotence story).
+ */
+export async function runAgentMigrateDefaultHome(
+	args: MigrateDefaultHomeArgs = {},
+): Promise<DefaultHomeMigrationReport> {
+	return migrateDefaultAgentHome({ dryRun: args.dryRun });
+}
+
+export function renderMigrateDefaultHome(result: DefaultHomeMigrationReport, json: boolean): string {
+	if (json) return JSON.stringify(result, null, 2);
+	const lines: string[] = [];
+	lines.push(`client dir: ${result.clientDir}`);
+	lines.push(`agent home: ${result.home}`);
+	lines.push(result.dryRun ? "(dry run — nothing was moved)" : "");
+	lines.push("");
+	for (const entry of result.entries) {
+		const tag =
+			entry.status === "moved"
+				? "→"
+				: entry.status === "merged"
+					? "⇄"
+					: entry.status === "kept"
+						? "="
+						: entry.status === "failed"
+							? "✗"
+							: " ";
+		const detail =
+			entry.status === "kept"
+				? `kept in client dir — ${entry.reason ?? "client-scope"}`
+				: entry.status === "absent"
+					? "nothing to move"
+					: `${entry.movedCount} entr${entry.movedCount === 1 ? "y" : "ies"}${
+							entry.targetHash ? ` → hash ${entry.targetHash}` : ""
+						}`;
+		lines.push(`${tag} ${entry.name.padEnd(28)} ${detail}`);
+		if (entry.conflicts.length > 0) {
+			lines.push(`    conflicts (left in the client dir, never overwritten): ${entry.conflicts.join(", ")}`);
+		}
+		if (entry.live.length > 0) {
+			lines.push(`    in use by a live process (left for the next run): ${entry.live.join(", ")}`);
+		}
+		if (entry.error) lines.push(`    error: ${entry.error}`);
+	}
+	lines.push("");
+	lines.push(
+		`entries: client dir ${result.before.clientDirEntries} → ${result.after.clientDirEntries}, ` +
+			`home ${result.before.homeEntries} → ${result.after.homeEntries}`,
+	);
+	return lines.filter(line => line !== "").join("\n");
 }
 
 export function renderValidate(result: ValidateResult, json: boolean): string {
