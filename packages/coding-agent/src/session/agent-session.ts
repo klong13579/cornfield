@@ -2376,7 +2376,7 @@ export class AgentSession {
 	}
 
 	resolveRoleModel(role: string): Model | undefined {
-		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(), this.model).model;
+		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(this.settings), this.model).model;
 	}
 
 	/**
@@ -2385,7 +2385,7 @@ export class AgentSession {
 	 * from role configuration (e.g., "anthropic/claude-sonnet-4-5:xhigh").
 	 */
 	resolveRoleModelWithThinking(role: string): ResolvedModelRoleValue {
-		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(), this.model);
+		return this.#resolveRoleModelFull(role, this.#modelRegistry.getAvailable(this.settings), this.model);
 	}
 
 	get promptTemplates(): ReadonlyArray<PromptTemplate> {
@@ -3634,7 +3634,7 @@ export class AgentSession {
 		roleOrder: readonly string[],
 		options?: { temporary?: boolean },
 	): Promise<RoleModelCycleResult | undefined> {
-		const availableModels = this.#modelRegistry.getAvailable();
+		const availableModels = this.#modelRegistry.getAvailable(this.settings);
 		if (availableModels.length === 0) return undefined;
 
 		const currentModel = this.model;
@@ -3744,7 +3744,7 @@ export class AgentSession {
 
 	async #cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
 		const previousEditMode = this.#resolveActiveEditMode();
-		const availableModels = this.#modelRegistry.getAvailable();
+		const availableModels = this.#modelRegistry.getAvailable(this.settings);
 		if (availableModels.length <= 1) return undefined;
 
 		const currentModel = this.model;
@@ -3775,8 +3775,12 @@ export class AgentSession {
 	/**
 	 * Get all available models with valid API keys.
 	 */
+	/**
+	 * 本会话（＝本 agent）可用的模型：停用名单取自**本会话自己的 Settings**，
+	 * 不吃全局单例——一个 agent 的停用名单不该让别的 agent 也看不见那些模型。
+	 */
 	getAvailableModels(): Model[] {
-		return this.#modelRegistry.getAvailable();
+		return this.#modelRegistry.getAvailable(this.settings);
 	}
 
 	// =========================================================================
@@ -4228,7 +4232,8 @@ export class AgentSession {
 				})
 				.catch(() => undefined);
 			if (persist && effectiveLevel !== undefined && effectiveLevel !== ThinkingLevel.Off) {
-				this.settings.set("defaultThinkingLevel", effectiveLevel);
+				// 落点跟随读侧优先级：配置看板的 thinking 与工具开关/模型路由写同一份配置。
+				this.settings.setEffective("defaultThinkingLevel", effectiveLevel);
 			}
 		}
 	}

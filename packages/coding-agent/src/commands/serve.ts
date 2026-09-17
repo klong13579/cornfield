@@ -126,7 +126,7 @@ export interface ServeSessionFactoryOptions {
  * |---|---|
  * | 工作根 `root` | `attachmentRoot(meta, workspace)` —— Project 的 root（绑了 Project）或 `agentDir`（没绑）；工具 cwd、skills/context 发现、配置的 project 层跟着它 |
  * | session 目录 | `<agentDir>/sessions` —— 会话文件永远归**身份根**，不跟着 Project 走 |
- * | 配置根 | `<agentDir>/config.yml`（per-agent 配置读写：工具开关 / modelRoles / thinking；前端 get_config/set_config 定向到该文件） |
+ * | 配置根 | `<agentDir>/config.yml`（per-agent 配置读写：工具开关 / modelRoutes / thinking；前端 get_config/set_config 定向到该 agent 的配置实例） |
  * | 归属 | `workspace.projectId` 写进会话头（`setResolvedProject`）：记录是装配方的决定，store 只记录不推导 |
  *
  * `workspace` 整个是上层（`../server/session-registry` 的 attach）问 resolver 要来的 —— 这里
