@@ -2,6 +2,7 @@ import { agentTodoStatusActions, isAgentTodoTransitionAllowed } from "@cornfield
 import { useEffect, useMemo, useState } from "react";
 import type { AgentTodoDto, AgentTodoPriorityDto, AgentTodoStatusDto } from "../../lib/pi-client-api";
 import { serveVerdictOf } from "../../lib/serve-verdict";
+import { activeAgentIdOf } from "../../state/agent-context";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
 import {
@@ -12,6 +13,8 @@ import {
 	applyTodoPatch,
 	bindableProjects,
 	bindingLabelOf,
+	boardAgentIdOf,
+	boardAgentNameOf,
 	canDefer,
 	countsOf,
 	DEFER_PRESETS,
@@ -138,7 +141,13 @@ export function AgentTodoBoard(): React.JSX.Element {
 	const todos = view.agentTodos;
 	// registry 三态（读到 / 还没读到 / 读不出来）—— 绑定标签与选择器都靠它区分「没有」与「不知道」。
 	const registry = projectRegistryOf(view);
-	const owner = view.activeAgentId ?? "default";
+	const ownerId = boardAgentIdOf(view);
+	const owner = ownerId ?? "default";
+	const ownerName = boardAgentNameOf(view);
+	// 「跟随焦点」的展示名：当前焦点是谁（显式 pin 了别的板子时，焦点与板子不同）。
+	const focusId = activeAgentIdOf(view);
+	const focusName =
+		focusId === undefined ? "（无）" : (view.agents.find(agent => agent.id === focusId)?.name ?? focusId);
 	// 相对文案（「已过期 3 天」）按渲染时刻取一次即可：它精确到分钟，没有谁需要它逐秒跳。
 	const now = Date.now();
 
@@ -234,6 +243,26 @@ export function AgentTodoBoard(): React.JSX.Element {
 
 	return (
 		<div>
+			<div className="mb-3 flex flex-wrap items-center gap-2">
+				<label className="flex items-center gap-2 text-[12px] text-ink-faint">
+					<span className="shrink-0">看板 Agent</span>
+					<select
+						value={view.todoBoardAgentId ?? ""}
+						onChange={e => store.setTodoBoardAgent(e.target.value === "" ? undefined : e.target.value)}
+						disabled={!view.connected || view.agents.length === 0}
+						aria-label="Todo 板子归属 Agent"
+						className="rounded-md border border-hairline bg-surface px-2 py-1.5 text-[12.5px] text-ink disabled:opacity-60"
+					>
+						<option value="">跟随焦点（{focusName}）</option>
+						{view.agents.map(agent => (
+							<option key={agent.id} value={agent.id}>
+								{agent.name}
+							</option>
+						))}
+					</select>
+				</label>
+				<span className="flex-1" />
+			</div>
 			<div className="mb-3 flex flex-wrap items-center gap-1.5">
 				{options.map(option => (
 					<button
@@ -260,7 +289,7 @@ export function AgentTodoBoard(): React.JSX.Element {
 					onKeyDown={e => {
 						if (e.key === "Enter") add();
 					}}
-					placeholder={`给 ${owner} 记一条长期任务…`}
+					placeholder={`给 ${ownerName} 记一条长期任务…`}
 					className="min-w-[240px] flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[13.5px] text-ink outline-none placeholder:text-ink-faint"
 				/>
 				<select
@@ -281,11 +310,14 @@ export function AgentTodoBoard(): React.JSX.Element {
 				<button type="button" className="cbtn" disabled={busy || title.trim() === ""} onClick={add}>
 					添加
 				</button>
+				{title.trim() === "" && (
+					<span className="w-full text-[11.5px] text-ink-faint">标题为空不能添加 —— 先输入要记的任务。</span>
+				)}
 			</div>
 
 			{bannerFailure && <FailureBox failure={bannerFailure} onDismiss={() => setFailure(null)} />}
 
-			{todos.length === 0 && <Empty text={`${owner} 还没有长期任务。上面加一条。`} />}
+			{todos.length === 0 && <Empty text={`${ownerName} 还没有长期任务。上面加一条。`} />}
 			{todos.length > 0 && visible.length === 0 && <Empty text="这个筛选下没有任务。" />}
 
 			{visible.map(todo => {
@@ -336,7 +368,7 @@ export function AgentTodoBoard(): React.JSX.Element {
 									{todo.sessionRefs.length > 0 && <span>{todo.sessionRefs.length} 个会话推进过</span>}
 								</div>
 							</div>
-							<div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+							<div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 max-sm:opacity-100">
 								<button
 									type="button"
 									className="cbtn"
@@ -578,7 +610,8 @@ function ErrorBox({
 
 export function TodoView(): React.JSX.Element {
 	const view = useSession();
-	const owner = view.activeAgentId ?? "default";
+	const ownerId = boardAgentIdOf(view) ?? "default";
+	const ownerName = boardAgentNameOf(view);
 
 	return (
 		<div className="px-10 pt-8 pb-12">
@@ -592,8 +625,8 @@ export function TodoView(): React.JSX.Element {
 					<ScopeHeading
 						scope="Agent"
 						title="Agent Todo"
-						owner={owner}
-						source={`<agentDir>/.cornfield/agent-todos.json（agentDir 为 ${owner} 的 home）`}
+						owner={ownerName}
+						source={`<agentDir>/.cornfield/agent-todos.json（agentDir 为 ${ownerId} 的 home）`}
 					/>
 					<AgentTodoBoard />
 				</section>

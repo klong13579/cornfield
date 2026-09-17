@@ -1,0 +1,25 @@
+a [12,-58 102x35] «跳到主要内容»
+a [0,0 0x0] «首页»
+a [0,0 0x0] «会话工作台»
+a [0,0 0x0] «会话记录»
+a [0,0 0x0] «Agent 总览»
+a [0,0 0x0] «Skills»
+a [0,0 0x0] «Memory»
+a [0,0 0x0] «Todo»
+a [0,0 0x0] «模型»
+a [0,0 0x0] «语音»
+a [0,0 0x0] «定时任务»
+a [0,0 0x0] «用量»
+a [0,0 0x0] «设置»
+select [107,265 153x33] v="hr" «Todo 板子归属 Agent»
+button button [40,310 42x20] «全部 1»
+button button [88,310 42x20] «通用 1»
+input [40,342 310x36] ph="给 hr 记一条长期任务…"
+select [40,386 157x33] «通用（不绑 Project）»
+button button DISABLED [205,386 42x31] «添加»
+input checkbox [44,475 16x16] ph="" v="on" «完成 T2-closure-1729»
+button button [120,471 42x31] «编辑»
+button button [166,471 42x31] «延期»
+button button [212,471 42x31] «开始»
+button button [258,471 42x31] «取消»
+button button [304,471 42x31] «删除 T2-closure-1729»

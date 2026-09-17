@@ -1,0 +1,9 @@
+
+──── 切板到 hr（与创建同一条板子） ────
+step 2 eval (() => { const sel = document.querySelector('select[aria-label="Todo 板子归属 Agent"]'); if (!sel) return 'no-board-select'; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(sel, 'hr'); sel.dispatchEvent(new Event('change', { bubbles: true })); return 'board=' + sel.value; })() → "board=hr"
+step 3 wait 1800ms
+
+──── 删除刚建的验证任务 ────
+step 5 click button[aria-label^="删除 T2-closure-1729"] → ok
+step 6 wait 2000ms
+step 7 shot → t2-delete-after-delete.png

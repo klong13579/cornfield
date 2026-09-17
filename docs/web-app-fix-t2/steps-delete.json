@@ -1,0 +1,23 @@
+[
+	{
+		"mark": "切板到 hr（与创建同一条板子）"
+	},
+	{
+		"eval": "(() => { const sel = document.querySelector('select[aria-label=\"Todo 板子归属 Agent\"]'); if (!sel) return 'no-board-select'; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(sel, 'hr'); sel.dispatchEvent(new Event('change', { bubbles: true })); return 'board=' + sel.value; })()"
+	},
+	{
+		"wait": 1800
+	},
+	{
+		"mark": "删除刚建的验证任务"
+	},
+	{
+		"click": "button[aria-label^=\"删除 T2-closure-1729\"]"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"shot": "after-delete"
+	}
+]

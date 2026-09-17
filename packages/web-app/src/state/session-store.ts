@@ -206,6 +206,11 @@ export interface SessionView {
 	/** 板子读不到的原因（存储损坏 / 版本不符）。读失败 ≠ 没有任务。 */
 	agentTodosError?: string;
 	/**
+	 * Todo 板在看的 Agent（显式 pin；`undefined` = 跟随焦点，与全站焦点解析同源）。
+	 * 在 Todo 页换板不切连接焦点 —— 看/写任意已注册 Agent 的板子都落在这个 id 上。
+	 */
+	todoBoardAgentId?: string;
+	/**
 	 * 当前焦点会话所在仓库的 working tree 改动（git_changes）。
 	 * `undefined` = 还没读过；`changes: []` = 读到了，**确实没有改动** —— 两者不能当成同一件事。
 	 */
@@ -321,6 +326,8 @@ export class SessionStore {
 	#agentTodoProjectIds: string[] | undefined;
 	#agentTodosPending = true;
 	#agentTodosError: string | undefined;
+	/** Todo 板显式选择的 Agent（null = 跟随焦点）。与 #activeAgentId 解耦：换板不切连接焦点。 */
+	#todoBoardAgent: string | null = null;
 	/** 板子对应的 Agent（空串 = 还没定过焦点）；undefined 与 "" 都表示「还没读过」。 */
 	#agentTodoKey: string | undefined;
 	/** 请求按代际提交：换 Agent 后，上一个 Agent 的迟到响应整份丢弃。 */
@@ -902,7 +909,9 @@ export class SessionStore {
 		if (identity !== this.#gitChangesKey) this.#invalidateGitChanges(view);
 		// Todo 板跟着 **Agent** 走（不是会话）：同一个 Agent 换历史会话，板子不变；换 Agent 立即作废，
 		// 在重读结果回来之前界面上是「还不知道」，而不是上一个 Agent 的任务。
-		if (agentId !== this.#agentTodoKey) this.#invalidateAgentTodos(view);
+		// 板子默认跟焦点 Agent；用户在 Todo 页显式 pin 了别的板子（#todoBoardAgent !== null）时，
+		// 切连接焦点不打断它正在看的板子。
+		if (this.#todoBoardAgent === null && agentId !== this.#agentTodoKey) this.#invalidateAgentTodos(view);
 		view.activeAgentId = agentId;
 		view.activeWorkspace = workspace;
 		// 会话树是上一个会话的账本视图，换会话后不能继续展示（否则把另一个 Agent 的子会话
@@ -1441,6 +1450,42 @@ export class SessionStore {
 	}
 
 	/**
+	 * Todo 板显式选择要看/写的 Agent（不离开本页、不切连接焦点）。
+	 *
+	 * `undefined` / 空串 = 回到跟随焦点。换板 = 同步作废 + 重读，与切 Agent 同一条纪律：
+	 * 上一个 Agent 的迟到响应整份丢弃，重读回来之前界面是「还不知道」；切板不改变
+	 * `#activeAgentId`，所以连接焦点（转发消息、新会话目标）完全不受影响。
+	 */
+	setTodoBoardAgent(agentId?: string): void {
+		const pin = agentId === undefined || agentId === "" ? null : agentId;
+		if (pin === this.#todoBoardAgent) return;
+		this.#todoBoardAgent = pin;
+		const view = cloneView(this.getSnapshot());
+		view.todoBoardAgentId = pin ?? undefined;
+		const key = this.#boardAgentKey();
+		if (key === this.#agentTodoKey) {
+			// 选的正是当前板子（例如把当前焦点显式 pin 上）—— 内容没变，只更新 pin 读数。
+			this.#view = view;
+			this.#notify();
+			return;
+		}
+		this.#invalidateAgentTodos(view, key);
+		this.#view = view;
+		this.#notify();
+		void this.#loadAgentTodos(this.#agentTodoGeneration);
+	}
+
+	/** 板子该读写哪个 Agent：显式 pin 优先，否则跟连接焦点；均无 → undefined（serve 回落焦点）。 */
+	#boardAgentTarget(): string | undefined {
+		return this.#todoBoardAgent ?? this.#activeAgentId ?? undefined;
+	}
+
+	/** 板子的归属 key（只用于「还是不是同一块板子」的相等比较）。 */
+	#boardAgentKey(): string {
+		return this.#todoBoardAgent ?? this.#activeAgentId ?? "";
+	}
+
+	/**
 	 * 新建或更新一条 Agent Todo（set_agent_todo），返回存储真正落盘的那一份。
 	 *
 	 * 失败**原样抛出**（owner 不对 / Project 没声明过 / 存储坏了）：吞掉它就会让用户以为已经
@@ -1449,7 +1494,7 @@ export class SessionStore {
 	 */
 	async saveAgentTodo(todo: AgentTodoDto): Promise<AgentTodoDto> {
 		const key = this.#agentTodoKey;
-		const result = await this.#client.setAgentTodo(todo, this.#activeAgentId ?? undefined);
+		const result = await this.#client.setAgentTodo(todo, this.#boardAgentTarget());
 		this.#mergeAgentTodo(result.todo, key);
 		return result.todo;
 	}
@@ -1457,7 +1502,7 @@ export class SessionStore {
 	/** 删除一条 Agent Todo（delete_agent_todo）。幂等：本来就不在板上返回 false。 */
 	async deleteAgentTodo(todoId: string): Promise<boolean> {
 		const key = this.#agentTodoKey;
-		const result = await this.#client.deleteAgentTodo(todoId, this.#activeAgentId ?? undefined);
+		const result = await this.#client.deleteAgentTodo(todoId, this.#boardAgentTarget());
 		if (result.deleted) this.#mergeAgentTodoRemoval(todoId, key);
 		return result.deleted;
 	}
@@ -1505,7 +1550,7 @@ export class SessionStore {
 	 * 不需要任何手动刷新。
 	 */
 	#syncAgentTodos(): void {
-		const key = this.#activeAgentId ?? "";
+		const key = this.#boardAgentKey();
 		if (key === this.#agentTodoKey) return;
 		const view = cloneView(this.getSnapshot());
 		this.#invalidateAgentTodos(view, key);
@@ -1542,7 +1587,7 @@ export class SessionStore {
 		let projectIds: string[] | undefined;
 		let error: string | undefined;
 		try {
-			const result = await this.#client.listAgentTodos(this.#activeAgentId ?? undefined);
+			const result = await this.#client.listAgentTodos(this.#boardAgentTarget());
 			todos = result.todos;
 			projectIds = result.projectIds;
 		} catch (err) {
@@ -2012,6 +2057,7 @@ export class SessionStore {
 				agentTodoProjectIds: this.#agentTodoProjectIds,
 				agentTodosPending: this.#agentTodosPending,
 				agentTodosError: this.#agentTodosError,
+				todoBoardAgentId: this.#todoBoardAgent ?? undefined,
 				gitChanges: this.#gitChanges,
 				gitChangesPending: this.#gitChangesPending,
 				gitChangesError: this.#gitChangesError,
@@ -2062,6 +2108,7 @@ export class SessionStore {
 			agentTodoProjectIds: this.#agentTodoProjectIds,
 			agentTodosPending: this.#agentTodosPending,
 			agentTodosError: this.#agentTodosError,
+			todoBoardAgentId: this.#todoBoardAgent ?? undefined,
 			gitChanges: this.#gitChanges,
 			gitChangesPending: this.#gitChangesPending,
 			gitChangesError: this.#gitChangesError,

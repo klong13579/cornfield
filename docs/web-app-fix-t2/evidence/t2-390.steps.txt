@@ -1,0 +1,14 @@
+
+──── 切板到 hr（不切连接焦点） ────
+step 2 eval (() => { const sel = document.querySelector('select[aria-label="Todo 板子归属 Agent"]'); if (!sel) return 'no-board-select'; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(sel, 'hr'); sel.dispatchEvent(new Event('change', { bubbles: true })); return 'board=' + sel.value; })() → "board=hr"
+step 3 wait 1800ms
+
+──── 填标题并点添加 ────
+step 5 fill input[placeholder*="记一条长期任务"] → ok
+step 6 wait 300ms
+step 7 click @button=添加 → ok
+step 8 wait 2000ms
+step 9 shot → t2-390-after-create.png
+
+──── 验证行内操作在无 hover 下的可见性（max-sm 生效 → opacity 应为 1） ────
+step 11 eval (() => { const rows = document.querySelectorAll('div.group'); for (const r of rows) { const actions = r.querySelector('div.opacity-0'); if (actions) return 'opacity=' + getComputedStyle(actions).opacity; } return 'no-actions-row'; })() → "opacity=1"
