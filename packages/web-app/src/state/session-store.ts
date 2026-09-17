@@ -104,6 +104,8 @@ export interface SessionView {
 	protocolVersion: number;
 	phase: SessionPhaseDto;
 	model: string | null;
+	/** 当前生效模型的 provider（快照 `snapshot.model.provider`）；`undefined` = 该视图构造器未携带（旧测试/局部视图）。 */
+	modelProvider?: string | null;
 	thinkingLevel: string | null;
 	/** 会话自己的 id（快照 payload 的 `session.sessionId`，一串 UUID）—— 只用于显示与索引对表。 */
 	sessionId: string;
@@ -1798,6 +1800,7 @@ export class SessionStore {
 			...base,
 			phase: snapshot.phase,
 			model: snapshot.model?.id ?? null,
+			modelProvider: snapshot.model?.provider ?? null,
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
 			sessionName: snapshot.sessionName,
@@ -1984,6 +1987,7 @@ export class SessionStore {
 				protocolVersion: connection.protocolVersion,
 				phase: EMPTY_PHASE,
 				model: null,
+				modelProvider: null,
 				thinkingLevel: null,
 				sessionId: "",
 				attachmentAddress: this.#attachmentAddress,
@@ -2025,6 +2029,7 @@ export class SessionStore {
 			protocolVersion: connection.protocolVersion,
 			phase: snapshot.phase,
 			model: snapshot.model?.id ?? null,
+			modelProvider: snapshot.model?.provider ?? null,
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
 			attachmentAddress: this.#attachmentAddress,
