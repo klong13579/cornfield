@@ -51,6 +51,9 @@ function startIdleChecker(): void {
 			}
 		}
 	}, IDLE_CHECK_INTERVAL_MS);
+	// Housekeeping only: a referenced interval keeps the event loop alive, so enabling the idle timeout
+	// would hold a finished session (print mode, one-shot runs) open until this timer burned out.
+	idleCheckInterval.unref?.();
 }
 
 function stopIdleChecker(): void {

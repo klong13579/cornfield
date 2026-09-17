@@ -12,9 +12,22 @@ import type { ServerConfig } from "./types";
 
 export interface LspConfig {
 	servers: Record<string, ServerConfig>;
-	/** Idle timeout in milliseconds. If set, LSP clients will be shutdown after this period of inactivity. Disabled by default. */
+	/**
+	 * Idle timeout in milliseconds: a client with no activity for this long is shut down (its process is
+	 * released; the next use starts it again). Falls back to `DEFAULT_IDLE_TIMEOUT_MS`. Set `0` to disable.
+	 */
 	idleTimeoutMs?: number;
 }
+
+/**
+ * Idle timeout used when no lsp config file sets `idleTimeoutMs`.
+ *
+ * Language servers are separate processes that survive a session's edits — TypeScript's server tree is
+ * ~150MB on its own, and a long-lived session that touched one `.ts` file would otherwise hold it for
+ * the life of the process. Ten minutes is long enough that a normal edit-diagnose loop never restarts a
+ * server, short enough that an idle session stops paying for it.
+ */
+export const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 // =============================================================================
 // Default Server Configuration Loading
@@ -351,7 +364,7 @@ export function loadConfig(cwd: string): LspConfig {
 			detected[name] = { ...config, resolvedCommand: resolved };
 		}
 
-		return { servers: detected, idleTimeoutMs };
+		return { servers: detected, idleTimeoutMs: idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS };
 	}
 
 	// Merge overrides with defaults and filter to available servers
@@ -366,7 +379,7 @@ export function loadConfig(cwd: string): LspConfig {
 		available[name] = { ...config, resolvedCommand: resolved };
 	}
 
-	return { servers: available, idleTimeoutMs };
+	return { servers: available, idleTimeoutMs: idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS };
 }
 
 // =============================================================================

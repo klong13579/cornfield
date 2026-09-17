@@ -5,7 +5,12 @@
 		"fileTypes": [".rs"],
 		"rootMarkers": ["Cargo.toml", "rust-analyzer.toml"],
 		"initOptions": {},
-		"settings": {},
+		"settings": {
+			"rust-analyzer": {
+				"cachePriming": { "enable": false }
+			}
+		},
+		"warmupTimeoutMs": 30000,
 		"capabilities": {
 			"flycheck": true,
 			"ssr": true,

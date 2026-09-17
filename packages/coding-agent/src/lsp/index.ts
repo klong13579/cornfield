@@ -74,7 +74,8 @@ export type { LspToolDetails } from "./types";
 
 export interface LspStartupServerInfo {
 	name: string;
-	status: "connecting" | "ready" | "error";
+	/** `on-demand` = discovered for this cwd, not started (it starts on first use of a matching file). */
+	status: "on-demand" | "connecting" | "ready" | "error";
 	fileTypes: string[];
 	error?: string;
 }
@@ -93,8 +94,9 @@ export interface LspWarmupOptions {
 export function discoverStartupLspServers(cwd: string): LspStartupServerInfo[] {
 	const config = getConfig(cwd);
 	return getLspServers(config).map(([name, serverConfig]) => ({
+		// Discovery only — nothing is started here. Callers that warm up flip these to `connecting`.
 		name,
-		status: "connecting",
+		status: "on-demand",
 		fileTypes: serverConfig.fileTypes,
 	}));
 }

@@ -1869,11 +1869,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			}
 		}
 
-		// Start LSP warmup in the background so startup does not block on language server initialization.
+		// Discover which LSP servers this cwd could use. Starting them is opt-in (lsp.warmupOnStart):
+		// every detected server is a separate process, and rust-analyzer alone runs a full
+		// `cargo check --workspace` on open and holds GBs per workspace root — so the default is to
+		// start a server on first use of a matching file instead of at session start.
 		let lspServers: CreateAgentSessionResult["lspServers"];
-		if (enableLsp && settings.get("lsp.diagnosticsOnWrite")) {
+		if (enableLsp) {
 			lspServers = discoverStartupLspServers(cwd);
-			if (lspServers.length > 0) {
+			if (lspServers.length > 0 && settings.get("lsp.warmupOnStart")) {
+				// Warming up in the background so startup does not block on language server initialization.
+				for (const server of lspServers) {
+					server.status = "connecting";
+				}
 				void (async () => {
 					try {
 						const result = await logger.time("warmupLspServers", warmupLspServers, cwd);

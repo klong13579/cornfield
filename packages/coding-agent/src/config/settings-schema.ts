@@ -1719,6 +1719,17 @@ export const SETTINGS_SCHEMA = {
 		ui: { tab: "editing", label: "LSP", description: "Enable the lsp tool for language server protocol" },
 	},
 
+	"lsp.warmupOnStart": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "editing",
+			label: "Warm Up LSP at Startup",
+			description:
+				"Start every detected language server when the session opens. Off = servers start on first use of a matching file (each server is its own process; rust-analyzer alone runs a full cargo check on open and holds GBs per workspace root)",
+		},
+	},
+
 	"lsp.formatOnWrite": {
 		type: "boolean",
 		default: false,

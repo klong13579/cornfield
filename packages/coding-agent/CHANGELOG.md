@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **LSP 预热不再默认开启：新设置 `lsp.warmupOnStart`（默认 `false`），服务在首次用到该语言的文件时才起**（`src/config/settings-schema.ts`, `src/sdk.ts`, `src/lsp/index.ts`, `src/modes/components/welcome.ts`, `src/modes/controllers/command-controller.ts`）：此前每个会话启动都对 cwd 上 **全部**探测到的语言服务开一次预热，与这个会话要不要碰那种语言无关。实测代价（2026-09-18，squad 多 worker 场景）：每个 workspace root 各起一份 rust-analyzer（lspmux 按 `(server,args,cwd)` 复用，worktree 之间不复用），而 RA 一打开 workspace 就跑 `cargo check --workspace --all-targets`（本仓 **464 个 crate**）——5 个 root = 5 份 RA ≈ **10.5GB phys_footprint**，构建波峰值 27 个 rustc/clang 进程 / 2.7GB。现默认改为「探测但不启动」：`discoverStartupLspServers()` 仍列出这个 cwd 能用哪些服务（无需进程），状态记为新增的 `on-demand`；真正起进程的路径（写文件/编辑/lsp 工具）本来就存在且未改动，只是不再提前发生。预热仍可用 `lsp.warmupOnStart: true` 打开（打开时行为与之前一致，含 TUI 的 `connecting` → `ready/error` 流转）。
+  - 两处配套：**预热不再受 `lsp.diagnosticsOnWrite` 约束**（两个开关各管各的：前者管启动时机，后者管写后诊断），且 `lsp.enabled: false` 时依旧不做任何探测。存活面板与 `/status` 认识 `on-demand`：`welcome.ts` 用中性圆点（不再把「没启动」画成待启动转圈或错误叉），`command-controller.ts` 用 muted 色而不是 error。
+  - **未验到的部分**：真集结（herdr + 真 worker）那段编排没跑；已验证的是单会话层面（新会话启动后 LSP 面板显示 `on-demand`、无任何语言服务子进程）。
+
+- **LSP 空闲超时默认 10 分钟，不再是「关闭」**（`src/lsp/config.ts`, `src/lsp/client.ts`）：`idleTimeoutMs` 此前只在 lsp 配置文件里显式给出时生效，否则客户端永不回收——一个只碰过一个 `.ts` 文件的长会话会把 TypeScript 的整套服务进程（`typescript-language-server` + 2×tsserver + typingsInstaller ≈ 150MB）留到进程结束。现加 `DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000`，无配置时生效；配置文件里的显式值（含 `0` = 关闭）仍然优先。
+  - 同批修掉一个会被这个默认值放大的隐患：**空闲检查的 `setInterval` 没有 `unref()`**，而它只在 `setIdleTimeout` 里被清。带 ref 的定时器会把 Bun 的事件循环吊住——默认打开等于给 print mode / 一次性运行的「跑完了不退出」装了一个 10 分钟的引信（同类型事故见 `packages/gateway` 的 `runCommand` 超时定时器）。现在 `unref()`。
+
+- **rust-analyzer 的两个默认值**（`src/lsp/defaults.json`）：① `cachePriming.enable = false`——RA 打开 workspace 时的后台 `cargo check` 预热（实测 464 个 crate 一波）由它控制；② `warmupTimeoutMs: 30000`——此前沿用全局 `WARMUP_TIMEOUT_MS = 2000`，而实测 RA 的 `initialize` 在本仓这类工作区上**必然超过 2 秒**（`~/.cornfield/logs/cornfield.*.log` 里 09-03 / 09-11 / 09-16 / 09-17 都有 `rust-analyzer: initialize timed out after 2000ms`），于是预热被判定失败并 kill 掉客户端，而服务端进程（经 lspmux）仍在跑：成本照付、连接不保留。该字段是 `ServerConfig` 既有的 per-server 覆盖（`markdown` 已在用）。
+  - **未验到**：`cachePriming` 是否在被 RA 读取时**早于**预热动作（cornfield 走 `workspace/configuration` 应答，RA 何时拉取未经实测）——如果晚于，这一项不生效；RA 侧确定生效的入口是工作区里的 `rust-analyzer.toml`（RA 启动时读文件）。
+
 ## [1.2.5] - 2026-09-16
 
 ### Added

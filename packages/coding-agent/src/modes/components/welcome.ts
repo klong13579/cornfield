@@ -10,7 +10,8 @@ export interface RecentSession {
 
 export interface LspServerInfo {
 	name: string;
-	status: "ready" | "error" | "connecting";
+	/** `on-demand` = known for this cwd, not started yet (starts on first use). */
+	status: "ready" | "error" | "connecting" | "on-demand";
 	fileTypes: string[];
 }
 
@@ -124,7 +125,9 @@ export class WelcomeComponent implements Component {
 						? theme.styledSymbol("status.success", "success")
 						: server.status === "connecting"
 							? theme.styledSymbol("status.pending", "muted")
-							: theme.styledSymbol("status.error", "error");
+							: server.status === "on-demand"
+								? theme.styledSymbol("status.info", "muted")
+								: theme.styledSymbol("status.error", "error");
 				const exts = server.fileTypes.slice(0, 3).join(" ");
 				lspLines.push(` ${icon} ${theme.fg("muted", server.name)} ${theme.fg("dim", exts)}`);
 			}
