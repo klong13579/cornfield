@@ -16,7 +16,7 @@
  * mock of a parent session; it is a parent session with a CLI instead of a TUI.
  */
 
-import { getAgentDir } from "@cornfield/utils";
+import { getDefaultAgentHome } from "@cornfield/utils";
 import { IntercomClient } from "../../src/intercom-extension/broker/client";
 import { createIntercomRegistrationProbe } from "../../src/intercom-extension/child-session-edge";
 import { createIntercomLivenessProbe } from "../../src/intercom-extension/child-session-tree";
@@ -80,8 +80,8 @@ if (mode === "delegate") {
 	const { child, record } = await manager.delegate({
 		sessionId: childId,
 		// This host delegates to its own Agent (the process it runs in) — read from the
-		// environment at call time, since `getAgentDir()` is a module-load-time cache.
-		agentDir: process.env.CORNFIELD_AGENT_DIR?.trim() || getAgentDir(),
+		// environment at call time, since `getDefaultAgentHome()` is a module-load-time cache.
+		agentDir: process.env.CORNFIELD_CLIENT_DIR?.trim() || getDefaultAgentHome(),
 		cwd,
 		command: { bin: binary, args: ["--mode", "wire-stdio"] },
 		delegationRole: "wp7-host",

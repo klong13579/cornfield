@@ -15,6 +15,7 @@ import * as path from "node:path";
 import { Args, Command, Flags, renderCommandHelp } from "@cornfield/utils/cli";
 import {
 	renderList,
+	renderMigrateDefaultHome,
 	renderReconcile,
 	renderRegister,
 	renderShow,
@@ -22,6 +23,7 @@ import {
 	renderValidate,
 	runAgentInit,
 	runAgentList,
+	runAgentMigrateDefaultHome,
 	runAgentReconcile,
 	runAgentRegister,
 	runAgentShow,
@@ -30,7 +32,17 @@ import {
 } from "../cli/agent-cli";
 import { initTheme } from "../modes/theme/theme";
 
-const ACTIONS = ["init", "list", "show", "validate", "register", "unregister", "reconcile", "help"];
+const ACTIONS = [
+	"init",
+	"list",
+	"show",
+	"validate",
+	"register",
+	"unregister",
+	"reconcile",
+	"migrate-default-home",
+	"help",
+];
 
 export default class Agent extends Command {
 	static description =
@@ -72,6 +84,9 @@ export default class Agent extends Command {
 		semantic: Flags.boolean({ description: "Run LLM semantic audit (validate)" }),
 
 		deleteFiles: Flags.boolean({ description: "Also rm -rf the agentDir on disk (unregister). Off by default." }),
+		dryRun: Flags.boolean({
+			description: "Report what would move without touching the filesystem (migrate-default-home)",
+		}),
 		json: Flags.boolean({ description: "Output JSON" }),
 	};
 
@@ -103,6 +118,10 @@ export default class Agent extends Command {
 		"  cornfield agent unregister hr3                          Remove hr3 from the registry (does not delete files)",
 		"  cornfield agent unregister hr3 --delete-files           Also rm -rf the agentDir on disk",
 		"  cornfield agent reconcile                               Prune stale entries; re-register any in default location",
+		"",
+		"  ======== default agent 的家 ========",
+		"  cornfield agent migrate-default-home --dry-run          Show what would move out of ~/.cornfield/agent",
+		"  cornfield agent migrate-default-home                    Move the default Agent's own state into ~/cf-workspace",
 		"",
 	];
 
@@ -232,6 +251,16 @@ export default class Agent extends Command {
 			case "reconcile": {
 				const result = await runAgentReconcile({ json: flags.json as boolean | undefined });
 				console.log(renderReconcile(result, Boolean(flags.json)));
+				return;
+			}
+			case "migrate-default-home": {
+				const result = await runAgentMigrateDefaultHome({
+					dryRun: flags.dryRun as boolean | undefined,
+					json: flags.json as boolean | undefined,
+				});
+				console.log(renderMigrateDefaultHome(result, Boolean(flags.json)));
+				const failed = result.entries.filter(entry => entry.status === "failed");
+				process.exitCode = failed.length > 0 ? 1 : 0;
 				return;
 			}
 			default:

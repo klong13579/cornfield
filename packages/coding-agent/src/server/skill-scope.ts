@@ -24,7 +24,7 @@
  */
 
 import * as path from "node:path";
-import { isEnoent, parseFrontmatter, pathIsWithin } from "@cornfield/utils";
+import { getClientDir, isEnoent, parseFrontmatter, pathIsWithin } from "@cornfield/utils";
 import { classifyScope, type SkillBlockedDto, type SkillLoadErrorDto, type SkillScopeRowDto } from "@cornfield/wire";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 
@@ -38,7 +38,7 @@ import type { Skill, SkillWarning } from "../extensibility/skills";
 export interface SkillScopeAnchor {
 	/** 被查询的 Agent（default = 进程自身的会话）。 */
 	agentId: string;
-	/** Agent 的物理 home；default agent 用 getAgentDir()（meta.agentDir 在 default 上是 cwd，不是家）。 */
+	/** Agent 的物理 home（default agent 用 getDefaultAgentHome()）。 */
 	agentDir: string;
 	/** 会话 cwd（未 attach 的 agent：调用方传 agentDir —— 它就是那个 agent 的会话根）。 */
 	sessionCwd: string;
@@ -127,13 +127,20 @@ export async function projectLoadedSkills(
 /**
  * 按名字在既有发现根里找 SKILL.md（停用名单只有名字，没有路径）。
  * 候选顺序 = 发现顺序，且带上 discovery 会给这个目录的 `provider:level`：
- * agentDir/skills（native user 级）→ agentDir/.cornfield/skills → 会话 cwd 的 .cornfield/skills（都是 project 级）。
+ *
+ *   1. `<client dir>/skills` —— user 级。这是 discovery 的用户级技能根
+ *      （`discovery/builtin.ts` 用 `ctx.home` + `.cornfield/agent/skills` 拼出来的那个），
+ *      对**每个** Agent 都是同一个根：它是用户级的，不是某个 Agent 的。
+ *   2. `<agentDir>/skills` —— 这个 Agent 自己 agentDir 下的技能目录（registry agent 的 native user 级）。
+ *   3. `<agentDir>/.cornfield/skills` —— agentDir 声明的 skillsDir。
+ *   4. `<sessionCwd>/.cornfield/skills` —— 会话 cwd 的项目级技能（上述 2/3 也是项目级，当 cwd = agentDir 时）。
  */
 export function skillPathCandidates(
 	name: string,
 	anchor: SkillScopeAnchor,
 ): Array<{ path: string; level: "user" | "project" }> {
 	return [
+		{ path: path.join(getClientDir(), "skills", name, "SKILL.md"), level: "user" },
 		{ path: path.join(anchor.agentDir, "skills", name, "SKILL.md"), level: "user" },
 		{ path: path.join(anchor.agentDir, ".cornfield", "skills", name, "SKILL.md"), level: "project" },
 		{ path: path.join(anchor.sessionCwd, ".cornfield", "skills", name, "SKILL.md"), level: "project" },

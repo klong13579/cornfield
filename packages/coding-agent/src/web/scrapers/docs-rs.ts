@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { gunzipSync } from "node:zlib";
-import { getAgentDir, isEnoent, logger, ptree, tryParseJson } from "@cornfield/utils";
+import { getClientDir, isEnoent, logger, ptree, tryParseJson } from "@cornfield/utils";
 import { ToolAbortError } from "../../tools/tool-errors";
 import type { RenderResult, SpecialHandler } from "./types";
 import { buildResult, MAX_BYTES } from "./types";
@@ -291,7 +291,7 @@ function getDocsRsCacheVersionSegment(version: string, now = new Date()): string
 function getDocsRsCachePath(target: DocsRsTarget, now = new Date()): string {
 	const crate = sanitizeCacheSegment(target.crateName);
 	const version = getDocsRsCacheVersionSegment(target.version, now);
-	return path.join(getAgentDir(), DOCS_RS_CACHE_ROOT, `docsrs_${crate}_${version}`, DOCS_RS_CACHE_FILENAME);
+	return path.join(getClientDir(), DOCS_RS_CACHE_ROOT, `docsrs_${crate}_${version}`, DOCS_RS_CACHE_FILENAME);
 }
 
 async function readCachedRustdocCrate(

@@ -5,7 +5,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir, getProjectDir, isEnoent } from "@cornfield/utils";
+import { CONFIG_DIR_NAME, getClientDir, getProjectDir, isEnoent } from "@cornfield/utils";
 import { YAML } from "bun";
 import chalk from "chalk";
 import { theme } from "../modes/theme/theme";
@@ -49,7 +49,7 @@ function resolveTargetDir(flags: AgentsCommandArgs["flags"]): string {
 		return path.resolve(getProjectDir(), CONFIG_DIR_NAME, "agents");
 	}
 
-	return path.join(getAgentDir(), "agents");
+	return path.join(getClientDir(), "agents");
 }
 
 function toFrontmatter(agent: AgentDefinition): Record<string, unknown> {

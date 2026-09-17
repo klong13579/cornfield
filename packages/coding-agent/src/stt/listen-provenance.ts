@@ -6,20 +6,20 @@
  * {@link ListenProvenance}，两个写入方共用：
  *
  *   serve（wire `record_transcribe*`）  agentDir/agentId 来自 agent-scope（registry + 会话）
- *   CLI / TUI（`/record`）                agentDir = getAgentDir()（进程自己的配置根）
+ *   CLI / TUI（`/record`）                agentDir = getDefaultAgentHome()（default Agent 的家）
  *
  * 失败模型：Project 注册表读不出来 / cwd 匹配不到 → **不写这一项**（缺省 = 未标注），
  * 而不是写一个猜测值。写入方仍然拿到 agentDir —— 那是它确定知道的事实。
  */
 
-import { getAgentDir, logger } from "@cornfield/utils";
+import { getDefaultAgentHome, logger } from "@cornfield/utils";
 import { loadProjects, matchProjectForPath } from "../agent-domain/project-store";
 import type { ListenProvenance } from "./listen-service";
 
 export interface ListenProvenanceInput {
 	/** 注册表 key；CLI/TUI 没有 agent 身份时缺省。 */
 	agentId?: string;
-	/** Agent 的 home。缺省 = 进程自己的配置根（getAgentDir）。 */
+	/** Agent 的 home。缺省 = 进程自己的配置根（getDefaultAgentHome）。 */
 	agentDir?: string;
 	/** 归属判定用的路径（通常是会话 cwd；缺省 = agentDir）。 */
 	cwd?: string;
@@ -29,7 +29,7 @@ export interface ListenProvenanceInput {
 
 /** 写入方（CLI/TUI/serve）统一入口：确定的事实落盘，不确定的留空。 */
 export async function resolveListenProvenance(input: ListenProvenanceInput = {}): Promise<ListenProvenance> {
-	const agentDir = input.agentDir ?? getAgentDir();
+	const agentDir = input.agentDir ?? getDefaultAgentHome();
 	const provenance: ListenProvenance = { agentDir };
 	if (input.agentId) provenance.agentId = input.agentId;
 	if (input.sessionFile) provenance.sessionFile = input.sessionFile;

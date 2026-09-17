@@ -187,7 +187,7 @@ async function finalizeArtifacts(
 
 /**
  * 提取 agent 产物（agent 维度）。roots 是会话工作面的边界（同 fs_*）；sessionsRoot 是会话根——
- * default 必须传 cwd 编码子目录（getSessionsDir()/<encoded-cwd>，否则全局根下
+ * default 必须传 cwd 编码子目录（getSessionsDir(<home>)/<encoded-cwd>，否则全局根下
  * 其它项目的新会话会挤掉本 agent 的会话）；registry 传 <agentDir>/sessions。
  */
 export async function listAgentArtifacts(roots: readonly string[], sessionsRoot: string): Promise<ArtifactDto[]> {

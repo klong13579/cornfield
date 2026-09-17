@@ -8,7 +8,7 @@ import {
 	formatChildSessionReport,
 } from "@cornfield/coding-agent/session/child-session-report";
 import { type AutocompleteItem, Text } from "@cornfield/tui";
-import { getAgentDir, isEnoent } from "@cornfield/utils";
+import { getClientDir, isEnoent } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import { randomUUID } from "crypto";
 import { resolveAskRouting } from "./ask-routing";
@@ -767,7 +767,7 @@ export function buildIntercomCompletions(
  * Built from the bundled text module — no external file needed at runtime.
  */
 async function ensureIntercomSkillInstalled(): Promise<void> {
-	const skillDir = path.join(getAgentDir(), "skills", "pi-intercom");
+	const skillDir = path.join(getClientDir(), "skills", "pi-intercom");
 	try {
 		const existing = await Bun.file(path.join(skillDir, "SKILL.md")).text();
 		if (existing === intercomSkill) return;

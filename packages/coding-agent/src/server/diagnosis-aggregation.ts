@@ -11,7 +11,7 @@
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import * as path from "node:path";
-import { getAgentDir, logger } from "@cornfield/utils";
+import { getClientDir, logger } from "@cornfield/utils";
 import type { DiagnosisSummaryDto } from "@cornfield/wire";
 
 // ── 类型导出 ──
@@ -86,7 +86,7 @@ let _db: Database | null = null;
 export function getAggregationDb(): Database {
 	if (_db) return _db;
 
-	const dbPath = path.join(getAgentDir(), "diagnosis-reports.db");
+	const dbPath = path.join(getClientDir(), "diagnosis-reports.db");
 	_db = new Database(dbPath, { create: true });
 	_db.exec("PRAGMA journal_mode=WAL;");
 	// 逐条执行 DDL（SQLite 一次只能执行一条语句）

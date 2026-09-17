@@ -19,7 +19,7 @@ import { Database } from "bun:sqlite";
 import path from "node:path";
 import type { AgentTool } from "@cornfield/agent";
 import { StringEnum } from "@cornfield/ai";
-import { $flag, getAgentDir, logger, VERSION } from "@cornfield/utils";
+import { $flag, getClientDir, logger, VERSION } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import type { Settings } from "..";
 import { normalizeToolName } from "./builtin-names";
@@ -53,7 +53,7 @@ export function isAutoQaEnabled(settings?: Settings): boolean {
 }
 
 export function getAutoQaDbPath(): string {
-	return path.join(getAgentDir(), "autoqa.db");
+	return path.join(getClientDir(), "autoqa.db");
 }
 
 const GRIEVANCES_SCHEMA = `

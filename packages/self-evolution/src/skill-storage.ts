@@ -5,7 +5,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, logger } from "@cornfield/utils";
+import { getDefaultAgentHome, logger } from "@cornfield/utils";
 import { getUnifiedSkillsDir, resolveGlobalMemoryRootCandidates } from "./paths";
 import { ensureAgentBodyShape } from "./skill-format";
 import { isValidSkillName } from "./skill-score";
@@ -229,7 +229,7 @@ export async function ensureUnifiedSkillStorage(cwd: string, memoryRoot: string,
 	await fs.mkdir(unifiedDir, { recursive: true });
 	await migrateNestedMemorySkills(memoryRoot, unifiedDir);
 	if (!globalStore) {
-		for (const globalMemoryRoot of resolveGlobalMemoryRootCandidates(getAgentDir(), cwd)) {
+		for (const globalMemoryRoot of resolveGlobalMemoryRootCandidates(getDefaultAgentHome(), cwd)) {
 			if (globalMemoryRoot === memoryRoot) continue;
 			await migrateNestedMemorySkills(globalMemoryRoot, unifiedDir);
 		}

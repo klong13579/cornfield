@@ -37,7 +37,7 @@
  */
 
 import * as path from "node:path";
-import { getAgentDir, logger } from "@cornfield/utils";
+import { getDefaultAgentHome, logger } from "@cornfield/utils";
 import type {
 	BroughtBackChildResultDto,
 	ChildSessionNodeDto,
@@ -137,7 +137,7 @@ async function hostFor(
 		intercomSessionId: parentEdgeId(session),
 	};
 	// 身份根与 `agent-scope` 同一条规则：它是 resolver 解析 roots 要的那一项，不是从 cwd 推的。
-	const agentDir = resolveAgentRuntimeDir({ agentId: meta.id, agentDir: meta.agentDir }) ?? getAgentDir();
+	const agentDir = resolveAgentRuntimeDir({ agentId: meta.id, agentDir: meta.agentDir }) ?? getDefaultAgentHome();
 	const workspace = await resolveSessionWorkspace({ session: session.sessionManager, agentDir });
 	if (workspace.projectId !== undefined) self.projectId = workspace.projectId;
 	const host = (options.host ?? createServeDelegationHost)({ session, meta, self });

@@ -14,7 +14,7 @@ import type {
 import { getTerminalId } from "@cornfield/tui";
 import {
 	getBlobsDir,
-	getAgentDir as getDefaultAgentDir,
+	getDefaultAgentHome,
 	getProjectDir,
 	getSessionsDir,
 	getTerminalSessionsDir,
@@ -3128,7 +3128,7 @@ export class SessionManager {
 	 * List all sessions across all project directories.
 	 */
 	static async listAll(storage: SessionStorage = new FileSessionStorage()): Promise<SessionInfo[]> {
-		const sessionsRoot = path.join(getDefaultAgentDir(), "sessions");
+		const sessionsRoot = getSessionsDir(getDefaultAgentHome());
 		try {
 			const files: string[] = [];
 			// Each project is a cwd-encoded subdirectory; sessions live under

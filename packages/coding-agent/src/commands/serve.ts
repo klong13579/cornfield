@@ -27,6 +27,7 @@ import { startWireServer } from "../server/wire-server";
 import type { AuthStorage } from "../session/auth-storage";
 import { SessionManager } from "../session/session-manager";
 import { SessionStore } from "../session/session-store";
+import { assertDefaultAgentHome } from "../skeleton/default-home";
 import { repo } from "../utils/git";
 
 export default class Serve extends Command {
@@ -63,6 +64,9 @@ export default class Serve extends Command {
 		const token: string = flags.token ?? "";
 
 		await logger.time("serve:boot", async () => {
+			// 一个 Session 只属于一个家：注册表里 default 的路径与本进程解析出的家不一致就拒绝
+			// 启动（不静默挑一个）。先于任何文件写入，避免把会话落到一个没人认的家。
+			await assertDefaultAgentHome();
 			await initTheme();
 			const authStorage = await discoverAuthStorage();
 			const modelRegistry = new ModelRegistry(authStorage);
@@ -70,7 +74,7 @@ export default class Serve extends Command {
 			// 初始化全局 settings（default agent 的配置根 = 全局 agent 目录；registry agent 各自
 			// Settings.create({ agentDir }) 在 sessionFactory 内惰性创建）。后续 Settings.instance
 			// 读取（如 get_available_models 的 disabled 名单）依赖此初始化。
-			await Settings.init({ cwd });
+			await Settings.init();
 			// 模型目录快速就位：静态 + 磁盘缓存本地加载（offline 不发网络），在线发现转后台补齐。
 			// serve 冷启动实测每次会并发拉 discoverable provider 列表等网络（4-10s 抖动），
 			// 是桌面客户端「打开首页要等几秒才显示连接上」的另一个根因；HTTP 30+ 连接等待时不阻塞启动。

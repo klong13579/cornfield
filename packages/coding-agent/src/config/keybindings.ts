@@ -9,7 +9,7 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "@cornfield/tui";
-import { getAgentDir, isEnoent, logger } from "@cornfield/utils";
+import { getClientDir, isEnoent, logger } from "@cornfield/utils";
 
 /**
  * Application-level keybindings (coding agent specific).
@@ -410,8 +410,8 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	/**
 	 * Create from config file at agentDir/keybindings.json.
 	 */
-	static create(agentDir: string = getAgentDir()): KeybindingsManager {
-		const configPath = path.join(agentDir, "keybindings.json");
+	static create(clientDir: string = getClientDir()): KeybindingsManager {
+		const configPath = path.join(clientDir, "keybindings.json");
 		const userBindings = KeybindingsManager.#loadFromFile(configPath);
 		const manager = new KeybindingsManager(userBindings, configPath);
 		// Set globally so getKeybindings() returns this manager

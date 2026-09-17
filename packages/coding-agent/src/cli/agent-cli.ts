@@ -16,8 +16,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	checkDefaultAgentHome,
+	type DefaultHomeMigrationReport,
 	ensureAgentDir,
 	findAgent,
+	migrateDefaultAgentHome,
 	pruneStaleEntries,
 	readWorkspaceDeclaration,
 	reconcileSkeletonFiles,
@@ -537,6 +540,21 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		}
 	}
 
+	// 3c. the default Agent's home must be the directory the registry declares. A session
+	// belongs to exactly one home; when `default` points elsewhere, every session this client
+	// starts lands somewhere the registry does not know. `serve` / `main` refuse to start on the
+	// same disagreement — this is where it is visible without starting a session.
+	const defaultHome = await checkDefaultAgentHome();
+	if (!defaultHome.ok) {
+		issues.push({
+			level: "error",
+			file: "registry.json",
+			message: defaultHome.message ?? "default Agent home mismatch",
+			rule: "default-agent-home-mismatch",
+			repairable: false,
+		});
+	}
+
 	// 4. prompt-includes.json must be valid JSON if present
 	const promptIncludesPath = path.join(agentDir, "prompt-includes.json");
 	if (await pathExists(promptIncludesPath)) {
@@ -972,6 +990,70 @@ export function renderShow(detail: AgentDetail, json: boolean): string {
 	lines.push(`  Cron tasks: ${detail.cronTaskCount}`);
 	lines.push(`  Sessions:   ${detail.sessionCount}`);
 	return lines.join("\n");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// migrate-default-home
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface MigrateDefaultHomeArgs {
+	/** Report what would change without touching the filesystem. */
+	dryRun?: boolean;
+	json?: boolean;
+}
+
+/**
+ * Move the default Agent's own state out of the client dir into its home (`~/cf-workspace`).
+ * Thin wrapper over `skeleton/default-home#migrateDefaultAgentHome` so the CLI path and the
+ * library share one implementation (and one idempotence story).
+ */
+export async function runAgentMigrateDefaultHome(
+	args: MigrateDefaultHomeArgs = {},
+): Promise<DefaultHomeMigrationReport> {
+	return migrateDefaultAgentHome({ dryRun: args.dryRun });
+}
+
+export function renderMigrateDefaultHome(result: DefaultHomeMigrationReport, json: boolean): string {
+	if (json) return JSON.stringify(result, null, 2);
+	const lines: string[] = [];
+	lines.push(`client dir: ${result.clientDir}`);
+	lines.push(`agent home: ${result.home}`);
+	lines.push(result.dryRun ? "(dry run — nothing was moved)" : "");
+	lines.push("");
+	for (const entry of result.entries) {
+		const tag =
+			entry.status === "moved"
+				? "→"
+				: entry.status === "merged"
+					? "⇄"
+					: entry.status === "kept"
+						? "="
+						: entry.status === "failed"
+							? "✗"
+							: " ";
+		const detail =
+			entry.status === "kept"
+				? `kept in client dir — ${entry.reason ?? "client-scope"}`
+				: entry.status === "absent"
+					? "nothing to move"
+					: `${entry.movedCount} entr${entry.movedCount === 1 ? "y" : "ies"}${
+							entry.targetHash ? ` → hash ${entry.targetHash}` : ""
+						}`;
+		lines.push(`${tag} ${entry.name.padEnd(28)} ${detail}`);
+		if (entry.conflicts.length > 0) {
+			lines.push(`    conflicts (left in the client dir, never overwritten): ${entry.conflicts.join(", ")}`);
+		}
+		if (entry.live.length > 0) {
+			lines.push(`    in use by a live process (left for the next run): ${entry.live.join(", ")}`);
+		}
+		if (entry.error) lines.push(`    error: ${entry.error}`);
+	}
+	lines.push("");
+	lines.push(
+		`entries: client dir ${result.before.clientDirEntries} → ${result.after.clientDirEntries}, ` +
+			`home ${result.before.homeEntries} → ${result.after.homeEntries}`,
+	);
+	return lines.filter(line => line !== "").join("\n");
 }
 
 export function renderValidate(result: ValidateResult, json: boolean): string {

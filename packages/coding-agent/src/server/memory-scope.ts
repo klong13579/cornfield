@@ -41,7 +41,7 @@ const MEMORY_FILE_MAX_BYTES = 128 * 1024;
 /** 投影用的定位事实（调用方按焦点 Agent / 会话解析后传入，本模块不再自己猜）。 */
 export interface MemoryScopeAnchor {
 	agentId: string;
-	/** Agent 的物理 home；default agent 用 getAgentDir()（它的 meta.agentDir 是 cwd）。 */
+	/** Agent 的物理 home（default agent 用 getDefaultAgentHome()）。 */
 	agentDir: string;
 	/** 会话 cwd（未 attach 的 registry agent = agentDir，就是它会话的根）。 */
 	sessionCwd: string;

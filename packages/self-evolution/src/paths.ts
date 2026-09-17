@@ -8,7 +8,7 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, getConfigDirName, getMemoriesDir, getProjectAgentDir } from "@cornfield/utils";
+import { getConfigDirName, getDefaultAgentHome, getMemoriesDir, getProjectAgentDir } from "@cornfield/utils";
 
 /** Default: user-level `~/.cornfield/self-evolution` + encoded memory paths. */
 export const DEFAULT_EVOLUTION_GLOBAL_STORE = true;
@@ -33,7 +33,7 @@ export interface EvolutionPathLayout {
 
 /** User-level evolution dir (cross-project utilities only; not project MEMORY). */
 export function resolveUserEvolutionDir(agentDir?: string): string {
-	return path.join(agentDir ?? getAgentDir(), "evolution");
+	return path.join(agentDir ?? getDefaultAgentHome(), "evolution");
 }
 
 export function resolveProjectConfigDir(cwd: string): string {
@@ -93,7 +93,7 @@ export function resolveGlobalMemoryRoot(agentDir: string, cwd: string): string |
 	if (isSystemPath(cwd)) {
 		return undefined;
 	}
-	const agent = agentDir ?? getAgentDir();
+	const agent = agentDir ?? getDefaultAgentHome();
 	const encoded = encodeProjectPathForGlobalMemory(cwd);
 	return path.join(agent, "memories", encoded);
 }
@@ -104,7 +104,7 @@ export function resolveGlobalMemoryRootCandidates(agentDir: string, cwd: string)
 		return [];
 	}
 	const encoded = encodeProjectPathForGlobalMemory(cwd);
-	const agent = agentDir ?? getAgentDir();
+	const agent = agentDir ?? getDefaultAgentHome();
 	const flat = path.join(agent, "memories", encoded);
 	const statePath = path.join(getMemoriesDir(agentDir), encoded);
 	return flat === statePath ? [flat] : [flat, statePath];

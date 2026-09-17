@@ -1,14 +1,24 @@
 /**
  * Centralized path helpers for cornfield config directories.
  *
- * Uses CORNFIELD_CONFIG_DIR (default ".cornfield") for the config root and
- * CORNFIELD_AGENT_DIR to override the agent directory.
+ * Two roots, two owners — never one directory serving both:
  *
- * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME environment
- * variables are set, paths are redirected to XDG-compliant locations under
- * $XDG_*_HOME/cornfield/. This requires running `cornfield config migrate` first to
- * move data to the new locations. No filesystem existence checks are performed
- * — if the env var is set, cornfield trusts that the migration has been done.
+ *   - **Client root** (`getClientDir()`, default `~/.cornfield/agent`): state that belongs to
+ *     the process/client and outlives any single Agent — credentials (`agent.db`), the Agent
+ *     registry, the Project store, caches (history/models/autoqa/diagnosis), blobs, terminal
+ *     breadcrumbs, extension installs. Overridable with `CORNFIELD_CLIENT_DIR`.
+ *   - **Default Agent home** (`getDefaultAgentHome()`, fixed to `~/cf-workspace` by
+ *     `docs/agent-task-control-plane-v1.md` §12): the default Agent's own agentDir — its
+ *     sessions, config, memories and other Agent-scoped files. Other Agents pass their own
+ *     agentDir explicitly.
+ *
+ * `CORNFIELD_CONFIG_DIR` (default `.cornfield`) names the config root (`getConfigRootDir()`).
+ * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME are set, *client- and
+ * root-scoped* paths are redirected to XDG-compliant locations under `$XDG_*_HOME/cornfield/`.
+ * This requires running `cornfield config migrate` first to move data to the new locations.
+ * No filesystem existence checks are performed — if the env var is set, cornfield trusts that
+ * the migration has been done. The default Agent's home is a user-visible workspace and is
+ * never XDG-relocated.
  */
 
 import * as fs from "node:fs";
@@ -27,6 +37,9 @@ export const VERSION: string = version;
 
 /** Minimum Bun version */
 export const MIN_BUN_VERSION: string = engines.bun.replace(/[^0-9.]/g, "");
+
+/** Directory name of the default Agent's home under the user's home. */
+export const DEFAULT_AGENT_HOME_DIR_NAME: string = "cf-workspace";
 
 // =============================================================================
 // Project directory
@@ -89,11 +102,6 @@ export function setProjectDir(dir: string): void {
 	process.chdir(projectDir);
 }
 
-/** Get the config directory name relative to home (e.g. ".cornfield" or CORNFIELD_CONFIG_DIR override). */
-export function getConfigDirName(): string {
-	return process.env.CORNFIELD_CONFIG_DIR || CONFIG_DIR_NAME;
-}
-
 /**
  * Absolute config root (`~/.cornfield` by default).
  *
@@ -111,8 +119,13 @@ export function resolveConfigRootDir(home: string = os.homedir()): string {
 	return path.isAbsolute(dirName) ? dirName : path.join(home, dirName);
 }
 
-/** Get the config agent directory name relative to home (e.g. ".cornfield/agent" or CORNFIELD_CONFIG_DIR + "/agent"). */
-export function getConfigAgentDirName(): string {
+/** Get the config directory name relative to home (e.g. ".cornfield" or CORNFIELD_CONFIG_DIR override). */
+export function getConfigDirName(): string {
+	return process.env.CORNFIELD_CONFIG_DIR || CONFIG_DIR_NAME;
+}
+
+/** Get the client dir name relative to home (e.g. ".cornfield/agent"). */
+export function getConfigClientDirName(): string {
 	return `${getConfigDirName()}/agent`;
 }
 
@@ -123,30 +136,34 @@ export function getConfigAgentDirName(): string {
 type XdgCategory = "data" | "state" | "cache";
 
 /**
- * Resolves and caches all cornfield directory paths. On Linux, when XDG environment
- * variables are set, paths are redirected under $XDG_*_HOME/cornfield/. A new
- * instance is created whenever the agent directory changes, which naturally
- * invalidates all cached paths.
+ * Resolves and caches the client-scoped cornfield directories. On Linux, when XDG environment
+ * variables are set, paths are redirected under $XDG_*_HOME/cornfield/. A new instance is
+ * created whenever the client directory changes, which naturally invalidates all cached paths.
+ *
+ * Only the client root goes through this resolver: the default Agent's home is a plain
+ * directory under the user's home (`getDefaultAgentHome()`), never XDG-relocated.
  */
 class DirResolver {
 	readonly configRoot: string;
-	readonly agentDir: string;
+	readonly clientDir: string;
 
-	// Per-category base dirs. Without XDG, all three equal configRoot / agentDir.
+	// Per-category base dirs. Without XDG, all three equal clientDir.
 	// With XDG on Linux, they point to $XDG_*_HOME/cornfield/.
 	readonly #rootDirs: Record<XdgCategory, string>;
-	readonly #agentDirs: Record<XdgCategory, string>;
+	readonly #clientDirs: Record<XdgCategory, string>;
 
 	readonly #rootCache = new Map<string, string>();
-	readonly #agentCache = new Map<string, string>();
+	readonly #clientCache = new Map<string, string>();
 
-	constructor(agentDirOverride?: string) {
-		// The root below HOME (or the absolute `CORNFIELD_CONFIG_DIR`): see `resolveConfigRootDir`.
-		this.configRoot = configRootOverride ?? resolveConfigRootDir();
+	constructor(clientDirOverride?: string) {
+		const dirName = getConfigDirName();
+		// CORNFIELD_CONFIG_DIR may be absolute (e.g. /tmp/test-cornfield) — use it directly;
+		// otherwise join it under the home directory (relative name like ".cornfield").
+		this.configRoot = configRootOverride ?? (path.isAbsolute(dirName) ? dirName : path.join(os.homedir(), dirName));
 
-		const defaultAgent = path.join(this.configRoot, "agent");
-		this.agentDir = agentDirOverride ? path.resolve(agentDirOverride) : defaultAgent;
-		const isDefault = this.agentDir === defaultAgent;
+		const defaultClientDir = path.join(this.configRoot, "agent");
+		this.clientDir = clientDirOverride ? path.resolve(clientDirOverride) : defaultClientDir;
+		const isDefault = this.clientDir === defaultClientDir;
 
 		// XDG is a Linux convention. On other platforms, or for non-default
 		// profiles, all categories resolve to the legacy paths.
@@ -177,10 +194,10 @@ class DirResolver {
 			cache: xdgCache ?? this.configRoot,
 		};
 		// XDG flattens the agent/ prefix: ~/.cornfield/agent/sessions → $XDG_DATA_HOME/cornfield/sessions
-		this.#agentDirs = {
-			data: xdgData ?? this.agentDir,
-			state: xdgState ?? this.agentDir,
-			cache: xdgCache ?? this.agentDir,
+		this.#clientDirs = {
+			data: xdgData ?? this.clientDir,
+			state: xdgState ?? this.clientDir,
+			cache: xdgCache ?? this.clientDir,
 		};
 	}
 
@@ -194,17 +211,14 @@ class DirResolver {
 		return result;
 	}
 
-	/** Agent subdirectory, with optional XDG override. */
-	agentSubdir(userAgentDir: string | undefined, subdir: string, xdg?: XdgCategory): string {
-		if (!userAgentDir || userAgentDir === this.agentDir) {
-			const cached = this.#agentCache.get(subdir);
-			if (cached) return cached;
-			const base = xdg ? this.#agentDirs[xdg] : this.agentDir;
-			const result = path.join(base, subdir);
-			this.#agentCache.set(subdir, result);
-			return result;
-		}
-		return path.join(userAgentDir, subdir);
+	/** Client-dir subdirectory, with optional XDG override. */
+	clientSubdir(subdir: string, xdg?: XdgCategory): string {
+		const cached = this.#clientCache.get(subdir);
+		if (cached) return cached;
+		const base = xdg ? this.#clientDirs[xdg] : this.clientDir;
+		const result = path.join(base, subdir);
+		this.#clientCache.set(subdir, result);
+		return result;
 	}
 }
 
@@ -212,7 +226,10 @@ class DirResolver {
  * the CORNFIELD_CONFIG_DIR-derived default. Pass `undefined` to reset to the default. */
 let configRootOverride: string | undefined;
 
-let dirs = new DirResolver(process.env.CORNFIELD_AGENT_DIR);
+/** Test-only override for the default Agent's home (normally `~/cf-workspace`). */
+let defaultAgentHomeOverride: string | undefined;
+
+let dirs = new DirResolver(process.env.CORNFIELD_CLIENT_DIR);
 
 // =============================================================================
 // Root directories
@@ -227,18 +244,43 @@ export function getConfigRootDir(): string {
  * Rebuilds the resolver, invalidating all cached paths. */
 export function setConfigRootDir(dir: string | undefined): void {
 	configRootOverride = dir;
-	dirs = new DirResolver(process.env.CORNFIELD_AGENT_DIR);
+	dirs = new DirResolver(process.env.CORNFIELD_CLIENT_DIR);
 }
 
-/** Set the coding agent directory. Creates a fresh resolver, invalidating all cached paths. */
-export function setAgentDir(dir: string): void {
+/** Set the client directory. Creates a fresh resolver, invalidating all cached paths. */
+export function setClientDir(dir: string): void {
 	dirs = new DirResolver(dir);
-	process.env.CORNFIELD_AGENT_DIR = dir;
+	process.env.CORNFIELD_CLIENT_DIR = dir;
 }
 
-/** Get the agent config directory (~/.cornfield/agent). */
-export function getAgentDir(): string {
-	return dirs.agentDir;
+/** Get the client directory (~/.cornfield/agent): credentials, registries, caches, blobs. */
+export function getClientDir(): string {
+	return dirs.clientDir;
+}
+
+/**
+ * Set (or reset, when `dir` is undefined) the default Agent's home.
+ *
+ * An override point, not a compatibility path: embedding (tests, a fork that ships another
+ * default workspace) can point the default Agent somewhere other than `~/cf-workspace`.
+ * Resolved at call time so a caller that changed HOME between calls is honoured.
+ */
+export function setDefaultAgentHome(dir: string | undefined): void {
+	defaultAgentHomeOverride = dir ? path.resolve(dir) : undefined;
+}
+
+/**
+ * The default Agent's home — its agentDir, fixed to `~/cf-workspace` by
+ * `docs/agent-task-control-plane-v1.md` §12 ("default Agent 的 agentDir 固定为 ~/cf-workspace").
+ *
+ * Resolved through `process.env.HOME` first (like `skeleton/registry` and
+ * `agent-domain/project-store`): a caller or test that points HOME at another client must get
+ * *that* client's default home. `os.homedir()` caches on some runtimes, so it is the fallback.
+ */
+export function getDefaultAgentHome(): string {
+	if (defaultAgentHomeOverride) return defaultAgentHomeOverride;
+	const home = process.env.HOME ?? os.homedir();
+	return path.join(home, DEFAULT_AGENT_HOME_DIR_NAME);
 }
 
 export function getProjectAgentDir(cwd: string = getProjectDir()): string {
@@ -339,78 +381,104 @@ export function getStatsDbPath(): string {
 	return dirs.rootSubdir("stats.db", "data");
 }
 
+/** Get the GitHub view cache database path (~/.cornfield/github-cache.db). */
+export function getGithubCacheDbPath(): string {
+	return dirs.rootSubdir("github-cache.db", "cache");
+}
+
 // =============================================================================
-// Agent subdirectories (~/.cornfield/agent/*)
+// Client-scope subdirectories (~/.cornfield/agent/*)
+//
+// Process/client state: it belongs to the client, not to any one Agent. Credentials are read
+// from here for every Agent; caches (models, history, diagnosis) are per client, not per Agent.
 // =============================================================================
 
-/** Get the path to agent.db (SQLite database for settings and auth storage). */
-export function getAgentDbPath(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "agent.db", "data");
+/** A subdirectory of the client root. The escape hatch for client-scope state that has no
+ *  named helper yet (e.g. `extensions`, `diagnosis-reports`); prefer a named helper. */
+export function getClientSubdir(subdir: string, xdg?: XdgCategory): string {
+	return dirs.clientSubdir(subdir, xdg);
 }
 
-/** Get the path to history.db (SQLite database for session history). */
-export function getHistoryDbPath(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "history.db", "data");
+/** Credentials/settings database of the client (`<client dir>/agent.db`). */
+export function getAgentDbPath(): string {
+	return dirs.clientSubdir("agent.db", "data");
 }
 
-/** Get the path to models.db (model cache database). */
-export function getModelDbPath(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "models.db", "data");
+/** An Agent's own storage database (`<agentHome>/agent.db`) — every Agent keeps its own. */
+export function getAgentStorageDbPath(agentHome: string): string {
+	return path.join(agentHome, "agent.db");
 }
 
-/** Get the sessions directory (~/.cornfield/agent/sessions). */
-export function getSessionsDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "sessions", "data");
+/** Get the path to history.db (SQLite database for session history), a client-scope cache. */
+export function getHistoryDbPath(): string {
+	return dirs.clientSubdir("history.db", "data");
 }
 
-/** Get the content-addressed blob store directory (~/.cornfield/agent/blobs). */
-export function getBlobsDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "blobs", "data");
+/** Get the path to models.db (client-scope model cache database). */
+export function getModelDbPath(): string {
+	return dirs.clientSubdir("models.db", "data");
 }
 
-/** Get the custom themes directory (~/.cornfield/agent/themes). */
-export function getCustomThemesDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "themes");
+/** Get the content-addressed blob store directory (`<client dir>/blobs`). */
+export function getBlobsDir(): string {
+	return dirs.clientSubdir("blobs", "data");
 }
 
-/** Get the tools directory (~/.cornfield/agent/tools). */
-export function getToolsDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "tools");
+/** Get the terminal breadcrumb directory (`<client dir>/terminal-sessions`). */
+export function getTerminalSessionsDir(): string {
+	return dirs.clientSubdir("terminal-sessions", "state");
 }
 
-/** Get the slash commands directory (~/.cornfield/agent/commands). */
-export function getCommandsDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "commands");
+/** Get the crash log path (`<client dir>/cornfield-crash.log`). */
+export function getCrashLogPath(): string {
+	return dirs.clientSubdir("cornfield-crash.log", "state");
 }
 
-/** Get the prompts directory (~/.cornfield/agent/prompts). */
-export function getPromptsDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "prompts");
+/** Get the debug log path (`<client dir>/cornfield-debug.log`). */
+export function getDebugLogPath(): string {
+	return dirs.clientSubdir(`${APP_NAME}-debug.log`, "state");
 }
 
-/** Get the user-level Python modules directory (~/.cornfield/agent/modules). */
-export function getAgentModulesDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "modules");
+// =============================================================================
+// Agent-scope subdirectories (<agentHome>/*)
+//
+// Everything here belongs to one Agent and travels with its agentDir. The default Agent's
+// home is `getDefaultAgentHome()`; other Agents pass their own agentDir.
+// =============================================================================
+
+/** Get the sessions directory of an Agent (`<agentHome>/sessions`). */
+export function getSessionsDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "sessions");
 }
 
-/** Get the memories directory (~/.cornfield/agent/memories). */
-export function getMemoriesDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "memories", "state");
+/** Get the custom themes directory of an Agent (`<agentHome>/themes`). */
+export function getCustomThemesDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "themes");
 }
 
-/** Get the terminal sessions directory (~/.cornfield/agent/terminal-sessions). */
-export function getTerminalSessionsDir(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "terminal-sessions", "state");
+/** Get the tools directory of an Agent (`<agentHome>/tools`). */
+export function getToolsDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "tools");
 }
 
-/** Get the crash log path (~/.cornfield/agent/cornfield-crash.log). */
-export function getCrashLogPath(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, "cornfield-crash.log", "state");
+/** Get the slash commands directory of an Agent (`<agentHome>/commands`). */
+export function getCommandsDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "commands");
 }
 
-/** Get the debug log path (~/.cornfield/agent/cornfield-debug.log). */
-export function getDebugLogPath(agentDir?: string): string {
-	return dirs.agentSubdir(agentDir, `${APP_NAME}-debug.log`, "state");
+/** Get the prompts directory of an Agent (`<agentHome>/prompts`). */
+export function getPromptsDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "prompts");
+}
+
+/** Get the Python modules directory of an Agent (`<agentHome>/modules`). */
+export function getAgentModulesDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "modules");
+}
+
+/** Get the memories directory of an Agent (`<agentHome>/memories`). */
+export function getMemoriesDir(agentHome: string = getDefaultAgentHome()): string {
+	return path.join(agentHome, "memories");
 }
 
 // =============================================================================
@@ -436,18 +504,19 @@ export function getProjectPluginOverridesPath(cwd: string = getProjectDir()): st
 // MCP config paths
 // =============================================================================
 
-/** Get the primary MCP config file path (first candidate). */
+/** Get the primary MCP config file path (first candidate). User scope is client-scope: one
+ *  MCP server list for the client, shared by every Agent in the process. */
 export function getMCPConfigPath(scope: "user" | "project", cwd: string = getProjectDir()): string {
 	if (scope === "user") {
-		return path.join(getAgentDir(), "mcp.json");
+		return path.join(getClientDir(), "mcp.json");
 	}
 	return path.join(getProjectAgentDir(cwd), "mcp.json");
 }
 
-/** Get the SSH config file path. */
+/** Get the SSH config file path. User scope is client-scope (same reason as MCP). */
 export function getSSHConfigPath(scope: "user" | "project", cwd: string = getProjectDir()): string {
 	if (scope === "user") {
-		return path.join(getAgentDir(), "ssh.json");
+		return path.join(getClientDir(), "ssh.json");
 	}
 	return path.join(getProjectAgentDir(cwd), "ssh.json");
 }

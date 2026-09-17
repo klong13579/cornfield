@@ -2,7 +2,7 @@
  * Load skills for context injection from the canonical skills directory + SQLite.
  */
 import { type UnifiedSkill, UnifiedSkillRegistry } from "@cornfield/cognitive-coordination";
-import { getAgentDir } from "@cornfield/utils";
+import { getDefaultAgentHome } from "@cornfield/utils";
 import { getMemoryRoot } from "./paths";
 import { ensureUnifiedSkillStorage } from "./skill-storage";
 import type { SkillStore } from "./storage/types";
@@ -56,7 +56,7 @@ export async function loadUnifiedSkillsForInjection(
 	options?: { globalStore?: boolean },
 ): Promise<UnifiedSkill[]> {
 	const globalStore = options?.globalStore ?? true;
-	const memoryRoot = getMemoryRoot(getAgentDir(), cwd);
+	const memoryRoot = getMemoryRoot(getDefaultAgentHome(), cwd);
 	const skillsDir = await ensureUnifiedSkillStorage(cwd, memoryRoot, globalStore);
 
 	const registry = new UnifiedSkillRegistry();

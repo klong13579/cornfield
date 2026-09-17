@@ -9,7 +9,7 @@ import type { ToolSession } from "@cornfield/coding-agent/tools";
 import { GithubTool } from "@cornfield/coding-agent/tools/gh";
 import { wrapToolWithMetaNotice } from "@cornfield/coding-agent/tools/output-meta";
 import * as git from "@cornfield/coding-agent/utils/git";
-import { getAgentDir, setAgentDir } from "@cornfield/utils";
+import { getClientDir, setClientDir } from "@cornfield/utils";
 
 function createSession(
 	cwd: string = "/tmp/test",
@@ -125,14 +125,14 @@ async function setupTempHome(): Promise<{ home: string; cleanup: () => Promise<v
 	const home = await fs.mkdtemp(path.join(os.tmpdir(), "gh-pr-tool-home-"));
 	vi.spyOn(os, "homedir").mockReturnValue(home);
 	// `dirs.configRoot` is computed at constructor time from `os.homedir()`, so
-	// we must rebuild the resolver after the spy is in place. `setAgentDir`
+	// we must rebuild the resolver after the spy is in place. `setClientDir`
 	// recreates it; we point it at the temp home's default agent dir.
-	const originalAgentDir = getAgentDir();
-	setAgentDir(path.join(home, ".cornfield", "agent"));
+	const originalAgentDir = getClientDir();
+	setClientDir(path.join(home, ".cornfield", "agent"));
 	return {
 		home,
 		cleanup: async () => {
-			setAgentDir(originalAgentDir);
+			setClientDir(originalAgentDir);
 			await fs.rm(home, { recursive: true, force: true });
 		},
 	};

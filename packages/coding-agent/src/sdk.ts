@@ -25,8 +25,8 @@ import {
 	$env,
 	$flag,
 	getAgentDbPath,
-	getAgentDir,
 	getConfigDirName,
+	getDefaultAgentHome,
 	getProjectDir,
 	logger,
 	postmortem,
@@ -309,10 +309,6 @@ export {
 
 // Helper Functions
 
-function getDefaultAgentDir(): string {
-	return getAgentDir();
-}
-
 /**
  * Resolve the streaming doom-loop detector config for the active model.
  * Returns `undefined` when the detector is disabled, so the agent loop
@@ -415,9 +411,10 @@ function resolvePerModelMaxThinking(modelId: string, byModel: Record<string, num
  * Create an AuthStorage instance with fallback support.
  * Reads from primary path first, then falls back to legacy paths (.pi, .claude).
  */
-export async function discoverAuthStorage(agentDir: string = getDefaultAgentDir()): Promise<AuthStorage> {
-	const dbPath = getAgentDbPath(agentDir);
-	logger.debug("discoverAuthStorage", { agentDir, dbPath });
+export async function discoverAuthStorage(): Promise<AuthStorage> {
+	// Credentials are client-scope: one login for this client, shared by every Agent it runs.
+	const dbPath = getAgentDbPath();
+	logger.debug("discoverAuthStorage", { dbPath });
 
 	const storage = await AuthStorage.create(dbPath, { configValueResolver: resolveConfigValue });
 	await storage.reload();
@@ -466,7 +463,7 @@ export async function discoverContextFiles(
 export async function discoverPromptTemplates(cwd?: string, agentDir?: string): Promise<PromptTemplate[]> {
 	return await loadPromptTemplatesInternal({
 		cwd: cwd ?? getProjectDir(),
-		agentDir: agentDir ?? getDefaultAgentDir(),
+		agentDir: agentDir ?? getDefaultAgentHome(),
 	});
 }
 
@@ -482,7 +479,7 @@ export async function discoverSlashCommands(cwd?: string): Promise<FileSlashComm
  */
 export async function discoverCustomTSCommands(cwd?: string, agentDir?: string): Promise<CustomCommandsLoadResult> {
 	const resolvedCwd = cwd ?? getProjectDir();
-	const resolvedAgentDir = agentDir ?? getDefaultAgentDir();
+	const resolvedAgentDir = agentDir ?? getDefaultAgentHome();
 
 	return loadCustomCommandsInternal({
 		cwd: resolvedCwd,
@@ -782,14 +779,14 @@ function buildMCPPromptCommands(manager: MCPManager): LoadedCustomCommand[] {
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = options.cwd ?? getProjectDir();
-	const agentDir = options.agentDir ?? getDefaultAgentDir();
+	const agentDir = options.agentDir ?? getDefaultAgentHome();
 	const eventBus = options.eventBus ?? new EventBus();
 
 	registerSshCleanup();
 	registerPythonCleanup();
 
 	// Use provided or create AuthStorage and ModelRegistry
-	const authStorage = options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir));
+	const authStorage = options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage));
 	const modelRegistry = options.modelRegistry ?? new ModelRegistry(authStorage);
 
 	const settings = options.settings ?? (await logger.time("settings", Settings.init, { cwd, agentDir }));

@@ -5,7 +5,7 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import { StringEnum } from "@cornfield/ai";
 import {
 	$which,
-	getAgentDir,
+	getClientDir,
 	getPuppeteerDir,
 	isEnoent,
 	logger,
@@ -738,7 +738,7 @@ function formatEvaluateResult(value: unknown): string {
  * via CDP on browser start; localStorage is injected lazily on first
  * navigation to each origin (CDP has no bulk localStorage API).
  */
-const BROWSER_STATE_FILE = path.join(getAgentDir(), "browser-state.json");
+const BROWSER_STATE_FILE = path.join(getClientDir(), "browser-state.json");
 
 export interface PersistedCookie {
 	name: string;

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { getAgentDir, getProjectDir, isBunTestRuntime, isEnoent, logger } from "@cornfield/utils";
+import { getClientDir, getProjectDir, isBunTestRuntime, isEnoent, logger } from "@cornfield/utils";
 import { OutputSink } from "../session/streaming-output";
 import { shutdownSharedGateway } from "./gateway-coordinator";
 import {
@@ -289,7 +289,7 @@ async function buildPreludeCacheState(cwd: string): Promise<PreludeCacheState> {
 	];
 	const composite = sources.map(source => `${source.path}:${source.hash}`).join("|");
 	const cacheKey = Bun.hash(composite).toString(16);
-	const cachePath = path.join(getAgentDir(), PRELUDE_CACHE_DIR, `${cacheKey}.json`);
+	const cachePath = path.join(getClientDir(), PRELUDE_CACHE_DIR, `${cacheKey}.json`);
 	return { cacheKey, cachePath, sources };
 }
 

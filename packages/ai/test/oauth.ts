@@ -10,7 +10,7 @@ import * as fs from "node:fs/promises";
 import path from "node:path";
 import { getOAuthApiKey } from "@cornfield/ai/utils/oauth";
 import type { OAuthCredentials, OAuthProvider } from "@cornfield/ai/utils/oauth/types";
-import { $flag, getAgentDir, isEnoent } from "@cornfield/utils";
+import { $flag, getClientDir, isEnoent } from "@cornfield/utils";
 
 /**
  * E2E tests require explicit opt-in via E2E=1 environment variable.
@@ -27,7 +27,7 @@ export function e2eApiKey(envVar: string): string | undefined {
 	return Bun.env[envVar];
 }
 
-const AUTH_PATH = path.join(getAgentDir(), "testauth.db");
+const AUTH_PATH = path.join(getClientDir(), "testauth.db");
 
 type ApiKeyCredential = {
 	type: "api_key";

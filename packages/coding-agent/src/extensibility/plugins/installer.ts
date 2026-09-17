@@ -1,10 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, getProjectDir, isEnoent } from "@cornfield/utils";
+import { getClientDir, getProjectDir, isEnoent } from "@cornfield/utils";
 import { extractPackageName } from "./parser";
 import type { InstalledPlugin } from "./types";
 
-const PLUGINS_DIR = path.join(getAgentDir(), "plugins");
+const PLUGINS_DIR = path.join(getClientDir(), "plugins");
 
 // Valid npm package name pattern (scoped and unscoped)
 const VALID_PACKAGE_NAME = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[a-z0-9-._^~>=<]+)?$/i;

@@ -116,7 +116,7 @@ function rootSessionFactory(): SessionFactory {
 
 /** serve 真正装配用的工厂（真 auth / 真 model 目录 / 真持久化 session 目录）。 */
 async function makeServeFactory(): Promise<SessionFactory> {
-	const authStorage = await discoverAuthStorage(agentDir);
+	const authStorage = await discoverAuthStorage();
 	const modelRegistry = new ModelRegistry(authStorage);
 	await modelRegistry.refresh("offline");
 	return createServeSessionFactory({ modelRegistry, authStorage, canUseTool: async () => true });
