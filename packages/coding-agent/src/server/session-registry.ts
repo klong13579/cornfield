@@ -36,6 +36,8 @@ export interface AgentMeta {
 	id: string;
 	/** 显示名：workspace.json name > registry displayName > id。 */
 	name: string;
+	/** 工作区/领域分组（= workspace.json domain；wire 面上沿用历史名 `role`）。未声明则 undefined。 */
+	role?: string;
 	/** agentDir 绝对路径。 */
 	agentDir: string;
 	/** 技能数（skillsDir 扫描，best-effort，失败为 undefined）。 */
@@ -140,6 +142,7 @@ export async function loadAgentMetas(): Promise<AgentMeta[]> {
 		metas.push({
 			id: name,
 			name: workspace?.name ?? entry.displayName ?? name,
+			role: workspace?.domain,
 			agentDir: entry.path,
 			skillCount: await countSkills(entry.path, workspace?.skillsDir),
 			dingtalk: dingtalk.get(name),
@@ -392,6 +395,7 @@ export class SessionRegistry {
 				if (model) entry.model = { provider: model.provider, id: model.id, name: model.name };
 				entry.phase = attached.store.getSnapshot().phase;
 			}
+			if (meta.role !== undefined) entry.role = meta.role;
 			return entry;
 		});
 	}

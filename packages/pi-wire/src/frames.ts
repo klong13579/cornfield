@@ -78,12 +78,13 @@ export interface SessionListEntry {
 	/** 当前 session JSONL 路径（已 attach 时有值；未 attach 时为 undefined）。 */
 	sessionFile?: string;
 	/**
-	 * 与当前连接的焦点相关：true = 本连接默认推送的 session。
-	 * P1 兼容：单 session 时恒 true。P3 多 agent 时，同一时刷只一个 active。
+	 * 本连接的焦点 agent（true = 这条连接默认推送的 session）。**不是进程状态**：
+	 * UI 的「运行中/空闲」文案由 `active`（焦点）与 `attached`（已挂载）推导，与 agent 是否真的在跑无关。
+	 * P1 兼容：单 session 时恒 true。P3 多 agent 时，同一连接同一时刻只一个 active。
 	 */
 	active: boolean;
 	// ── P3 新增（均可选，旧客户端忽略）──
-	/** Agent 角色/工作区定位（workspace.json role）。 */
+	/** Agent 工作区/领域分组（源自 workspace.json `domain`；web-app 把它当作「工作区」分组键）。 */
 	role?: string;
 	/** Agent 当前模型存图（provider/id）——仅 attached 时有值。 */
 	model?: { provider: string; id: string; name?: string };

@@ -58,6 +58,11 @@ export interface WorkspaceDeclaration {
 	id: string;
 	/** Human-facing display name. */
 	name: string;
+	/**
+	 * 业务领域/工作区分组（如 HR / 算法 / 产品 / 软件 / coding）。
+	 * wire 面上投影为 `SessionListEntry.role`（web-app 用它作为工作区分组键）。
+	 */
+	domain?: string;
 	type: "agent";
 	/** AgentDir root, relative to this file's directory ("."). */
 	root: string;
