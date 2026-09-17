@@ -349,6 +349,7 @@ afterEach(async () => {
 ```
 
 - Save + restore `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR` in `afterEach` if touched.
+- **Bun caches `os.homedir()` at startup, so setting `process.env.HOME` alone does not change what `os.homedir()` returns** (Node re-reads the env, Bun does not — `bun -e 'process.env.HOME="/tmp/x"; console.log(require("os").homedir())'` still prints the real home). Any test whose code path reaches a bare `os.homedir()` (e.g. `resolveConfigRootDir`'s default parameter in `packages/utils/src/dirs.ts`) must ALSO `vi.spyOn(os, "homedir").mockReturnValue(isolatedHome)` and restore it in `afterEach` — otherwise the test silently reads the developer's real HOME and stays green for the wrong reason.
 - Use `Bun.sleep()` + `Promise.race` with timeout for hang detection in PTY/shell tests.
 - Never use long-lived file-wide mutations of globals (`Bun.*`, `process.platform`, `process.env`). Use per-test `vi.spyOn(...)` with immediate restoration.
 
