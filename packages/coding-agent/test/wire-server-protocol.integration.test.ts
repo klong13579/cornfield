@@ -8,6 +8,9 @@
  *
  * 单一 serve 子进程 + 隔离 HOME（不触发 LLM 计费）：HOME 预置 default CLI 会话 + hr registry
  * agent 会话（list_sessions source 断言依赖 registry 启动时加载，必须 spawn 前 seed）。
+ * 两条会话的落点不一样：default agent 的会话在**它的家**（官方默认家
+ * `<HOME>/.cornfield/agents/default/sessions`，与 `session-index.ts` 的 `defaultSessionsRoot()`
+ * = `getSessionsDir()` 同源）；registry agent 的在 `<agentDir>/sessions`。
  * 帧收集器：push 与 response 统一队列/等待者——杜绝「等 response 期间 push 被丢」。
  *
  * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）；
@@ -322,6 +325,10 @@ describe("W3 D1 — serve get_stats 只读命令", () => {
 		expect(res.ok).toBe(true);
 		const sessions = ((res.result ?? {}) as { sessions?: { agentId: string; source: string }[] }).sessions ?? [];
 		const cliEntry = sessions.find(s => s.agentId === "default");
+		// source 的判定依据是** Agent 身份**（`wire-server.ts` 的 list_sessions：`m.id === "default"`
+		// → "cli"，其余注册表 agent → "agent"），不是根路径的字面值；但两条会话各自只能从
+		// 自己的落点被扫到（default → `defaultSessionsRoot()`，registry agent → `<agentDir>/sessions`），
+		// 所以 seed 必须写在对应家的 sessions 下，否则这条会话根本不会出现在索引里。
 		expect(cliEntry?.source).toBe("cli");
 		const hrEntry = sessions.find(s => s.agentId === "hr");
 		expect(hrEntry?.source).toBe("agent");
@@ -342,7 +349,18 @@ afterAll(async () => {
  */
 async function seedHome(home: string): Promise<void> {
 	// W3 D2：预置 default 根 CLI 会话 + hr registry agent 会话（serve 启动时加载 registry，必须在此 seed）
-	const cliDir = path.join(home, ".cornfield", "agent", "sessions", "--work--demo--", "by-date", "2026-08-18");
+	// default agent 的会话根 = 它的家（官方默认家，`getDefaultAgentHome()`）下的 `sessions/`，
+	// 不是客户端根（`<HOME>/.cornfield/agent/`）的那份 —— 家搬迁后 default 的家与客户端根是两处。
+	const cliDir = path.join(
+		home,
+		".cornfield",
+		"agents",
+		"default",
+		"sessions",
+		"--work--demo--",
+		"by-date",
+		"2026-08-18",
+	);
 	await fs.mkdir(cliDir, { recursive: true });
 	await Bun.write(
 		path.join(cliDir, "000001__cli00001.jsonl"),

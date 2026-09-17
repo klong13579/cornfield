@@ -7,7 +7,9 @@
  *   3. 读不到（不是 git 仓库 / 未注册 agent / 库打不开）一律 `ok:false`，并且**响应 id 就是请求 id**
  *      —— 客户端按 id 关联请求，错误响应丢了 id 就变成一个没人认领的帧（前端只能超时）。
  *
- * 隔离 HOME：registry.json / evolution.db 全在临时目录里，不碰真机的 `~/.cornfield`。
+ * 隔离 HOME：registry.json / projects.json / evolution.db 全在临时目录里，不碰真机的 `~/.cornfield`。
+ * repo 在隔离 HOME 里被声明成一个 Project（未绑定 Project 的 default agent 的根是官方默认家，
+ * 不是 serve 的启动目录）——git 面的锚就是这条声明的 root。
  *
  * 注意执行顺序：最后一组用例会**删掉/占掉**演化库（库不存在、库打不开这两种事实要真造出来），
  * 所以它们必须排在使用演化库的用例之后 —— bun test 按声明顺序跑，不要把它们提前。
@@ -22,6 +24,7 @@ import { resolveMemoryDbPath } from "@cornfield/self-evolution/memory/storage";
 import { initSchema } from "@cornfield/self-evolution/storage/db";
 import { SqliteSkillStore } from "@cornfield/self-evolution/storage/skills";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
+import { upsertProject } from "../../src/agent-domain/project-store";
 import { registerAgent } from "../../src/skeleton/registry";
 import { waitForServe } from "../wait-for-serve";
 
@@ -151,6 +154,16 @@ beforeAll(async () => {
 	// ── 不是 git 仓库的 agentDir（注册进 registry，"unknown agent" 之外的第二种读不到）──
 	nogitDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-new-wire-nogit-"));
 	await registerAgent("nogit", nogitDir);
+
+	// 把 repo 声明成 Project（走 Project 注册表的真写入器，落到隔离 HOME 的 projects.json）。
+	// 为什么必须声明（票 34）：git 面的锚是 `resolveWorkRoot` = `projectRoot ?? agentDir`（同为
+	// `resolveSessionWorkspace` 的结论），而**未绑定 Project 的 default agent 的根是官方默认家**
+	// （`getDefaultAgentHome()`，票 28 下半），不再是 serve 的启动目录 ⇒ 没有声明时锚点落在
+	// `<隔离 HOME>/.cornfield/agents/default`（不是 git 仓库），整个『读真工作区』的意图就没了。
+	// 为什么不改成「注册一个 agentDir 正好是仓库的 agent」：那测的是「某个 agent 把仓库当自己家」，
+	// 不是本文件要钉的「一个已绑定会话读的是它那个仓库的真工作区」；Project 声明才是真实形态
+	// （工作区由 Project 声明，agent 在里面干活），会话 cwd 命它 → projectRoot = repo。
+	await upsertProject({ projectId: "omp-new-wire-repo", root: repo, name: "omp-new-wire-repo" });
 
 	// ── 真演化库：用真 schema + 真写入器 ──
 	dbPath = resolveMemoryDbPath(repo);

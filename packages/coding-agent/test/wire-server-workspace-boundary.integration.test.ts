@@ -13,7 +13,8 @@
  *     - agentDir 的 `workspace.json` 声明的 attachedRoots 也在边界内
  *   B 越界仍被拒：`..` 逃逸 + **符号链接逃逸**（读穿已存在的链接、往链接里新建）都拒绝，
  *     且一个字节都不落盘
- *   C 未绑定（agent "ops" / default）边界 = agentDir，行为与今天逐字节一致
+ *   C 未绑定（agent "ops"）边界 = agentDir，行为与今天逐字节一致；default（未绑定）
+ *     边界 = **官方默认家**（`<HOME>/.cornfield/agents/default`），不是 serve 的启动目录
  *   D session-index 持久回归：`list_sessions` 的 projectId 只从会话头读 ——
  *     头里没有就是 undefined，**不**拿 cwd 反推一个（cwd 明明在 Project 里也不推）
  *
@@ -23,6 +24,7 @@
  *   <home>/work/extra/             ← workspace.json 的 attachedRoots（不属于任何 Project）
  *   <home>/outside/                ← 边界外（secret.txt + 越界写入的落点）
  *   <home>/agents/ops/             ← agent "ops" 的 agentDir（不在任何 Project root 下）
+ *   <home>/.cornfield/agents/default/ ← 内建 default agent 的根（官方默认家，未绑定）
  *
  * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见 ./wire-serve-fixture 的说明）；
  * 本文件的种子（registry / projects / workspace.json / 两个 git 仓库 / symlink）走它的 `seed` 钩子 ——
@@ -42,12 +44,16 @@ let agentDir: string;
 let extraRoot: string;
 let outsideDir: string;
 let opsDir: string;
+/** 内建 default agent 的根（官方默认家）——与 `getDefaultAgentHome()` 同一条路径。 */
+let defaultHome: string;
 /** agentDir 的 workspace.json 坏掉的 agent（声明读不出 ≠ 没声明过）。 */
 let badDir: string;
 
 /** agentDir 的 workspace.json 声明的额外根（相对 agentDir 或绝对，这里给绝对路径）。 */
 const EXTRA_FILE = "extra-only.txt";
 const SHARED_FILE = "shared.txt";
+/** 只在官方默认家里落一份的标记文件（C 组用它证明 default 的边界不是 serve 的启动目录）。 */
+const DEFAULT_HOME_MARKER = "default-home-only.txt";
 
 async function runGit(cwd: string, args: string[]): Promise<void> {
 	const child = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
@@ -110,12 +116,16 @@ async function seedBoundaryHome(home: string): Promise<void> {
 	outsideDir = path.join(home, "outside");
 	opsDir = path.join(home, "agents", "ops");
 	badDir = path.join(home, "agents", "bad");
+	// 官方默认家：`getDefaultAgentHome()` = config root（隔离 HOME 下 = <home>/.cornfield）
+	// 下的 `agents/default`。内建 default meta 的兜底 agentDir 就是它（票 28 下半）。
+	defaultHome = path.join(home, ".cornfield", "agents", "default");
 
 	await fs.mkdir(agentDir, { recursive: true });
 	await fs.mkdir(extraRoot, { recursive: true });
 	await fs.mkdir(outsideDir, { recursive: true });
 	await fs.mkdir(opsDir, { recursive: true });
 	await fs.mkdir(path.join(badDir, "sessions"), { recursive: true });
+	await fs.mkdir(defaultHome, { recursive: true });
 
 	// ── Project root：自己的 git 仓库（分支名与 agentDir 那个不同，用来分辨 git 读的是哪个根）──
 	await runGit(projectRoot, ["init", "-b", "project-main"]);
@@ -139,6 +149,8 @@ async function seedBoundaryHome(home: string): Promise<void> {
 	await Bun.write(path.join(extraRoot, EXTRA_FILE), "extra\n");
 	await Bun.write(path.join(outsideDir, "secret.txt"), "outside\n");
 	await Bun.write(path.join(opsDir, "local.txt"), "ops\n");
+	// 默认家里只此一份的标记：C 组由它证明 default 的边界确实落在官方默认家。
+	await Bun.write(path.join(defaultHome, DEFAULT_HOME_MARKER), "default\n");
 
 	await writeAgentWorkspace(agentDir, "hr", [extraRoot]);
 	await writeAgentWorkspace(opsDir, "ops");
@@ -155,7 +167,8 @@ async function seedBoundaryHome(home: string): Promise<void> {
 beforeAll(async () => {
 	fixture = await spawnServeFixture({
 		homePrefix: "omp-ws-boundary-",
-		// serve 的 cwd = 隔离 HOME（非 git 目录）→ default agent 的 agentDir = 这个目录，未绑定。
+		// serve 的 cwd = 隔离 HOME（非 git 目录）：default agent 未绑定 Project，
+		// 它的根是官方默认家（= seedBoundaryHome 里的 defaultHome），**不是**这个 cwd。
 		cwd: home => home,
 		seed: seedBoundaryHome,
 	});
@@ -314,7 +327,7 @@ describe("B 越界仍被拒（`..` 与符号链接）", () => {
 	}, 30_000);
 });
 
-describe("C 未绑定 Project 的会话：边界 = agentDir，行为与今天一致", () => {
+describe("C 未绑定 Project 的会话：边界 = 身份根（ops = agentDir；default = 官方默认家）", () => {
 	test('fs_list("") 列的是 agentDir 自己的条目', async () => {
 		await withClient(async client => {
 			const res = await fsList(client, "ops");
@@ -339,12 +352,21 @@ describe("C 未绑定 Project 的会话：边界 = agentDir，行为与今天一
 		});
 	}, 30_000);
 
-	test("default agent（未绑定）边界 = 启动目录", async () => {
+	test("default agent（未绑定）边界 = 官方默认家，不是 serve 的启动目录", async () => {
 		await withClient(async client => {
 			const res = await client.request<FsListResult>({ type: "fs_list", sessionId: "default" } as never);
 			const names = res.entries.map(e => e.name);
-			expect(names).toContain("work");
-			expect(names).toContain("outside");
+			// 正面：默认家里那枚只有它有的标记文件在边界内。
+			expect(names).toContain(DEFAULT_HOME_MARKER);
+			// 反面：serve 启动目录（= 隔离 HOME，defaultHome 的祖先）自己的条目一个都不在边界内。
+			// 旧语义（根 = 启动目录）下这两条会同时反色。
+			expect(names).not.toContain("work");
+			expect(names).not.toContain("outside");
+
+			// 写面同一条边界：落在默认家里，启动目录里没有它。
+			await fsWrite(client, "default", "written-by-default.txt", "default\n");
+			expect(await Bun.file(path.join(defaultHome, "written-by-default.txt")).text()).toBe("default\n");
+			expect(await Bun.file(path.join(fixture!.home, "written-by-default.txt")).exists()).toBe(false);
 		});
 	}, 30_000);
 });

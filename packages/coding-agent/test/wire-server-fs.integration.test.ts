@@ -5,7 +5,7 @@
  * `fs_diff`（before/after 与 path+content 统一 diff）。
  *
  * 夹具布局（隔离 HOME 由 `wire-serve-fixture` 提供；projectCwd 是独立 mkdtemp 项目目录，
- * 作为 serve 的 cwd → 不污染仓库）：
+ * 同时是 serve 的 cwd，也是 **fs 命令面的根** → 不污染仓库）：
  * ```
  * <projectCwd>/
  *   shot.png   1x1 透明 PNG（PNG_1PX 的原始字节）
@@ -15,6 +15,15 @@
  * ```
  * 所有用例只读或只改自身临时目录内的文件；文件写入用例在开始时复位其依赖的初始内容，
  * 因此每个 test 单独运行（`bun test -t <name>`）同样成立。
+ *
+ * **projectCwd 为什么要在 spawn 前声明成 Project**（票 34）：fs 命令面的根 = 会话的
+ * workspace roots（Project root → agentDir 声明的 attachedRoots → agentDir，见
+ * `src/server/wire-server.ts` 的 `resolveFsTarget` / `session/session-workspace`）。未绑定
+ * Project 的 default agent 的根是**官方默认家**（票 28 下半，`getDefaultAgentHome()`），
+ * 不是 serve 的启动目录 —— 光靠 `cwd: projectCwd` 已经不再把 fs 根指过来。所以夹具在 spawn
+ * **之前**写一份 `projects.json` 把 projectCwd 声明成 Project，让会话 cwd 命中它、
+ * `projectRoot` 重新等于 projectCwd，本文件逐字节 / 边界断言才能对齐到同一批文件（不可改被测
+ * 实现去迁就夹具）。写法与 `test/wire-server-git.integration.test.ts` 的 `seedProject` 同源。
  *
  * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
  */
@@ -533,6 +542,33 @@ describe("fs_read 截断边界（128KiB 按字节，UTF-8 安全）", () => {
 	});
 });
 
+/** 本文件声明的 Project id（root = projectCwd）。 */
+const FS_PROJECT_ID = "omp-serve-fs-project";
+
+/**
+ * 把 projectCwd 声明成 Project（`<隔离 HOME>/.cornfield/agent/projects.json`）。
+ *
+ * 为什么是「声 Project」而不是「改断言」：本文件要证的事实是「fs 命令面在真实 serve 上
+ * 逐字节正确」—— fs_* 的根是会话的 Project root，那就得先在真实处把这条归属建立起来，
+ * 再去断言同一批文件的字节。断言基准跟着根走，而不是把根拉回来迁就断言。
+ *
+ * 投影形状与 `test/wire-server-git.integration.test.ts` 的 `seedProject` 一致（同一份
+ * `ProjectStoreFile`：`{ version, projects }`，每项至少要有 `root`）。
+ */
+async function seedProject(home: string): Promise<void> {
+	const storeDir = path.join(home, ".cornfield", "agent");
+	await fs.mkdir(storeDir, { recursive: true });
+	await Bun.write(
+		path.join(storeDir, "projects.json"),
+		JSON.stringify({
+			version: 1,
+			projects: {
+				[FS_PROJECT_ID]: { projectId: FS_PROJECT_ID, root: projectCwd, name: FS_PROJECT_ID },
+			},
+		}),
+	);
+}
+
 beforeAll(async () => {
 	projectCwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-fs-project-"));
 
@@ -543,7 +579,12 @@ beforeAll(async () => {
 	await Bun.write(path.join(projectCwd, "out.txt"), OUT_INITIAL);
 
 	// projectCwd 必须在 spawn 前存在（它是子进程的 cwd），HOME / 端口 / 预算由夹具负责。
-	fixture = await spawnServeFixture({ homePrefix: "omp-serve-fs-", cwd: projectCwd });
+	// Project 声明也必须在 spawn 前落盘：fs 根就是由它推出来的（见文件头）。
+	fixture = await spawnServeFixture({
+		homePrefix: "omp-serve-fs-",
+		cwd: projectCwd,
+		seed: seedProject,
+	});
 }, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {

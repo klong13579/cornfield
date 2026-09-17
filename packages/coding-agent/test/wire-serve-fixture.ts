@@ -15,15 +15,19 @@
  *   （registry.json、skills discovery），所以预置内容走 `seed` 钩子写在 spawn 之前——
  *   晚于 spawn 写只剩下 fs watcher 的竞态。
  *
- * **为什么必须是空 HOME**（票 28 的实测结论）：serve 的内建 default meta 兜底是
- * `agentDir = process.cwd()`，但启动时 `loadMetasSafe()` 会读
- * `<HOME>/.cornfield/agent/registry.json` 并在其后 registerMeta ⇒ **覆盖**内建兜底。
- * 开发机真 HOME 里存在 `default` 条目时，工作根就被换成条目的路径，一切以「cwd 就是工作根」
- * 为前提的用例都会假红（wire-server-git 曾 6 fail：`fatal: not a git repository`）；
- * 空 HOME 让注册表从零开始、default 落回内建兜底。`CORNFIELD_CONFIG_DIR` /
- * `CORNFIELD_AGENT_DIR` 一并剔除：它们优先于 HOME，开发者 shell 里带着它们时同样会把
- * 工作根指到别处。隔离只做在**子进程的 env** 上，不改进程自己的 `process.env`
- * —— 没有跨测试的全局状态要恢复。
+ * **为什么必须是空 HOME**（票 28 的实测结论）：serve 启动即读注册表 / Project 注册表 /
+ * workspace 声明 / skills，真 HOME 会把开发机的 agents、Projects 与会话带进用例。此外
+ * serve 的内建 default meta 兜底 `agentDir = getDefaultAgentHome()`（= `<HOME>` 解析出的
+ * config root 下的 `agents/default`，票 28 下半），**跟着 HOME 走** —— 隔离 HOME 因此把
+ * default 的工作根钉在临时目录里；而启动时 `loadMetasSafe()` 会读
+ * `<HOME>/.cornfield/agent/registry.json` 并在其后 registerMeta ⇒ **覆盖**内建兜底，
+ * 所以真 HOME 里存在 `default` 条目时，工作根会被换成条目的路径。
+ * 需要「fs / git 命令面落在某个真实目录上」的用例不能在 cwd 上停下：新语义下**未绑定
+ * Project 的 default agent 的根是默认家，不是启动目录**，这类用例要在 spawn 前把那个目录
+ * 声明成 Project（`projects.json`），让 `resolveSessionWorkspace` 由会话 cwd 命中它。
+ * `CORNFIELD_CONFIG_DIR` / `CORNFIELD_AGENT_DIR` 一并剔除：它们优先于 HOME（默认家也经
+ * config root 解析），开发者 shell 里带着它们时同样会把工作根指到别处。隔离只做在
+ * **子进程的 env** 上，不改进程自己的 `process.env` —— 没有跨测试的全局状态要恢复。
  *
  * 这里把它们收敛成一处。**静默停摆**（子进程活着、零输出、不监听）已定位到 bun 运行时层
  * ——连 `serve:boot:start` 都没打出来，产品侧无从修——所以按仓库自己的先例

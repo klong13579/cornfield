@@ -184,13 +184,13 @@ describe("多 Agent 注册表与推送隔离", () => {
 	}, 60_000);
 });
 
-describe("default agent 根归位（从包目录启动）", () => {
+describe("default agent 根不随启动目录（从包目录启动）", () => {
 	let fixture: ServeFixture | undefined;
 	let repoRoot: string;
 
 	beforeAll(async () => {
 		repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-		// 在仓库子目录（包目录）里启动 serve——default agent 根应提升到 git 仓库根
+		// 在仓库子目录（包目录）里启动 serve。
 		fixture = await spawnServeFixture({
 			homePrefix: "omp-serve-root-",
 			cwd: path.join(repoRoot, "packages", "coding-agent"),
@@ -201,7 +201,7 @@ describe("default agent 根归位（从包目录启动）", () => {
 		await fixture?.dispose();
 	});
 
-	test("serve default agent 根 = git 仓库根（从包目录启动也归位）", async () => {
+	test("default agent 根 = 官方默认家；启动目录的 git 仓库根归位只作用于会话工作根", async () => {
 		const conn = await WireConn.connect(fixture!.url, fixture!.token);
 		const helloPush = await conn.nextPush("server_snapshot");
 		const sessions = (
@@ -210,15 +210,22 @@ describe("default agent 根归位（从包目录启动）", () => {
 			}
 		).sessions;
 		const def = sessions.find(s => s.id === "default");
-		expect(def?.agentDir).toBe(repoRoot);
+		// 身份根 = 官方默认家（`getDefaultAgentHome()`）：与「你在哪个目录起了 serve」无关。
+		// 旧语义（内建兜底 = `process.cwd()`）下这里会是 repoRoot —— serve 启动时
+		// `setProjectDir` 会 chdir 到启动目录的 git 仓库根，「根归位」就是那条链路的产物；
+		// 票 28 下半把兜底换成默认家后，这条链路不再碰身份根（下面的工作根断言仍是真的）。
+		expect(path.resolve(def?.agentDir ?? "")).toBe(path.join(fixture!.home, ".cornfield", "agents", "default"));
+		expect(path.resolve(def?.agentDir ?? "")).not.toBe(repoRoot);
 
-		// fs_list 根 = agentDir：应列出仓库级顶层，而非包目录的特征（packages/coding-agent/src）
-		const fsResp = await conn.request({ type: "fs_list", sessionId: "default" });
-		expect(fsResp.ok).toBe(true);
-		const entries = (fsResp.result as { entries: Array<{ name: string }> }).entries;
-		const names = entries.map(e => e.name);
-		expect(names).toContain("packages");
-		expect(names).not.toContain("src");
+		// 归位那条语义本身仍然成立，只是不再作用于身份根：从包目录启动时，serve 的
+		// 进程 / 会话工作根仍是启动目录的 git 仓库根（`serve.ts` 的 `setProjectDir(projectRoot)`），
+		// `get_state.env.repos` 读的就是这个 cwd 的 basename。
+		// （fs / git 命令面在新语义下的根部断言在 `wire-server-workspace-boundary` 的 C 组与
+		// `wire-server-fs` —— 那里才是它们唯一该被钉住的地方。）
+		const state = await conn.request({ type: "get_state" });
+		expect(state.ok).toBe(true);
+		const env = (state.result as { env?: { repos?: string } }).env;
+		expect(env?.repos).toBe(path.basename(repoRoot));
 		conn.close();
 	}, 60_000);
 });
