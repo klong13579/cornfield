@@ -208,15 +208,36 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 				await openTab(page, label, observations, errors);
 			}
 
-			// ── 4a. 模型配置读作用域（只记录，不断言）：verify-bot 自己**没有**停用 narwal-plan，
-			//        而 default agent 的全局 config.yml 停用了它 —— 看下拉里还有没有 narwal-plan ──
+			// ── 4a. 模型配置首屏：两个下拉的选中值必须落在自己的选项上，Model 不得是 0 个 option ──
+			//        受控 select 的 value 不在选项里时浏览器把 selectedIndex 置 -1（屏幕上「一个都没选中」）；
+			//        Model 那一栏被写死的 provider 筛空时干脆一个 option 都没有：选不了，也看不到当前模型。
+			//        这一组断言在任何读取态（目录还在路上 / 已到）下都成立 —— 不看加载状态。
 			await page
 				.getByRole("button", { name: /^模型配置/ })
 				.first()
 				.click();
-			await page.waitForTimeout(800);
-			const providerOptions = await page.locator("select").first().locator("option").allTextContents();
-			// Provider 下拉的初始态：React state 写死 "anthropic"，与真实 provider 列表是否对得上
+			const providerSelect = page.getByTestId("model-provider-select");
+			const modelSelect = page.getByTestId("model-select");
+			// 当前模型从页面自己宣称的那一处读（标题上的模型徽标，与下拉同源），不是测试自己编的一个值
+			const currentModel = (await page.getByTestId("agent-model-badge").innerText()).trim();
+			expect(currentModel, "该 agent 没报当前模型，这条断言会退化成空断言").not.toBe("");
+			expect(await modelSelect.locator("option").count(), "Model 下拉不得是 0 个 option").toBeGreaterThan(0);
+			expect(
+				await modelSelect.evaluate(el => (el as HTMLSelectElement).selectedIndex),
+				`Model 下拉的 value（${currentModel}）必须落在它自己的某个 option 上`,
+			).toBeGreaterThanOrEqual(0);
+			await expect(modelSelect).toHaveValue(currentModel);
+			expect(
+				await providerSelect.evaluate(el => (el as HTMLSelectElement).selectedIndex),
+				"Provider 下拉的 value 必须落在它自己的某个 option 上",
+			).toBeGreaterThanOrEqual(0);
+			// 读取态必须说得出来（未连接 / 加载中 / 读取失败 / 没有模型 四态不许合并成一句空白）
+			expect((await page.getByTestId("model-catalog-state").innerText()).trim()).not.toBe("");
+
+			// ── 4a-1. 模型配置读作用域（只记录，不断言）：verify-bot 自己**没有**停用 narwal-plan，
+			//         而 default agent 的全局 config.yml 停用了它 —— 看下拉里还有没有 narwal-plan ──
+			const providerOptions = await providerSelect.locator("option").allTextContents();
+			// 三个下拉的首屏态（Provider / Model / Thinking）——只记录，供人工复核
 			const providerSelected = await page.evaluate(() => {
 				const sels = Array.from(document.querySelectorAll("select"));
 				return sels.map(s => ({
@@ -241,13 +262,16 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 				project: await fsp.readFile(projectConfig, "utf8"),
 			});
 			const beforeWrite = await readBoth();
-			// Provider 初始 state 是 "anthropic"（AgentDetailView.tsx:49），但列表里没有它 ——
-			// 所以这里探 DOM 里真正选中的那一项（index 0）来触发 onChange，避开名字写死的脆断。
-			await page.locator("select").first().selectOption({ index: 0 }, { timeout: 15_000 });
+			// 当前 provider 未知时第一条（「未知」）是不可选的事实项 —— 挑第一个真能选的 provider，
+			// 再看 Model 下拉是否随之出现真模型（级联：Model 的范围由 Provider 决定）。
+			const providerPick = await providerSelect.locator("option:not([disabled])").first().getAttribute("value");
+			expect(providerPick, "Provider 下拉里至少该有一个真 provider 可选").toBeTruthy();
+			await providerSelect.selectOption(providerPick!, { timeout: 15_000 });
 			await page.waitForTimeout(600);
-			const modelOptions = await page.locator("select").nth(1).locator("option").allTextContents();
-			if (modelOptions.length > 0) {
-				await page.locator("select").nth(1).selectOption({ index: 0 }, { timeout: 15_000 });
+			const modelOptions = await modelSelect.locator("option").allTextContents();
+			const modelPick = await modelSelect.locator("option:not([disabled])").first().getAttribute("value");
+			if (modelPick) {
+				await modelSelect.selectOption(modelPick, { timeout: 15_000 });
 			}
 			await page.waitForTimeout(2500);
 			const afterModelWrite = await readBoth();
