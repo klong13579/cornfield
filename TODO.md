@@ -4,14 +4,12 @@
 
 ## 待办
 - [ ] 复查工具输出剪枝阈值（compaction 已开，观察几天后再定）：实测 shipped 配置在大会话剪掉 46.6% 的 toolResult token，但对话账号只有 0.8–8.3%（protectTokens=40k 盖住了多数对话会话全程）；待定项是 read 是否移出 protectedTools（46.6% → 90.0%）、protectTokens 降 20k 或升 80–100k
-- [ ] Tool 呈现协议迁移：采用上游 xd:// 设备挂载 → topics/tool-presentation-xdev.md
 - [ ] [P1] 最终验证
 - [ ] [P1] B层验证2
 - [ ] g-brain 实体建模
 - [ ] task agent 调用梳理
 - [ ] web-search tool 功能升级，提升搜索能力。
 - [ ] web-search 搜索的页面在客户端显示列表，并支持点击查看。
-- [ ] 深挖组队编程：升级grill + squad-programming 组合技能。
 - [ ] cronfield 功能管理与说明。
 - [ ] dataAgent 增加本体论能力v1.0
 - [ ] 客户端开机首页默认显示每天日程和待办。
@@ -27,6 +25,8 @@
 
 ## 已完成
 
+- [x] Tool 呈现协议迁移：采用上游 xd:// 设备挂载 → topics/tool-presentation-xdev.md
+- [x] 深挖组队编程：升级grill + squad-programming 组合技能。
 - [x] omp 添加前端框架
 - [x] gateway agent 增加动态注册能力，动态enable 和 disable 能力。 → topics/agent-client-config.md
 - [x] Agent 客户端配置验证 → topics/agent-client-config.md

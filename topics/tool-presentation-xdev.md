@@ -8,7 +8,7 @@ doneWhen: |-
   - 挂载开关关闭时，顶层工具暴露与改造前一致
   - internal 工具不可由用户配置、设置或发现结果启用（运行时注入通道除外，见 ADR-0003）
   - 两条系统提示路径都包含设备说明，SYSTEM.md 覆盖场景下不消失
-lastActivity: 2026-09-13 04:24
+lastActivity: 2026-09-15 21:44
 sessionRefs:
   - ~/.cornfield/agent/sessions (tool1)
 nextAction: 已发布 v1.1.4（tag + GitHub Release + 全部产物）。剩余可选项：三个 pre-* tag 已在远端；非本批 4 棵工作树未清（等用户确认）。
@@ -72,7 +72,7 @@ openQuestions:
 
 | 时间 | 验证命令 | 结果 |
 |---|---|---|
-| - | - | - |
+| 2026-09-15 21:42 | `bun run --cwd=packages/coding-agent verify:xdev`（main @ 8658793b44） | ALL PASS — 13 顶层工具 / 9 挂载设备；设备目录无 description 回退；keep-list 不挂载；read/write 不挂载；tools.xdev=false 与显式 toolNames 均关挂载；MCP 后置只挂设备；write 对象/字符串两形态过、文件写对象明确拒绝 |
 
 ## 进度记录
 
@@ -335,6 +335,8 @@ openQuestions:
   **顺手修了 release.ts 一处真 bug**：版本门禁用 bare `git describe --tags` 当「上一版」，任何非版本 tag（如本批的 `pre-*` 回退锚点）都会让它读到 `pre-write-fix` 并抛 `Invalid version`；改用仓库里 `auto-release.ts` 已有的 `--match "v[0-9]*"` 写法。
 
 - 2026-09-13 04:28 — 【发布产物已独立验证】不只看 CI 结论，我把发布的产物拉下来自己跑了一遍：`cornfield-darwin-arm64.tar.gz` 与 `cornfield_natives.darwin-arm64.node` 字节数与 GitHub API 报告完全一致（85,215,782 / 32,996,464，SHA256 已记录），gzip 完整性 OK；解包后 `./cornfield --version` → `cornfield/1.1.4`、`./cornfield-gateway --version` → `cornfield-gateway/1.1.4`、`file` → Mach-O arm64。并用这次修复的那道检查验了**已发布的** addon（`PI_NATIVE_VERIFY_DIR=/tmp/cf-rel`）rc 0、`links only system libraries` —— 闭环。※ 顺带一条环境事实：`gh release download` 拉大产物在本机只有约 3.5 KB/s，直连 `curl` 同 URL 有 1.69 MB/s（差 500 倍）—— 以后再拉发布产物用 curl。
+
+- 2026-09-15 21:44 — 【复验并归档（用户要求核对 TODO 状态）】当时 main `8658793b44` 重跑挂载门禁 `verify:xdev` 得 **ALL PASS**（13 顶层 / 9 设备，逐项见上表）；分支均已合入 main（`git merge-base --is-ancestor 4c0228d805 main` = true）。据此将 TODO.md 行由 `- [ ]` 置为 `- [x]` 并移入「## 已完成」。
 
 ## 批注
 
