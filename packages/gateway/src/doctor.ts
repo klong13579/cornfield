@@ -185,7 +185,7 @@ async function checkCredentialsSection(config?: GatewayConfig): Promise<Section>
 				findings.push(
 					error(
 						`Provider "${p.provider}" API key missing (env ${p.envVar} unset, not in agent.db)`,
-						"Agent LLM calls for this provider will fail. Run `omp login`.",
+						"Agent LLM calls for this provider will fail. Run `/login` in a cornfield session to authenticate.",
 					),
 				);
 			} else {

@@ -10,7 +10,7 @@
  *     `!process.stdin.isTTY`) prints a "edit the file manually" hint and
  *     returns `{ ok: false, reason: "non-interactive" }`.
  *   - agentDir creation delegates to `runAgentInit` so the skeleton
- *     layout stays in lockstep with `omp agent init`.
+ *     layout stays in lockstep with `cornfield agent init`.
  *   - AppKey dedup is enforced before prompting for AppSecret so we
  *     don't gather credentials we'd then refuse to use.
  */
@@ -140,7 +140,7 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 
 	rl.close();
 
-	// Delegate agentDir creation to the public `omp agent init` handler so install
+	// Delegate agentDir creation to the public `cornfield agent init` handler so install
 	// and the CLI share one source of truth for the skeleton layout.
 	let agentDir: string;
 	try {
@@ -223,8 +223,8 @@ export async function runInteractiveSetup(opts: SetupOptions = {}): Promise<Setu
 	console.log(`   AppKey: ${appKey}`);
 	console.log(`   AgentDir: ${agentDir}`);
 	console.log(`\n下一步：`);
-	console.log(`  omp agent show ${accountId}        查看身份/工具/技能`);
-	console.log(`  omp agent validate --dir ${agentDir}   校验目录结构`);
+	console.log(`  cornfield agent show ${accountId}        查看身份/工具/技能`);
+	console.log(`  cornfield agent validate --dir ${agentDir}   校验目录结构`);
 	console.log(`  cornfield-gateway start              启动网关`);
 	console.log(`  cornfield-gateway stop               停止网关`);
 	console.log(`  cornfield-gateway service install    安装为系统服务(开机自启)`);
