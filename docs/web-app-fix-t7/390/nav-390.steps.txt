@@ -1,0 +1,89 @@
+
+──── 初始：home 面板、抽屉关闭、右上角汉堡可见 ────
+step 2 shot → nav-390-home-initial.png
+step 3 eval location.hash → "#/"
+step 4 goto #/ → http://127.0.0.1:4187/#/
+
+──── panel=home ────
+step 6 click @button=打开主导航 → ok
+step 7 shot → nav-390-home-drawer-open.png
+step 8 eval document.querySelector('nav[aria-label="主导航"]:not([hidden])') ? 'drawer-visible' : 'drawer-missing' → "drawer-visible"
+step 9 click @link=设置 → ok
+step 10 eval location.hash → "#/settings"
+step 11 goto #/workspace → http://127.0.0.1:4187/#/workspace
+
+──── panel=workspace ────
+step 13 click @button=打开主导航 → ok
+step 14 shot → nav-390-workspace-drawer-open.png
+step 15 click @link=首页 → ok
+step 16 eval location.hash → "#/"
+step 17 goto #/records → http://127.0.0.1:4187/#/records
+
+──── panel=records ────
+step 19 click @button=打开主导航 → ok
+step 20 shot → nav-390-records-drawer-open.png
+step 21 click @link=首页 → ok
+step 22 eval location.hash → "#/"
+step 23 goto #/agents → http://127.0.0.1:4187/#/agents
+
+──── panel=agents ────
+step 25 click @button=打开主导航 → ok
+step 26 shot → nav-390-agents-drawer-open.png
+step 27 click @link=首页 → ok
+step 28 eval location.hash → "#/"
+step 29 goto #/skills → http://127.0.0.1:4187/#/skills
+
+──── panel=skills ────
+step 31 click @button=打开主导航 → ok
+step 32 shot → nav-390-skills-drawer-open.png
+step 33 click @link=首页 → ok
+step 34 eval location.hash → "#/"
+step 35 goto #/memory → http://127.0.0.1:4187/#/memory
+
+──── panel=memory ────
+step 37 click @button=打开主导航 → ok
+step 38 shot → nav-390-memory-drawer-open.png
+step 39 click @link=首页 → ok
+step 40 eval location.hash → "#/"
+step 41 goto #/todo → http://127.0.0.1:4187/#/todo
+
+──── panel=todo ────
+step 43 click @button=打开主导航 → ok
+step 44 shot → nav-390-todo-drawer-open.png
+step 45 click @link=首页 → ok
+step 46 eval location.hash → "#/"
+step 47 goto #/models → http://127.0.0.1:4187/#/models/catalog
+
+──── panel=models ────
+step 49 click @button=打开主导航 → ok
+step 50 shot → nav-390-models-drawer-open.png
+step 51 click @link=首页 → ok
+step 52 eval location.hash → "#/"
+step 53 goto #/voice → http://127.0.0.1:4187/#/voice
+
+──── panel=voice ────
+step 55 click @button=打开主导航 → ok
+step 56 shot → nav-390-voice-drawer-open.png
+step 57 click @link=首页 → ok
+step 58 eval location.hash → "#/"
+step 59 goto #/tasks → http://127.0.0.1:4187/#/tasks
+
+──── panel=tasks ────
+step 61 click @button=打开主导航 → ok
+step 62 shot → nav-390-tasks-drawer-open.png
+step 63 click @link=首页 → ok
+step 64 eval location.hash → "#/"
+step 65 goto #/insights → http://127.0.0.1:4187/#/insights
+
+──── panel=insights ────
+step 67 click @button=打开主导航 → ok
+step 68 shot → nav-390-insights-drawer-open.png
+step 69 click @link=首页 → ok
+step 70 eval location.hash → "#/"
+step 71 goto #/settings → http://127.0.0.1:4187/#/settings
+
+──── panel=settings ────
+step 73 click @button=打开主导航 → ok
+step 74 shot → nav-390-settings-drawer-open.png
+step 75 click @link=首页 → ok
+step 76 eval location.hash → "#/"

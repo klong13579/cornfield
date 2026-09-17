@@ -1,0 +1,9 @@
+step 1 goto #/workspace → http://127.0.0.1:4187/#/workspace
+step 2 eval (function(){ const a=document.querySelector('button[aria-label="打开主导航"]'); const b=document.querySelector('button[aria-label="切换会话栏"]'); const r=e=>e?JSON.stringify([Math.round(e.getBoundingClientRect().x),Math.round(e.getBoundingClientRect().y),Math.round(e.getBoundingClientRect().width),Math.round(e.getBoundingClientRect().height)]):'missing'; return 'main-nav='+r(a)+' session-drawer='+r(b); })() → "main-nav=[342,0,48,48] session-drawer=[18,10,34,28]"
+step 3 shot → nav-390-workspace-workspace-both-entries.png
+step 4 click @button=切换会话栏 → ok
+step 5 shot → nav-390-workspace-workspace-session-drawer-open.png
+step 6 eval (function(){ var a=document.querySelector('aside'); return a && a.getBoundingClientRect().x >= -1 ? 'session-drawer-open' : 'session-drawer-closed'; })() → "session-drawer-open"
+step 7 click @button=打开主导航 → ok
+step 8 shot → nav-390-workspace-workspace-main-nav-open.png
+step 9 eval location.hash → "#/workspace"

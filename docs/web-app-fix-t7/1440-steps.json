@@ -1,0 +1,11 @@
+[
+	{
+		"eval": "document.querySelector('nav[aria-label=\"主导航\"]') ? getComputedStyle(document.querySelector('nav[aria-label=\"主导航\"]')).display : 'no-main-nav'"
+	},
+	{
+		"eval": "document.querySelector('button[aria-label=\"打开主导航\"]') ? getComputedStyle(document.querySelector('button[aria-label=\"打开主导航\"]')).display : 'no-toggle-button'"
+	},
+	{
+		"shot": "desktop"
+	}
+]

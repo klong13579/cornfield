@@ -1,0 +1,28 @@
+a [12,-58 102x35] «跳到主要内容»
+a [0,0 0x0] «首页»
+a [0,0 0x0] «会话工作台»
+a [0,0 0x0] «会话记录»
+a [0,0 0x0] «Agent 总览»
+a [0,0 0x0] «Skills»
+a [0,0 0x0] «Memory»
+a [0,0 0x0] «Todo»
+a [0,0 0x0] «模型»
+a [0,0 0x0] «语音»
+a [0,0 0x0] «定时任务»
+a [0,0 0x0] «用量»
+a [0,0 0x0] «设置»
+select [227,96 103x19] v="default" «切换 Agent»
+button button [62,306 72x19] «查看完整对话»
+input [66,359 220x34] ph="给 default 发一条指令…"
+button button DISABLED [296,358 36x36] «发送»
+button button [186,419 155x19] «转入会话工作台（同一会话）»
+button button [310,512 31x25] «刷新项目列表»
+a [38,634 172x39] «检查今天的定时任务»
+a [219,634 133x39] «最近会话回顾»
+a [57,683 159x39] «语音记录一条指令»
+a [226,683 107x39] «切换模型»
+a [121,732 148x39] «打开 Agent 管理»
+button button [32,828 160x64] «ddefault—»
+button button [202,828 160x64] «hhr—»
+button button [372,828 160x64] «aalgorithm—»
+button button [146,925 98x19] «打开会话工作台»

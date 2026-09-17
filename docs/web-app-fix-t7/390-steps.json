@@ -1,0 +1,266 @@
+[
+	{
+		"mark": "初始：home 面板、抽屉关闭、右上角汉堡可见"
+	},
+	{
+		"shot": "home-initial"
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/",
+		"wait": 350
+	},
+	{
+		"mark": "panel=home"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "home-drawer-open"
+	},
+	{
+		"eval": "document.querySelector('nav[aria-label=\"主导航\"]:not([hidden])') ? 'drawer-visible' : 'drawer-missing'"
+	},
+	{
+		"click": "@link=设置",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/workspace",
+		"wait": 350
+	},
+	{
+		"mark": "panel=workspace"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "workspace-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/records",
+		"wait": 350
+	},
+	{
+		"mark": "panel=records"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "records-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/agents",
+		"wait": 350
+	},
+	{
+		"mark": "panel=agents"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "agents-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/skills",
+		"wait": 350
+	},
+	{
+		"mark": "panel=skills"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "skills-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/memory",
+		"wait": 350
+	},
+	{
+		"mark": "panel=memory"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "memory-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/todo",
+		"wait": 350
+	},
+	{
+		"mark": "panel=todo"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "todo-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/models",
+		"wait": 350
+	},
+	{
+		"mark": "panel=models"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "models-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/voice",
+		"wait": 350
+	},
+	{
+		"mark": "panel=voice"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "voice-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/tasks",
+		"wait": 350
+	},
+	{
+		"mark": "panel=tasks"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "tasks-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/insights",
+		"wait": 350
+	},
+	{
+		"mark": "panel=insights"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "insights-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/settings",
+		"wait": 350
+	},
+	{
+		"mark": "panel=settings"
+	},
+	{
+		"click": "@button=打开主导航",
+		"wait": 250
+	},
+	{
+		"shot": "settings-drawer-open"
+	},
+	{
+		"click": "@link=首页",
+		"wait": 300
+	},
+	{
+		"eval": "location.hash"
+	}
+]

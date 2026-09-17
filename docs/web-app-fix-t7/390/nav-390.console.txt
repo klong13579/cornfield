@@ -1,0 +1,15 @@
+[debug] [vite] connecting...
+[debug] [vite] connected.
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[error] Each child in a list should have a unique "key" prop.%s%s See https://react.dev/link/warning-keys for more information. 
+
+Check the render method of `div`.  It was passed a child from Transcript.
+[warning] [web-app] serve command failed list_remote_skills PiServerError: Server rejected "list_remote_skills": [internal] list_remote_skills failed: GitCommandError: fatal: could not create work tree dir '/Users/sz-0203015357/.cornfield/plugins/cache/marketplaces/.tmp-clone-1789663593865': File exists
+    at #handleServerFrame (http://127.0.0.1:4187/@fs/Users/sz-0203015357/Desktop/Narwal/cornfield/.worktrees/squad-webapp-fix-t7/packages/pi-client/src/client.ts:285:26)
+    at ws.onmessage (http://127.0.0.1:4187/@fs/Users/sz-0203015357/Desktop/Narwal/cornfield/.worktrees/squad-webapp-fix-t7/packages/pi-client/src/client.ts:175:30)
+[warning] [web-app] serve command failed list_remote_skills PiServerError: Server rejected "list_remote_skills": [internal] list_remote_skills failed: GitCommandError: Cloning into '/Users/sz-0203015357/.cornfield/plugins/cache/marketplaces/.tmp-clone-1789663593865'...
+fatal: cannot copy '/Library/Developer/CommandLineTools/usr/share/git-core/templates/hooks/pre-rebase.sample' to '/Users/sz-0203015357/.cornfield/plugins/cache/marketplaces/.tmp-clone-1789663593865/.git/hooks/pre-rebase.sample': No such file or directory
+    at #handleServerFrame (http://127.0.0.1:4187/@fs/Users/sz-0203015357/Desktop/Narwal/cornfield/.worktrees/squad-webapp-fix-t7/packages/pi-client/src/client.ts:285:26)
+    at ws.onmessage (http://127.0.0.1:4187/@fs/Users/sz-0203015357/Desktop/Narwal/cornfield/.worktrees/squad-webapp-fix-t7/packages/pi-client/src/client.ts:175:30)
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o

@@ -1,0 +1,3 @@
+step 1 eval document.querySelector('nav[aria-label="主导航"]') ? getComputedStyle(document.querySelector('nav[aria-label="主导航"]')).display : 'no-main-nav' → "flex"
+step 2 eval document.querySelector('button[aria-label="打开主导航"]') ? getComputedStyle(document.querySelector('button[aria-label="打开主导航"]')).display : 'no-toggle-button' → "no-toggle-button"
+step 3 shot → nav-1440-before-desktop.png

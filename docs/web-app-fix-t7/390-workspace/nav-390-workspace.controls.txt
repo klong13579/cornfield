@@ -1,0 +1,116 @@
+a [12,-58 102x35] «跳到主要内容»
+a [0,0 0x0] «首页»
+a [0,0 0x0] «会话工作台»
+a [0,0 0x0] «会话记录»
+a [0,0 0x0] «Agent 总览»
+a [0,0 0x0] «Skills»
+a [0,0 0x0] «Memory»
+a [0,0 0x0] «Todo»
+a [0,0 0x0] «模型»
+a [0,0 0x0] «语音»
+a [0,0 0x0] «定时任务»
+a [0,0 0x0] «用量»
+a [0,0 0x0] «设置»
+button button [342,0 48x48] «打开主导航»
+button button [229,26 28x28] «关闭主导航»
+a [14,196 251x35] «首页»
+a [14,234 251x35] «会话工作台»
+a [14,271 251x35] «会话记录»
+a [14,341 251x35] «Agent 总览»
+a [14,410 251x35] «Skills»
+a [14,448 251x35] «Memory»
+a [14,486 251x35] «Todo»
+a [14,523 251x35] «模型»
+a [14,561 251x35] «语音»
+a [14,631 251x35] «定时任务»
+a [14,668 251x35] «用量»
+a [14,706 251x35] «设置»
+button button [12,12 275x39] «新会话»
+button button [12,59 136x28] «列表»
+button button [152,59 136x28] «树»
+input [44,101 232x21] ph="过滤会话…"
+button button [12,135 87x28] «WebUI 会话»
+button button [103,135 69x28] «CLI 会话»
+button button [16,214 12x12] «pin 置顶»
+button button [34,212 249x38] «当前会话当前会话»
+button button [16,306 12x12] «pin 置顶»
+button button [34,304 249x38] «[System note: This is a fresh conversat…hr · 86 条»
+button button [16,360 12x12] «pin 置顶»
+button button [34,358 249x38] «你的工作区在哪？hr · 44 条»
+button button [16,414 12x12] «pin 置顶»
+button button [34,412 249x38] «[CRON-CONTEXT] Task: goal-2-kb-refresh …hr · 101 条»
+button button [16,469 12x12] «pin 置顶»
+button button [34,467 249x38] «[CRON-CONTEXT] Task: goal-1-context-int…hr · 193 条»
+button button [16,560 12x12] «pin 置顶»
+button button [34,558 249x38] «01a0ad85algorithm · 110 条»
+button button [18,10 34x28] «切换会话栏»
+select [167,14 103x19] v="default" «切换 Agent»
+button button [399,56 31x25] «重新读取项目列表»
+select [76,111 354x28] «工作上下文»
+input [76,312 174x29] ph="project id" «project id»
+input [256,312 174x29] ph="名称" «名称»
+input [76,347 354x29] ph="/绝对/项目/根路径" «项目根路径»
+select [76,384 306x28] «默认 Agent»
+button button [388,382 42x31] «声明»
+button button [519,10 34x28] «手机预览»
+button button [565,10 34x28] «展开右栏»
+button button [611,8 66x31] «compact»
+button button [689,8 54x31] «新会话»
+button button DISABLED [308,-801 28x28]
+button button [338,-801 28x28]
+button button [67,-737 303x30] «活动 · 0 个工具»
+button button DISABLED [62,-224 28x28]
+button button DISABLED [92,-224 28x28]
+button button DISABLED [122,-224 28x28]
+button button [152,-224 28x28]
+button button DISABLED [308,-135 28x28]
+button button [338,-135 28x28]
+button button [67,-72 303x30] «活动 · 2 个工具1 个失败»
+button button DISABLED [62,-38 28x28]
+button button DISABLED [92,-38 28x28]
+button button DISABLED [122,-38 28x28]
+button button DISABLED [152,-38 28x28]
+button button [67,25 303x30] «活动 · 2 个工具1 个失败»
+button button DISABLED [62,59 28x28]
+button button DISABLED [92,59 28x28]
+button button DISABLED [122,59 28x28]
+button button DISABLED [152,59 28x28]
+button button [67,122 303x30] «活动 · 2 个工具»
+button button DISABLED [62,156 28x28]
+button button DISABLED [92,156 28x28]
+button button DISABLED [122,156 28x28]
+button button DISABLED [152,156 28x28]
+button button [67,220 303x30] «活动 · 0 个工具»
+button button DISABLED [62,556 28x28]
+button button DISABLED [92,556 28x28]
+button button DISABLED [122,556 28x28]
+button button [152,556 28x28]
+textarea [19,675 352x52] ph="@default 发消息，或直接提问…"
+button button [29,742 115x34] «d@default»
+input file [0,0 0x0] ph=""
+button button [160,745 33x27] «附件»
+button button [201,745 33x27]
+button button [250,733 171x50] «deepseek-v4-flash medium»
+button button [438,737 44x44] «发送»
+button button [103,8 63x37] «文件»
+button button [166,8 63x37] «产物»
+button button [229,8 63x37] «改动»
+button button [104,65 273x22] «▾·»
+button button [104,87 273x22] «▸.cornfield»
+button button [104,109 273x22] «▸commands»
+button button [104,131 273x22] «▸cron»
+button button [104,153 273x22] «▸knowledge»
+button button [104,175 273x22] «▸memories»
+button button [104,197 273x22] «▸raw»
+button button [104,219 273x22] «▸sessions»
+button button [104,241 273x22] «▸wiki»
+button button [104,263 273x22] «·.gitignore132»
+button button [104,285 273x22] «·agent.db4K»
+button button [104,307 273x22] «·agent.db-shm32K»
+button button [104,329 273x22] «·agent.db-wal2.2M»
+button button [104,351 273x22] «·AGENTS.md7K»
+button button [104,373 273x22] «·mission.md1K»
+button button [104,395 273x22] «·prompt-includes.json92»
+button button [104,417 273x22] «·TODO.md2K»
+button button [104,439 273x22] «·TOOLS.md11K»
+button button [104,461 273x22] «·user.md3K»
