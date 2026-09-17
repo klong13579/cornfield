@@ -153,7 +153,7 @@ function spawnSidecar(options: SidecarOptions): childProcess.ChildProcess {
 		stdio: "ignore",
 	});
 	child.on("error", err => {
-		logger.error("serve: failed to spawn omp serve sidecar", { bin, error: String(err) });
+		logger.error("serve: failed to spawn cornfield serve sidecar", { bin, error: String(err) });
 	});
 	return child;
 }

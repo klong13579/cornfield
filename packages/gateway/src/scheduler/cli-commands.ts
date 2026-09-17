@@ -210,7 +210,7 @@ export async function cronCreate(args: string[], storage: SchedulerStorage): Pro
 	if (type === "agent" && !agentDir) {
 		console.error(
 			"Agent tasks require --agent-dir (or --account with an agentDir in gateway.json) " +
-				"so omp runs in the correct project. Shell tasks may omit it.",
+				"so cornfield runs in the correct project. Shell tasks may omit it.",
 		);
 		process.exitCode = 1;
 		return;

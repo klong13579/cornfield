@@ -7,7 +7,7 @@ import type { ToolSession } from "./index";
 import { ToolError } from "./tool-errors";
 
 /**
- * `switch_model` — change the LLM used by the current omp session.
+ * `switch_model` — change the LLM used by the current cornfield session.
  *
  * Resolves a fuzzy query against the configured model registry, then calls
  * `AgentSession.setModel(model, role)`. Intended for gateway agents that
@@ -86,7 +86,7 @@ export class SwitchModelTool implements AgentTool<typeof switchModelSchema, Swit
 				.join("、");
 			throw new ToolError(
 				`未找到匹配 "${params.query}" 的模型。可用示例：${hint}` +
-					(models.length > 10 ? `（共 ${models.length} 个，更多请用 \`omp models list\`）` : ""),
+					(models.length > 10 ? `（共 ${models.length} 个，可在会话内用 \`/model\` 切换）` : ""),
 			);
 		}
 

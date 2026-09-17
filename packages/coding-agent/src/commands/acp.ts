@@ -25,7 +25,7 @@ import { createAgentSession, discoverAuthStorage } from "../sdk";
 import { SessionManager } from "../session/session-manager";
 
 export default class Acp extends Command {
-	static description = "Run omp as an ACP (Agent Client Protocol) stdio JSON-RPC server";
+	static description = "Run cornfield as an ACP (Agent Client Protocol) stdio JSON-RPC server";
 
 	static flags = {
 		model: Flags.string({ description: "Model to use (fuzzy match)" }),

@@ -127,7 +127,7 @@ function getAuthHeaders(apiKey: string): Record<string, string> {
 export async function searchWithKagi(query: string, options: KagiSearchOptions = {}): Promise<KagiSearchResult> {
 	const apiKey = await findKagiApiKey();
 	if (!apiKey) {
-		throw new KagiApiError("Kagi credentials not found. Set KAGI_API_KEY or login with 'omp /login kagi'.");
+		throw new KagiApiError("Kagi credentials not found. Set KAGI_API_KEY or login with 'cornfield /login kagi'.");
 	}
 
 	const requestUrl = new URL(KAGI_SEARCH_URL);

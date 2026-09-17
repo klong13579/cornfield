@@ -1155,7 +1155,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "interaction",
 			label: "Turn Endpointing",
 			description:
-				"Who decides you finished speaking: server (realtime server VAD — the verified default) or client (omp RMS tracking; opt-in experiment — its fixed 0.04 arm threshold and noise-spike silence resets swallowed post-playback utterances on 2026-08-06).",
+				"Who decides you finished speaking: server (realtime server VAD — the verified default) or client (cornfield RMS tracking; opt-in experiment — its fixed 0.04 arm threshold and noise-spike silence resets swallowed post-playback utterances on 2026-08-06).",
 			submenu: true,
 		},
 	},
