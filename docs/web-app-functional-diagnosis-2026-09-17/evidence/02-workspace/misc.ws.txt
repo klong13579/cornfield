@@ -1,0 +1,27 @@
+<- {"type":"connected"}
+-> {"type":"hello","version":1,"token":""}
+<- {"type":"hello_ack","connectionId":"82cc9508-8f65-40d1-b066-6233aa190460","protocolVersion":1,"gatewayWirePort":7892}
+-> {"type":"request","id":"req_1","command":{"type":"list_projects","id":"req_1"}}
+-> {"type":"request","id":"req_2","command":{"type":"list_agent_todos","id":"req_2"}}
+-> {"type":"request","id":"req_3","command":{"type":"git_changes","id":"req_3"}}
+-> {"type":"request","id":"req_4","command":{"type":"get_state","id":"req_4"}}
+-> {"type":"request","id":"req_5","command":{"type":"list_sessions","id":"req_5"}}
+-> {"type":"request","id":"req_6","command":{"type":"get_available_models","id":"req_6"}}
+-> {"type":"request","id":"req_7","command":{"type":"list_commands","id":"req_7"}}
+<- {"type":"push","event":{"type":"server_snapshot","sessions":[{"id":"default","name":"default","active":true,"attached":true,"agentDir":"/Users/sz-0203015357/.cornfield/agents/default","skillCount":1,"sessionFile":"/Users/sz-0203015357/.cornfield/agents/default/sessions/--private-tmp-cf-ui-demo--/by-date/2026-09-17/221612__e791fd60.jsonl","model":{"provider":"narwal-plan","id":"deepseek-v4-flash","
+<- {"type":"push","event":{"type":"session_snapshot","sessionId":"default","snapshot":{"seq":0,"sessionId":"01a0afb9-9dc6-7000-84c2-be92e791fd60","sessionFile":"/Users/sz-0203015357/.cornfield/agents/default/sessions/--private-tmp-cf-ui-demo--/by-date/2026-09-17/221612__e791fd60.jsonl","model":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","api":"openai-completions","provider":"narwal-plan","ba
+-> {"type":"request","id":"req_8","command":{"type":"list_projects","id":"req_8"}}
+-> {"type":"request","id":"req_9","command":{"type":"git_changes","sessionId":"default","id":"req_9"}}
+-> {"type":"request","id":"req_10","command":{"type":"fs_list","sessionId":"default","id":"req_10"}}
+-> {"type":"request","id":"req_11","command":{"type":"fs_list","sessionId":"default","id":"req_11"}}
+<- {"type":"response","id":"req_1","ok":true,"result":{"projects":[],"currentProjectSource":"none"}}
+<- {"type":"response","id":"req_6","ok":true,"result":{"models":[{"id":"deepseek-v4-flash","name":"💬 DeepSeek V4 Flash","api":"openai-completions","provider":"alibaba-coding-plan","baseUrl":"https://dashscope.aliyuncs.com/compatible-mode/v1","reasoning":true,"input":["text","image"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":1000000,"maxTokens":384000,"category":"chat
+<- {"type":"response","id":"req_7","ok":true,"result":{"commands":[{"name":"/settings","description":"Open settings menu","group":"系统命令"},{"name":"/plan","description":"Toggle plan mode (agent plans before executing)","group":"系统命令"},{"name":"/loop","description":"Toggle loop mode. While enabled, the next prompt you send re-submits after every yield. Esc cancels the current iteration; /loop again to 
+<- {"type":"response","id":"req_2","ok":true,"result":{"agentId":"default","todos":[]}}
+<- {"type":"response","id":"req_8","ok":true,"result":{"projects":[],"currentProjectSource":"none"}}
+<- {"type":"response","id":"req_4","ok":true,"result":{"model":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","api":"openai-completions","provider":"narwal-plan","baseUrl":"https://coder.narwal.com/v1","reasoning":true,"input":["text","image"],"cost":{"input":0.14,"output":0.28,"cacheRead":0.03,"cacheWrite":0},"contextWindow":1000000,"maxTokens":384000,"thinking":{"mode":"effort","minLevel":"mi
+<- {"type":"response","id":"req_11","ok":true,"result":{"path":"","entries":[{"name":".cornfield","type":"dir","size":288},{"name":"commands","type":"dir","size":96},{"name":"cron","type":"dir","size":160},{"name":"knowledge","type":"dir","size":160},{"name":"memories","type":"dir","size":128},{"name":"raw","type":"dir","size":96},{"name":"sessions","type":"dir","size":10720},{"name":"wiki","type":"d
+<- {"type":"response","id":"req_10","ok":true,"result":{"path":"","entries":[{"name":".cornfield","type":"dir","size":288},{"name":"commands","type":"dir","size":96},{"name":"cron","type":"dir","size":160},{"name":"knowledge","type":"dir","size":160},{"name":"memories","type":"dir","size":128},{"name":"raw","type":"dir","size":96},{"name":"sessions","type":"dir","size":10720},{"name":"wiki","type":"d
+<- {"type":"response","id":"req_9","ok":true,"result":{"repoRoot":"/Users/sz-0203015357/.cornfield","changes":[{"path":"agent.bak-migration-verify-20260917-185338/agent","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-shm","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-wal","index":null,"worktree":"untracke
+<- {"type":"response","id":"req_3","ok":true,"result":{"repoRoot":"/Users/sz-0203015357/.cornfield","changes":[{"path":"agent.bak-migration-verify-20260917-185338/agent","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-shm","index":null,"worktree":"untracked"},{"path":"agent.bak-migration-verify-20260917-185338/agent-wal","index":null,"worktree":"untracke
+<- {"type":"response","id":"req_5","ok":true,"result":{"sessions":[{"sessionId":"01a0afe0-4bb8-7000-92b2-59eb9fd1a2f9","agentId":"default","agentName":"default","source":"cli","title":"Add Parent Child Model Configuration","cwd":"/Users/sz-0203015357/Desktop/Narwal/cornfield","startTime":"2026-09-17T14:58:27.384Z","endTime":"2026-09-17T15:09:08.451Z","messageCount":102,"entryCount":105,"status":"comp

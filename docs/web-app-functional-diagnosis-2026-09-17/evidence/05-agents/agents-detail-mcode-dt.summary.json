@@ -1,0 +1,13 @@
+{
+  "page": "#/agents/mcode",
+  "view": "1440x900",
+  "url": "http://127.0.0.1:4173/#/agents/mcode",
+  "title": "CornField · AI Agent 控制台",
+  "elapsedMs": 7185,
+  "consoleLines": 3,
+  "consoleErrors": 0,
+  "networkIssues": 0,
+  "wsFrames": 19,
+  "controls": 38,
+  "stepsFailed": 0
+}

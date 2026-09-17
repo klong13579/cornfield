@@ -1,0 +1,89 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "输入条：fill 文本 + Shift+Enter 换行（不发送）"
+	},
+	{
+		"fill": [
+			"textarea",
+			"第一行"
+		]
+	},
+	{
+		"press": [
+			"textarea",
+			"Shift+Enter"
+		]
+	},
+	{
+		"wait": 400
+	},
+	{
+		"shot": "shift-enter-newline"
+	},
+	{
+		"eval": "document.querySelector('textarea').value"
+	},
+	{
+		"mark": "Esc 空闲态：不 streaming 不中止，草稿应保留"
+	},
+	{
+		"press": [
+			"textarea",
+			"Escape"
+		]
+	},
+	{
+		"wait": 400
+	},
+	{
+		"eval": "document.querySelector('textarea').value"
+	},
+	{
+		"mark": "斜杠面板：输入 / 打开命令面板"
+	},
+	{
+		"fill": [
+			"textarea",
+			"/"
+		]
+	},
+	{
+		"wait": 700
+	},
+	{
+		"shot": "slash-palette"
+	},
+	{
+		"eval": "document.body.innerText.includes('系统命令')"
+	},
+	{
+		"press": [
+			"textarea",
+			"Escape"
+		]
+	},
+	{
+		"mark": "清空草稿后空 Enter：不应发送（send 空文本直接 return）"
+	},
+	{
+		"fill": [
+			"textarea",
+			""
+		]
+	},
+	{
+		"press": [
+			"textarea",
+			"Enter"
+		]
+	},
+	{
+		"wait": 700
+	},
+	{
+		"eval": "document.querySelector('textarea').value"
+	}
+]

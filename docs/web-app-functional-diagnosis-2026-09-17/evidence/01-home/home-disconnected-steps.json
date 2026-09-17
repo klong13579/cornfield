@@ -1,0 +1,35 @@
+[
+	{
+		"mark": "未连接态：初始读数"
+	},
+	{
+		"eval": "document.querySelector('main').innerText"
+	},
+	{
+		"eval": "JSON.stringify({agentSelDisabled:document.querySelector('select[aria-label=\"切换 Agent\"]').disabled, agentSelText:document.querySelector('select[aria-label=\"切换 Agent\"]').selectedOptions[0]?.text, inputDisabled:document.querySelector('#home-composer').disabled, sendDisabled:document.querySelector('button[aria-label=\"发送\"]').disabled})"
+	},
+	{
+		"shot": "disconnected"
+	},
+	{
+		"mark": "未连接态：点重试（连死端口，看是否给反馈）"
+	},
+	{
+		"click": "@button=重试"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "document.querySelector('main').innerText"
+	},
+	{
+		"shot": "after-retry"
+	},
+	{
+		"mark": "未连接态：点发送键（应点不动）"
+	},
+	{
+		"click": "@button=发送"
+	}
+]

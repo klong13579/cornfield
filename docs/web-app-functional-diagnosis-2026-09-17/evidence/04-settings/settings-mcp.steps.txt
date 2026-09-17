@@ -1,0 +1,25 @@
+
+──── MCP 区：读取初始列表 ────
+step 2 eval (() => { const main = document.querySelector('main'); const t = main?.innerText ?? ''; const i = t.indexOf('MCP 服务器'); return t.slice(i, i + 160); })() → "MCP 服务器\n新增\ngitnexus\n/opt/homebrew/bin/gitnexus mcp\n测试\n编辑\n删除\n主题\n颜色主题\n亮色（V6）\n消息密度\n紧凑\n快捷键\n发送\nEnter\n换行\nShift+Enter\n中止（streaming 时）\nEsc\n切换模型（TODO）\nCmd+M\n会话行为\n自动压缩\n上下"
+
+──── 打开 新增 表单（只读，不写） ────
+step 4 click @button=新增 → ok
+step 5 wait 500ms
+step 6 shot → settings-mcp-mcp-form.png
+step 7 eval (() => { const t = document.querySelector('main')?.innerText ?? ''; const i = t.indexOf('新增 MCP 服务器'); return i >= 0 ? t.slice(i, i + 200) : 'FORM-NOT-OPEN'; })() → "新增 MCP 服务器\n名称\nCommand\nArgs（可选）\n按 shell 词法拆分：空格/制表符分隔，双引号 \"\" 或单引号 '' 包裹含空格参数，反斜杠转义单个字符。\n保存\n取消\n主题\n颜色主题\n亮色（V6）\n消息密度\n紧凑\n快捷键\n发送\nEnter\n换行\nShift+Enter\n中止（streaming 时）\nEsc\n切换模型（TODO）\nCmd+M\n会话行为\n自动压缩\n上下文超阈值时自动"
+
+──── 关闭表单（取消，不写） ────
+step 9 click @button=取消 → ok
+step 10 wait 500ms
+
+──── 启停开关：gitnexus OFF ────
+step 12 click @button=gitnexus 启停开关 → ok
+step 13 wait 1000ms
+step 14 eval (() => { const main = document.querySelector('main'); const t = main?.innerText ?? ''; const i = t.indexOf('MCP 服务器'); return t.slice(i, i + 160); })() → "MCP 服务器\n新增\ngitnexus\n已停用\n/opt/homebrew/bin/gitnexus mcp\n测试\n编辑\n删除\n主题\n颜色主题\n亮色（V6）\n消息密度\n紧凑\n快捷键\n发送\nEnter\n换行\nShift+Enter\n中止（streaming 时）\nEsc\n切换模型（TODO）\nCmd+M\n会话行为\n自动压"
+step 15 shot → settings-mcp-mcp-toggled-off.png
+
+──── 启停开关：gitnexus 回滚 ON ────
+step 17 click @button=gitnexus 启停开关 → ok
+step 18 wait 1000ms
+step 19 eval (() => { const main = document.querySelector('main'); const t = main?.innerText ?? ''; const i = t.indexOf('MCP 服务器'); return t.slice(i, i + 160); })() → "MCP 服务器\n新增\ngitnexus\n/opt/homebrew/bin/gitnexus mcp\n测试\n编辑\n删除\n主题\n颜色主题\n亮色（V6）\n消息密度\n紧凑\n快捷键\n发送\nEnter\n换行\nShift+Enter\n中止（streaming 时）\nEsc\n切换模型（TODO）\nCmd+M\n会话行为\n自动压缩\n上下"
+step 20 shot → settings-mcp-mcp-toggled-on.png

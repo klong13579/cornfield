@@ -1,0 +1,3 @@
+
+──── 深链不存在的 agent id ────
+step 2 shot → agents-unknown-unknown.png

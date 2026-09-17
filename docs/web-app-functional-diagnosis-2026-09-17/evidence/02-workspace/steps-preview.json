@@ -1,0 +1,50 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "手机预览：打开 → 检查全屏遮罩与 Escape 关闭"
+	},
+	{
+		"click": "@button=手机预览"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "document.querySelectorAll('[aria-label=\"关闭预览\"]').length"
+	},
+	{
+		"shot": "preview-open"
+	},
+	{
+		"press": [
+			"body",
+			"Escape"
+		]
+	},
+	{
+		"wait": 700
+	},
+	{
+		"eval": "document.querySelectorAll('[aria-label=\"关闭预览\"]').length"
+	},
+	{
+		"shot": "preview-after-escape"
+	},
+	{
+		"mark": "若仍在：点遮罩关闭，确认可关闭"
+	},
+	{
+		"click": "[aria-label=\"关闭预览\"]"
+	},
+	{
+		"wait": 700
+	},
+	{
+		"eval": "document.querySelectorAll('[aria-label=\"关闭预览\"]').length"
+	},
+	{
+		"shot": "preview-after-backdrop-click"
+	}
+]

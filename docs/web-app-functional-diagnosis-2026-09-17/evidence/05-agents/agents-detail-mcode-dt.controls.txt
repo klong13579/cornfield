@@ -1,0 +1,38 @@
+a [12,-58 102x35] «跳到主要内容»
+a [14,196 211x35] «首页»
+a [14,234 211x35] «会话工作台»
+a [14,271 211x35] «会话记录»
+a [14,341 211x35] «Agent 总览»
+a [14,410 211x35] «Skills»
+a [14,448 211x35] «Memory»
+a [14,486 211x35] «Todo»
+a [14,523 211x35] «模型»
+a [14,561 211x35] «语音»
+a [14,631 211x35] «定时任务»
+a [14,668 211x35] «用量»
+a [14,706 211x35] «设置»
+button button [1172,80 28x28] «关闭详情»
+button button [480,226 76x43] «Skills5»
+button button [558,226 58x43] «钉钉»
+button button [618,226 84x43] «模型配置»
+button button [704,226 84x43] «工具开关»
+button button [789,226 84x43] «用户画像»
+button button [875,226 58x43] «文件»
+button button [935,226 83x43] «Prompts»
+button button [629,337 42x24]
+input [629,382 474x33] ph="M-HR" v="M-Code"
+input [629,436 474x33] ph="/Users/.../OMP-workspace-test/mcode" v="/Users/sz-0203015357/Desktop/Narwal/OMP-"
+button button [629,490 42x24]
+button button [493,819 68x26] «ast_edit»
+button button [567,819 36x26] «lsp»
+button button [609,819 49x26] «debug»
+button button [664,819 68x26] «notebook»
+button button [738,819 55x26] «recipe»
+button button [800,819 36x26] «irc»
+button button [841,819 55x26] «github»
+button button [903,819 36x26] «ssh»
+button button [944,819 101x26] «inspect_image»
+button button [493,850 62x26] «browser»
+button button [561,850 108x26] «render_mermaid»
+button button DISABLED [480,939 60x29] «已同步»
+button button [480,1058 100x19] «← 返回 Agent 列表»

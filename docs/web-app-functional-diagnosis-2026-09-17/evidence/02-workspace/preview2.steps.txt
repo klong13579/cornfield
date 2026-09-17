@@ -1,0 +1,16 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+step 2 click @button=手机预览 → ok
+step 3 wait 800ms
+step 4 eval document.querySelectorAll('[aria-label="关闭预览"]').length → 2
+
+──── eval 直接派发 window keydown Escape（绕过 locator.press 的聚焦语义） ────
+step 6 eval (()=>{window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return 'dispatched'})() → "dispatched"
+step 7 wait 600ms
+step 8 eval document.querySelectorAll('[aria-label="关闭预览"]').length → 0
+step 9 shot → preview2-esc-eval-dispatched.png
+
+──── 用唯一 CSS 选择器点全屏遮罩关闭 ────
+step 11 失败：{"click":"button.fixed[aria-label=\"关闭预览\"]"} → click: Timeout 8000ms exceeded.
+step 12 wait 600ms
+step 13 eval document.querySelectorAll('[aria-label="关闭预览"]').length → 0
+step 14 shot → preview2-after-backdrop-click.png

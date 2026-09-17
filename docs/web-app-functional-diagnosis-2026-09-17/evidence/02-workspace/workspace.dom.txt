@@ -1,0 +1,53 @@
+CornField · AI Agent 控制台
+
+新会话
+列表
+树
+WebUI 会话
+CLI 会话
+当前会话
+1
+当前会话
+当前会话
+HR
+4
+[System note: This is a fresh conversat…
+hr · 85 条
+你的工作区在哪？
+hr · 44 条
+[CRON-CONTEXT] Task: goal-2-kb-refresh …
+hr · 101 条
+[CRON-CONTEXT] Task: goal-1-context-int…
+hr · 193 条
+ALGORITHM
+1
+01a0ad85
+algorithm · 110 条
+已连接 · 7 agents
+已连接
+default
+hr（idle）
+algorithm（idle）
+me（idle）
+dataAgent（idle）
+sw（idle）
+mcode（idle）
+/
+default ·
+/
+未声明
+/
+01a0afb9-9dc6-7000-84c2-be92e791fd60
+compact
+新会话
+还没有消息 —— 从下方输入第一条指令。
+当前计划
+本会话的 Session Todo
+本次会话还没有计划
+d
+@default
+附件
+deepseek-v4-flash
+medium
+Enter 发送 · Shift+Enter 换行 · Esc 中止
+draft 自动保留 · 输入自适应增高

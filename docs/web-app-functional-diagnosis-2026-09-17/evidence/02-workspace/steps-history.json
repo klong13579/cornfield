@@ -1,0 +1,53 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "打开历史会话 hr「你的工作区在哪？」（非当前会话 → openHistorySession）"
+	},
+	{
+		"click": "@button=你的工作区在哪？"
+	},
+	{
+		"wait": 1800
+	},
+	{
+		"shot": "history-open"
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"eval": "document.querySelector('textarea').placeholder"
+	},
+	{
+		"eval": "document.querySelectorAll('.msg-row').length"
+	},
+	{
+		"eval": "document.querySelector('main').innerText.slice(0,1200)"
+	},
+	{
+		"mark": "在转录区内滚动，检查工具卡渲染"
+	},
+	{
+		"eval": "(()=>{const sc=[...document.querySelectorAll('div')].find(d=>d.scrollHeight>d.clientHeight+50&&d.className.includes('overflow-y-auto'));if(sc){sc.scrollTop=0;return sc.scrollHeight+'/'+sc.clientHeight}return 'no-scroller'})()"
+	},
+	{
+		"wait": 600
+	},
+	{
+		"shot": "history-top"
+	},
+	{
+		"mark": "右栏展开：改动 tab（本会话组）"
+	},
+	{
+		"click": "@button=展开右栏"
+	},
+	{
+		"wait": 1000
+	},
+	{
+		"shot": "history-rightpanel"
+	}
+]

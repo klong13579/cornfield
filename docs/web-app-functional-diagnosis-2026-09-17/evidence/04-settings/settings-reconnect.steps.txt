@@ -1,0 +1,11 @@
+
+──── 连接配置：填非法 WS URL 触发重连 ────
+step 2 fill #conn-wsurl → ok
+step 3 wait 300ms
+
+──── 点击 保存并重连（写 localStorage + 断线重连） ────
+step 5 click @button=保存并重连 → ok
+step 6 wait 3500ms
+step 7 eval (() => { const main = document.querySelector('main'); const t = main?.innerText ?? ''; const i = t.indexOf('状态'); return t.slice(i, i + 80); })() → "状态\n重连中（指数退避）\n连接 ID\n—\n协议版本\nv1\n桌面壳版本\n—\n更新\n检查更新\nWS URL\nToken\n保存并重连\n工作目录\n保存\nMCP 服务器\n"
+step 8 shot → settings-reconnect-reconnect-state.png
+step 9 eval localStorage.getItem('cornfield.serve.connection') → "{\"wsUrl\":\"ws://127.0.0.1:9/ws\",\"token\":\"\"}"

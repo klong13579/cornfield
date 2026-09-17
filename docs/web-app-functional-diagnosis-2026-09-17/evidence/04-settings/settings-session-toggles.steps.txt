@@ -1,0 +1,23 @@
+
+──── 会话行为三开关：读取初始态 ────
+step 2 eval (() => { const s = t => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes(t)); return b?.querySelector('.toggle')?.className ?? 'MISSING'; }; return JSON.stringify({autoCompaction: s('自动压缩'), autoRetry: s('自动重试'), keepDraft: s('草稿保留')}); })() → "{\"autoCompaction\":\"toggle \",\"autoRetry\":\"toggle \",\"keepDraft\":\"toggle on\"}"
+
+──── 切换 自动压缩（OFF -> ON） ────
+step 4 click @button=自动压缩 → ok
+step 5 wait 1000ms
+step 6 eval (() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('自动压缩')); return b?.querySelector('.toggle')?.className ?? 'MISSING'; })() → "toggle on"
+
+──── 回滚 自动压缩（ON -> OFF） ────
+step 8 click @button=自动压缩 → ok
+step 9 wait 1000ms
+
+──── 切换 自动重试（OFF -> ON） ────
+step 11 click @button=自动重试 → ok
+step 12 wait 1000ms
+step 13 eval (() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('自动重试')); return b?.querySelector('.toggle')?.className ?? 'MISSING'; })() → "toggle on"
+
+──── 回滚 自动重试（ON -> OFF） ────
+step 15 click @button=自动重试 → ok
+step 16 wait 1000ms
+step 17 eval (() => { const s = t => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes(t)); return b?.querySelector('.toggle')?.className ?? 'MISSING'; }; return JSON.stringify({autoCompaction: s('自动压缩'), autoRetry: s('自动重试'), keepDraft: s('草稿保留')}); })() → "{\"autoCompaction\":\"toggle \",\"autoRetry\":\"toggle \",\"keepDraft\":\"toggle on\"}"
+step 18 shot → settings-session-toggles-session-behavior-toggles.png

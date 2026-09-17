@@ -1,0 +1,5 @@
+
+──── 禁用态点击：期望 Timeout 且无 set_agent_todo 出站帧 ────
+step 2 失败：{"click":"@button=添加"} → click: Timeout 8000ms exceeded.
+step 3 wait 1000ms
+step 4 eval document.querySelector('main').innerText.replace(/\n/g,' | ') → "Todo | Agent 长期任务 · Project 筛选 | Agent | Agent Todo | owner default | <agentDir>/.cornfield/agent-todos.json（agentDir 为 default 的 home） | 全部 0 | 0 未完成 · 0 已完成 | 通用（不绑 Project） | 添加 | default 还没有长期任务。上面加一条。"

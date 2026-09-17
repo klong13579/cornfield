@@ -1,0 +1,21 @@
+
+──── detail default 初始 ────
+step 2 shot → agents-detail-default-d-skills.png
+step 3 click @text=钉钉 → ok
+step 4 wait 1500ms
+step 5 shot → agents-detail-default-d-dingtalk.png
+step 6 click @text=模型配置 → ok
+step 7 wait 2000ms
+step 8 shot → agents-detail-default-d-model.png
+step 9 click @text=工具开关 → ok
+step 10 wait 2000ms
+step 11 shot → agents-detail-default-d-tools.png
+step 12 click @text=用户画像 → ok
+step 13 wait 1500ms
+step 14 shot → agents-detail-default-d-profile.png
+step 15 click @text=文件 → ok
+step 16 wait 2000ms
+step 17 shot → agents-detail-default-d-files.png
+step 18 click @text=Prompts → ok
+step 19 wait 2000ms
+step 20 shot → agents-detail-default-d-prompts.png

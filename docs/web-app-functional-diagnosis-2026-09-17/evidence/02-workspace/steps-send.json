@@ -1,0 +1,71 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "确认焦点 Agent 与通知条"
+	},
+	{
+		"eval": "document.querySelector('textarea').placeholder"
+	},
+	{
+		"mark": "真实发送（本次诊断唯一 1 次真 LLM 调用）：fill + Enter"
+	},
+	{
+		"eval": "(()=>{window.__sendT=Date.now();return 't0:'+window.__sendT})()"
+	},
+	{
+		"fill": [
+			"textarea",
+			"请用三点说明为什么代码要写测试"
+		]
+	},
+	{
+		"press": [
+			"textarea",
+			"Enter"
+		]
+	},
+	{
+		"wait": 1500
+	},
+	{
+		"eval": "({dtMs: Date.now()-window.__sendT, streaming: !!document.querySelector('[aria-label=\"停止\"]'), sendBtn: !!document.querySelector('[aria-label=\"发送\"]')})"
+	},
+	{
+		"shot": "streaming-1"
+	},
+	{
+		"wait": 2500
+	},
+	{
+		"eval": "({dtMs: Date.now()-window.__sendT, streaming: !!document.querySelector('[aria-label=\"停止\"]'), tail: document.querySelector('main').innerText.slice(-400)})"
+	},
+	{
+		"shot": "streaming-2"
+	},
+	{
+		"mark": "Esc 中止（streaming 中）"
+	},
+	{
+		"press": [
+			"textarea",
+			"Escape"
+		]
+	},
+	{
+		"wait": 1500
+	},
+	{
+		"eval": "({dtMs: Date.now()-window.__sendT, streaming: !!document.querySelector('[aria-label=\"停止\"]'), sendBtn: !!document.querySelector('[aria-label=\"发送\"]')})"
+	},
+	{
+		"shot": "after-escape"
+	},
+	{
+		"mark": "会话文件路径"
+	},
+	{
+		"eval": "[...document.querySelectorAll('[title]')].map(e=>e.title).filter(t=>typeof t==='string'&&t.includes('.jsonl'))[0]"
+	}
+]

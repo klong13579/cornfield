@@ -1,0 +1,31 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 右栏展开：文件树 ────
+step 3 click @button=展开右栏 → ok
+step 4 wait 900ms
+step 5 shot → panels-right-panel-files.png
+step 6 eval document.body.innerText.includes('文件') && document.body.innerText.includes('产物') && document.body.innerText.includes('改动') → true
+
+──── 产物 tab ────
+step 8 click @text=产物 → ok
+step 9 wait 900ms
+step 10 shot → panels-right-panel-artifacts.png
+
+──── 改动 tab ────
+step 12 click @text=改动 → ok
+step 13 wait 900ms
+step 14 shot → panels-right-panel-changes.png
+
+──── 手机预览入口 ────
+step 16 click @button=手机预览 → ok
+step 17 wait 900ms
+step 18 shot → panels-phone-preview.png
+step 19 eval document.body.innerText.includes('移动端预览') → true
+step 20 press Escape on body → ok
+step 21 wait 300ms
+
+──── 消息流与工具卡：打开历史会话 ────
+step 23 失败：{"click":"@text=你的工作区在哪？"} → click: Timeout 8000ms exceeded.
+step 24 wait 1200ms
+step 25 shot → panels-history-session.png
+step 26 eval document.body.innerText.slice(0, 300) → "跳到主要内容\ncornfield\n当前 AGENT\ndefault\n未声明\n工作\n首页\n会话工作台\n会话记录\nAGENT\nAgent 总览\n能力\nSkills\nMemory\nTodo\n模型\n语音\n系统\n定时任务\n用量\n设置\n新会话\n列表\n树\nWebUI 会话\nCLI 会话\n当前会话\n1\n当前会话\n当前会话\nHR\n4\n[System note: This is a fresh conversat…\nhr · 86 条\n你的工作区在哪？\nhr · 44 条\n[CRON-CONTEXT] Task: goal-2-kb-refresh …\nhr · 101 条\n[CRON-CONTEXT] Task"

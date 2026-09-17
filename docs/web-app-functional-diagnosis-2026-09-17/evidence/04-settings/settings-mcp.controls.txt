@@ -1,0 +1,35 @@
+a [12,-58 102x35] «跳到主要内容»
+a [14,196 211x35] «首页»
+a [14,234 211x35] «会话工作台»
+a [14,271 211x35] «会话记录»
+a [14,341 211x35] «Agent 总览»
+a [14,410 211x35] «Skills»
+a [14,448 211x35] «Memory»
+a [14,486 211x35] «Todo»
+a [14,523 211x35] «模型»
+a [14,561 211x35] «语音»
+a [14,631 211x35] «定时任务»
+a [14,668 211x35] «用量»
+a [14,706 211x35] «设置»
+button button [1121,-230 62x24] «检查更新»
+input [497,-153 686x33] ph="ws://127.0.0.1:7891/ws" v="ws://127.0.0.1:7891/ws"
+input password [497,-76 594x33] ph="serve 启动时打印的 token"
+button button [1099,-76 84x33] «保存并重连»
+input [497,2 630x33] ph="~/workspace" v="~/workspace"
+button button [1135,2 48x33] «保存»
+button button [1160,82 40x24] «新增»
+button button [1037,135 40x28] «测试»
+button button [1085,135 40x28] «编辑»
+button button [1133,135 40x28] «删除»
+button button [1181,137 2x22] «gitnexus 启停开关»
+button button [481,633 718x59] «自动压缩上下文超阈值时自动 compact»
+button button [481,692 718x59] «自动重试模型调用失败后按退避重试»
+button button [481,752 718x58] «草稿保留输入内容自动持久化，刷新不丢（真控制：关闭后草稿不再写入 localStorage）»
+button button [481,876 718x59] «Agent 完成页面不在前台时，回合结束发浏览器通知（Notification API）»
+button button [481,935 718x59] «出错告警回合/命令/重试出错时提醒（页面不在前台才发）»
+button button [481,994 718x58] «定时任务后台轮询 cron 执行日志（B6 只读），新运行完成时提醒（页面不在前台才发）»
+input DISABLED [497,1192 337x33] ph="（配置存本地 gateway.json，编辑待接入）"
+input password DISABLED [846,1192 337x33] ph="••••••"
+button button DISABLED [497,1237 130x31] «测试连接（TODO）»
+button button [480,1349 74x31] «新建会话»
+button button DISABLED [566,1349 74x31] «重置设置»

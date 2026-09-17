@@ -1,0 +1,65 @@
+CornField · AI Agent 控制台
+
+设置
+连接
+状态
+connected
+连接 ID
+329d1ef2-498a-4a0f-83fc-aa3a39cb6d8d
+协议版本
+v1
+桌面壳版本
+—
+更新
+检查更新
+WS URL
+Token
+保存并重连
+工作目录
+保存
+已保存
+MCP 服务器
+新增
+gitnexus
+/opt/homebrew/bin/gitnexus mcp
+测试
+编辑
+删除
+主题
+颜色主题
+亮色（V6）
+消息密度
+紧凑
+快捷键
+发送
+Enter
+换行
+Shift+Enter
+中止（streaming 时）
+Esc
+切换模型（TODO）
+Cmd+M
+会话行为
+自动压缩
+上下文超阈值时自动 compact
+自动重试
+模型调用失败后按退避重试
+草稿保留
+输入内容自动持久化，刷新不丢（真控制：关闭后草稿不再写入 localStorage）
+通知
+Agent 完成
+浏览器已拒绝通知权限——请在站点设置中开启
+出错告警
+浏览器已拒绝通知权限——请在站点设置中开启
+定时任务
+浏览器已拒绝通知权限——请在站点设置中开启
+钉钉集成
+钉
+连接器配置
+未配置
+AppKey
+AppSecret
+测试连接（TODO）
+危险操作
+新建会话
+重置设置

@@ -1,0 +1,44 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"click": "@button=手机预览"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "document.querySelectorAll('[aria-label=\"关闭预览\"]').length"
+	},
+	{
+		"mark": "eval 直接派发 window keydown Escape（绕过 locator.press 的聚焦语义）"
+	},
+	{
+		"eval": "(()=>{window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return 'dispatched'})()"
+	},
+	{
+		"wait": 600
+	},
+	{
+		"eval": "document.querySelectorAll('[aria-label=\"关闭预览\"]').length"
+	},
+	{
+		"shot": "esc-eval-dispatched"
+	},
+	{
+		"mark": "用唯一 CSS 选择器点全屏遮罩关闭"
+	},
+	{
+		"click": "button.fixed[aria-label=\"关闭预览\"]"
+	},
+	{
+		"wait": 600
+	},
+	{
+		"eval": "document.querySelectorAll('[aria-label=\"关闭预览\"]').length"
+	},
+	{
+		"shot": "after-backdrop-click"
+	}
+]

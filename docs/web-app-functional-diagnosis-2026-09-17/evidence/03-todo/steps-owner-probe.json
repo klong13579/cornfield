@@ -1,0 +1,8 @@
+[
+	{
+		"mark": "侧栏（canonical activeAgentOf）vs Todo 标题（view.activeAgentId ?? default）"
+	},
+	{
+		"eval": "(() => { const nav = document.querySelector('nav[aria-label=\"主导航\"]'); const main = document.querySelector('main'); return { sidebar: nav ? nav.innerText.replace(/\\n/g,' | ') : 'no-nav', mainHead: main ? main.innerText.split('\\n').slice(0,8).join(' | ') : 'no-main' }; })()"
+	}
+]

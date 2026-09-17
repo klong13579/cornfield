@@ -1,0 +1,83 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "附件按钮：点击触发隐藏 file input（原生文件选择器）"
+	},
+	{
+		"click": "@button=附件"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"shot": "attachment-click"
+	},
+	{
+		"eval": "document.querySelector('input[type=file]') ? document.querySelector('input[type=file]').accept : 'NO_FILE_INPUT'"
+	},
+	{
+		"mark": "语音按钮：跳转 /voice"
+	},
+	{
+		"click": "@button=语音输入"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"shot": "voice"
+	},
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "模型下拉：打开（只读，不切模型避免全局写）"
+	},
+	{
+		"click": "@text=deepseek-v4-flash"
+	},
+	{
+		"wait": 900
+	},
+	{
+		"shot": "model-menu"
+	},
+	{
+		"eval": "document.body.innerText.includes('思维级别') && document.body.innerText.includes('模型')"
+	},
+	{
+		"press": [
+			"body",
+			"Escape"
+		]
+	},
+	{
+		"wait": 300
+	},
+	{
+		"mark": "Agent 选择器：打开（只读，不切 agent）"
+	},
+	{
+		"click": "@text=@default"
+	},
+	{
+		"wait": 900
+	},
+	{
+		"shot": "agent-menu"
+	},
+	{
+		"eval": "document.body.innerText.includes('CODING') || document.body.innerText.includes('WORKER')"
+	},
+	{
+		"press": [
+			"body",
+			"Escape"
+		]
+	}
+]

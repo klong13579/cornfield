@@ -1,0 +1,13 @@
+{
+  "page": "#/todo",
+  "view": "1440x900",
+  "url": "http://127.0.0.1:4173/#/todo",
+  "title": "CornField · AI Agent 控制台",
+  "elapsedMs": 9634,
+  "consoleLines": 6,
+  "consoleErrors": 3,
+  "networkIssues": 0,
+  "wsFrames": 1,
+  "controls": 13,
+  "stepsFailed": 0
+}

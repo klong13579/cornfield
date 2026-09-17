@@ -1,0 +1,13 @@
+CornField · AI Agent 控制台
+
+Todo
+Agent 长期任务 · Project 筛选
+Agent
+Agent Todo
+owner default
+<agentDir>/.cornfield/agent-todos.json（agentDir 为 default 的 home）
+全部 0
+0 未完成 · 0 已完成
+通用（不绑 Project）
+添加
+default 还没有长期任务。上面加一条。

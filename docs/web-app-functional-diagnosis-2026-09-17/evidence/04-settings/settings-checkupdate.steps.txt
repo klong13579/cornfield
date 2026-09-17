@@ -1,0 +1,6 @@
+
+──── 连接区：点击检查更新（网页直开，无 window.api） ────
+step 2 click @button=检查更新 → ok
+step 3 wait 800ms
+step 4 eval (() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('检查')); return b ? b.textContent.trim() : 'MISSING'; })() → "检查更新"
+step 5 shot → settings-checkupdate-check-update.png

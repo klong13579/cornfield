@@ -1,0 +1,44 @@
+CornField · AI Agent 控制台
+
+晚上好，彭梦龙
+cf-ui-demo · · 7 agent 运行中 · 0 定时任务待执行
+快速会话
+default
+hr（idle）
+algorithm（idle）
+me（idle）
+dataAgent（idle）
+sw（idle）
+mcode（idle）
+Agent default
+/
+Project 未归属
+/
+工作区 cf-ui-demo
+/
+会话 01a0afb9-9dc6-7000-84c2-be92e791fd60
+
+还没有对话内容。在下面发一条，default 的回复会出现在这里。
+
+Enter 发送到当前会话
+转入会话工作台（同一会话）
+项目
+
+未声明任何 Project。声明文件：~/.cornfield/agent/projects.json
+
+检查今天的定时任务
+最近会话回顾
+语音记录一条指令
+切换模型
+打开 Agent 管理
+最近活跃
+d
+default
+—
+h
+hr
+—
+a
+algorithm
+—
+打开会话工作台 

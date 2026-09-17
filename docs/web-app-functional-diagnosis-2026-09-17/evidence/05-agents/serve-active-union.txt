@@ -1,0 +1,8 @@
+=== list_agents after switch to hr (active/attached/phase per agent) ===
+default	active=true	attached=true	phase=idle	model=deepseek-v4-flash
+hr	active=true	attached=true	phase=idle	model=deepseek-v4-flash-0731
+algorithm	active=false	attached=true	phase=idle	model=deepseek-v4-flash-0731
+me	active=false	attached=true	phase=idle	model=deepseek-v4-flash-0731
+dataAgent	active=false	attached=true	phase=idle	model=deepseek-v4.1-flash
+sw	active=false	attached=true	phase=idle	model=deepseek-v4-flash-0731
+mcode	active=false	attached=true	phase=idle	model=minimax-m3

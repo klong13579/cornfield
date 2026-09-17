@@ -1,0 +1,40 @@
+
+──── 禁用态（标题为空） ────
+step 2 eval (() => { const b = [...document.querySelectorAll('button')].find(x => (x.textContent||'').trim() === '添加'); if (!b) return 'not-found'; const s = getComputedStyle(b); return { disabled: b.disabled, bg: s.backgroundColor, color: s.color, cursor: s.cursor, opacity: s.opacity }; })() → {"disabled":true,"bg":"rgba(0, 0, 0, 0)","color":"rgba(24, 24, 27, 0.5)","cursor":"pointer","opacity":"1"}
+step 3 shot → write-loop-add-disabled.png
+step 4 fill input[placeholder*='长期任务'] → ok
+
+──── 可用态（标题已填） ────
+step 6 eval (() => { const b = [...document.querySelectorAll('button')].find(x => (x.textContent||'').trim() === '添加'); if (!b) return 'not-found'; const s = getComputedStyle(b); return { disabled: b.disabled, bg: s.backgroundColor, color: s.color, cursor: s.cursor, opacity: s.opacity }; })() → {"disabled":false,"bg":"rgba(0, 0, 0, 0)","color":"rgba(24, 24, 27, 0.5)","cursor":"pointer","opacity":"1"}
+step 7 shot → write-loop-add-enabled.png
+
+──── 写闭环：创建 ────
+step 9 click @button=添加 → ok
+step 10 wait 2000ms
+step 11 eval document.body.innerText.includes('T3-diag-write-loop') → true
+step 12 shot → write-loop-write-created.png
+
+──── 编辑：改备注 ────
+step 14 click @button=编辑 → ok
+step 15 fill textarea[placeholder='留空 = 没有备注'] → ok
+step 16 click @button=保存 → ok
+step 17 wait 2000ms
+step 18 eval document.body.innerText.includes('T3-note-edit-verify') → true
+
+──── 延期：明天 ────
+step 20 click @button=延期 → ok
+step 21 click @button=明天 → ok
+step 22 wait 2000ms
+step 23 eval document.body.innerText.includes('截止') → true
+
+──── 状态转移：完成（复选框） ────
+step 25 click input[type=checkbox] → ok
+step 26 wait 2000ms
+step 27 eval document.body.innerText.includes('已完成') → true
+step 28 shot → write-loop-write-completed.png
+
+──── 写闭环：删除清理 ────
+step 30 click button[aria-label^='删除 T3-diag-write-loop'] → ok
+step 31 wait 2000ms
+step 32 eval !document.body.innerText.includes('T3-diag-write-loop') → true
+step 33 shot → write-loop-write-deleted.png

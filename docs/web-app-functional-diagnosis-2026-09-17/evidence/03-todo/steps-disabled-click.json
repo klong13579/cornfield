@@ -1,0 +1,14 @@
+[
+	{
+		"mark": "禁用态点击：期望 Timeout 且无 set_agent_todo 出站帧"
+	},
+	{
+		"click": "@button=添加"
+	},
+	{
+		"wait": 1000
+	},
+	{
+		"eval": "document.querySelector('main').innerText.replace(/\\n/g,' | ')"
+	}
+]

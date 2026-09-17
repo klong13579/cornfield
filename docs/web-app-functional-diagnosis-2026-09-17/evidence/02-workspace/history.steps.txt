@@ -1,0 +1,20 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 打开历史会话 hr「你的工作区在哪？」（非当前会话 → openHistorySession） ────
+step 3 click @button=你的工作区在哪？ → ok
+step 4 wait 1800ms
+step 5 shot → history-history-open.png
+step 6 eval location.hash → "#/workspace"
+step 7 eval document.querySelector('textarea').placeholder → "@hr 发消息，或直接提问…"
+step 8 eval document.querySelectorAll('.msg-row').length → 19
+step 9 eval document.querySelector('main').innerText.slice(0,1200) → "新会话\n列表\n树\nWebUI 会话\nCLI 会话\n当前会话\n1\n当前会话\n当前会话\nHR\n4\n[System note: This is a fresh conversat…\nhr · 86 条\n你的工作区在哪？\nhr · 44 条\n[CRON-CONTEXT] Task: goal-2-kb-refresh …\nhr · 101 条\n[CRON-CONTEXT] Task: goal-1-context-int…\nhr · 193 条\nALGORITHM\n1\n01a0ad85\nalgorithm · 110 条\n已连接 · 7 agents\n已连接\ndefault\nhr\nalgorithm（idle）\nme（idle）\ndataAgent（idle）\nsw（idle）\nmcode（idle）\n/\nhr3 ·\n/\n未声明\n/\n01a0afb9-a040-7000-b61c-f52ba335cab9\ncompact\n新会话\n你的工作区在哪？\ndeepseek-v4-flash-0731\n✓ 完成\n活动 · 2 个工具\ndeepseek-v4-flash-0731\n✓ 完成\n活动 · 0 个工具\n\n/Users/sz-0203015357/Desktop/Narwal/OMP-workspace-test/hr3 —— 我是 Anna，HR agent 的 agentDir。\n\n里面主要的：mission.md（身份）、AGENTS.md（硬约束）、TOOLS.md、user.md、knowledge/（外部数据源映射）、context/（钉钉 context 摘要）、interview-record/、cron/、sessions/。\n\n准备一下待会的面试资料给我\ndeepseek-v4-flash-0731\n✓ 完成\n活动 · 2 个工具\ndeepseek-v4-flash-0731\n✓ 完成\n活动 · 2 个工具\n1 个失败\ndeepseek-v4
+
+──── 在转录区内滚动，检查工具卡渲染 ────
+step 11 eval (()=>{const sc=[...document.querySelectorAll('div')].find(d=>d.scrollHeight>d.clientHeight+50&&d.className.includes('overflow-y-auto'));if(sc){sc.scrollTop=0;return sc.scrollHeight+'/'+sc.clientHeight}return 'no-scroller'})() → "5625/636"
+step 12 wait 600ms
+step 13 shot → history-history-top.png
+
+──── 右栏展开：改动 tab（本会话组） ────
+step 15 click @button=展开右栏 → ok
+step 16 wait 1000ms
+step 17 shot → history-history-rightpanel.png

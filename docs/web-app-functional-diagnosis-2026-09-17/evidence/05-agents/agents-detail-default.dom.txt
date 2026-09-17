@@ -1,0 +1,40 @@
+CornField · AI Agent 控制台
+
+运行中 · 最近活跃 —
+default
+deepseek-v4-flash
+WORKER
+默认工作区 · 最近活跃 —
+Skills1
+钉钉
+模型配置
+工具开关
+用户画像
+文件
+Prompts
+硬约束与文件地图
+AGENTS.md
+全局硬约束清单与文件地图。启动时无条件读取：带 MUST NOT / NEVER 的行抽进 <hard-constraints>，其余内容注入 <context>。
+身份与职责
+mission.md
+本 agent 的身份、职责与能力边界（人设的来源）。经 prompt-includes.json 注入 <context>。
+工具级规则
+TOOLS.md
+各工具的 MUST / MUST NOT 规则，与工具说明同处一地。always-on 注入 <context>，其中 MUST/NOT 级别行抽进 <hard-constraints>。
+当前任务看板
+TODO.md
+当前任务状态，由 agent 随进展更新；always-on 注入 <context>，TUI 欢迎页也读它。
+项目级人设
+user.md
+agentDir 级的用户画像，作为用户级 ~/.cornfield/user.md 在本项目的覆盖层（两者都在时 agentDir 级优先）。刻意不列进 prompt-includes.json：loadUserProfile 已把它注入 <user>，列进去会被当 <context> 再加载一遍。
+always-on 注入清单
+prompt-includes.json
+声明哪些文件被当作 always-on 注入 <context>（顶层 files 数组），启动时读取。
+系统提示词基线
+.cornfield/SYSTEM.md
+自定义系统提示词模板：非空时替换 CornField 内置提示词（gateway agent 的基线行为）。留空则回落内置提示词。
+外部数据源登记
+knowledge/external-workspaces.md
+外部工作区与数据源的登记表（参考文档，本身不触发同步）。经 prompt-includes.json 注入 <context>。
+点击左侧浏览 agent 的各份 prompt 配置
+← 返回 Agent 列表

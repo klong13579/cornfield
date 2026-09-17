@@ -1,0 +1,30 @@
+a [12,-58 102x35] «跳到主要内容»
+a [14,196 211x35] «首页»
+a [14,234 211x35] «会话工作台»
+a [14,271 211x35] «会话记录»
+a [14,341 211x35] «Agent 总览»
+a [14,410 211x35] «Skills»
+a [14,448 211x35] «Memory»
+a [14,486 211x35] «Todo»
+a [14,523 211x35] «模型»
+a [14,561 211x35] «语音»
+a [14,631 211x35] «定时任务»
+a [14,668 211x35] «用量»
+a [14,706 211x35] «设置»
+button button [1172,80 28x28] «关闭详情»
+button button [480,226 73x43] «Skills1»
+button button [555,226 58x43] «钉钉»
+button button [615,226 84x43] «模型配置»
+button button [701,226 84x43] «工具开关»
+button button [787,226 84x43] «用户画像»
+button button [873,226 58x43] «文件»
+button button [933,226 83x43] «Prompts»
+button button [481,302 318x89] «硬约束与文件地图AGENTS.md全局硬约束清单与文件地图。启动时无条件读取：带 MUST NOT / NEVER 的行»
+button button [481,391 318x74] «身份与职责mission.md本 agent 的身份、职责与能力边界（人设的来源）。经 prompt-includes.»
+button button [481,465 318x89] «工具级规则TOOLS.md各工具的 MUST / MUST NOT 规则，与工具说明同处一地。always-on 注入 »
+button button [481,555 318x74] «当前任务看板TODO.md当前任务状态，由 agent 随进展更新；always-on 注入 <context>，TUI»
+button button [481,629 318x105] «项目级人设user.mdagentDir 级的用户画像，作为用户级 ~/.cornfield/user.md 在本项目的»
+button button [481,734 318x74] «always-on 注入清单prompt-includes.json声明哪些文件被当作 always-on 注入 <co»
+button button [481,808 318x74] «系统提示词基线.cornfield/SYSTEM.md自定义系统提示词模板：非空时替换 CornField 内置提示词（»
+button button [481,882 318x93] «外部数据源登记knowledge/external-workspaces.md外部工作区与数据源的登记表（参考文档，本身»
+button button [480,1007 100x19] «← 返回 Agent 列表»

@@ -1,0 +1,58 @@
+
+──── A. Agent 切换 default -> hr ────
+step 2 eval (()=>{const s=document.querySelector('select[aria-label="切换 Agent"]');const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;setter.call(s,'hr');s.dispatchEvent(new Event('change',{bubbles:true}));return 'dispatch change to hr';})() → "dispatch change to hr"
+step 3 wait 1500ms
+step 4 eval JSON.stringify({select:document.querySelector('select[aria-label="切换 Agent"]').value, ph:document.querySelector('#home-composer').placeholder, ctx:document.querySelector('main').innerText.split('\n').slice(0,3).join(' | ')}) → "{\"select\":\"hr\",\"ph\":\"给 hr 发一条指令…\",\"ctx\":\"晚上好，彭梦龙 | cf-ui-demo · · 7 agent 运行中 · 0 定时任务待执行 | 快速会话\"}"
+step 5 shot → home-interact-agent-hr.png
+
+──── B. 切回 default ────
+step 7 eval (()=>{const s=document.querySelector('select[aria-label="切换 Agent"]');const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;setter.call(s,'default');s.dispatchEvent(new Event('change',{bubbles:true}));return 'dispatch change to default';})() → "dispatch change to default"
+step 8 wait 1500ms
+step 9 eval JSON.stringify({select:document.querySelector('select[aria-label="切换 Agent"]').value, ph:document.querySelector('#home-composer').placeholder}) → "{\"select\":\"default\",\"ph\":\"给 default 发一条指令…\"}"
+
+──── C. composer 填写 -> 发送键可用 -> 清空 -> 禁用 ────
+step 11 fill #home-composer → ok
+step 12 eval document.querySelector('button[aria-label="发送"]').disabled ? 'send DISABLED (after fill)' : 'send ENABLED (after fill)' → "send ENABLED (after fill)"
+step 13 shot → home-interact-composer-filled.png
+step 14 fill #home-composer → ok
+step 15 eval document.querySelector('button[aria-label="发送"]').disabled ? 'send DISABLED (after clear)' : 'send ENABLED (after clear)' → "send DISABLED (after clear)"
+
+──── D. 空文本点发送键（应点不动 / 无出站帧） ────
+step 17 失败：{"click":"@button=发送"} → click: Timeout 8000ms exceeded.
+
+──── E. 项目刷新按钮 ────
+step 19 click @button=刷新项目列表 → ok
+step 20 wait 1000ms
+
+──── F. 快捷卡片导航 5 个 ────
+step 22 click @link=检查今天的定时任务 → ok
+step 23 wait 800ms
+step 24 eval location.hash → "#/tasks"
+step 25 goto #/ → http://127.0.0.1:4173/#/
+step 26 click @link=最近会话回顾 → ok
+step 27 wait 800ms
+step 28 eval location.hash → "#/records"
+step 29 goto #/ → http://127.0.0.1:4173/#/
+step 30 click @link=语音记录一条指令 → ok
+step 31 wait 800ms
+step 32 eval location.hash → "#/voice"
+step 33 goto #/ → http://127.0.0.1:4173/#/
+step 34 click @link=切换模型 → ok
+step 35 wait 800ms
+step 36 eval location.hash → "#/models/catalog"
+step 37 goto #/ → http://127.0.0.1:4173/#/
+step 38 click @link=打开 Agent 管理 → ok
+step 39 wait 800ms
+step 40 eval location.hash → "#/agents"
+step 41 goto #/ → http://127.0.0.1:4173/#/
+
+──── G. 最近活跃卡片 -> 工作台 ────
+step 43 click button:has-text("default") → ok
+step 44 wait 1000ms
+step 45 eval location.hash → "#/workspace"
+
+──── H. 转入会话工作台（同一会话） ────
+step 47 goto #/ → http://127.0.0.1:4173/#/
+step 48 click @button=转入会话工作台（同一会话） → ok
+step 49 wait 800ms
+step 50 eval location.hash → "#/workspace"

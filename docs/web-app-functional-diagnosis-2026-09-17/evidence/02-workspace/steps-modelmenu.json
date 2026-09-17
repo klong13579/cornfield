@@ -1,0 +1,20 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"click": "@button=deepseek-v4-flash"
+	},
+	{
+		"wait": 1500
+	},
+	{
+		"eval": "(()=>{const m=[...document.querySelectorAll('div')].filter(d=>typeof d.className==='string'&&d.className.includes('z-30')&&d.className.includes('w-80'))[0];if(!m)return 'no-menu';const t=m.innerText;return {dangqian: (t.match(/当前/g)||[]).length, narwal: (t.match(/narwal/gi)||[]).length, txtLen: t.length}})()"
+	},
+	{
+		"eval": "(()=>{const m=[...document.querySelectorAll('div')].filter(d=>typeof d.className==='string'&&d.className.includes('z-30')&&d.className.includes('w-80'))[0];if(!m)return 'no-menu';const t=m.innerText;const i=t.search(/narwal/i);return i<0?'narwal-not-in-menu-text':JSON.stringify(t.slice(Math.max(0,i-60), i+160))})()"
+	},
+	{
+		"eval": "(()=>{const m=[...document.querySelectorAll('div')].filter(d=>typeof d.className==='string'&&d.className.includes('z-30')&&d.className.includes('w-80'))[0];if(!m)return 'no-menu';const btns=[...m.querySelectorAll('button')];const cur=btns.filter(b=>b.innerText.includes('当前')).map(b=>b.innerText.replace(/\\s+/g,' ').trim());return {rowCount: btns.length, badgedRows: cur}})()"
+	}
+]

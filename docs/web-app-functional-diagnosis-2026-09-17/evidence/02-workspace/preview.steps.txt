@@ -1,0 +1,17 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 手机预览：打开 → 检查全屏遮罩与 Escape 关闭 ────
+step 3 click @button=手机预览 → ok
+step 4 wait 800ms
+step 5 eval document.querySelectorAll('[aria-label="关闭预览"]').length → 2
+step 6 shot → preview-preview-open.png
+step 7 press Escape on body → ok
+step 8 wait 700ms
+step 9 eval document.querySelectorAll('[aria-label="关闭预览"]').length → 2
+step 10 shot → preview-preview-after-escape.png
+
+──── 若仍在：点遮罩关闭，确认可关闭 ────
+step 12 失败：{"click":"[aria-label=\"关闭预览\"]"} → click: Error: strict mode violation: locator('[aria-label="关闭预览"]') resolved to 2 elements:
+step 13 wait 700ms
+step 14 eval document.querySelectorAll('[aria-label="关闭预览"]').length → 2
+step 15 shot → preview-preview-after-backdrop-click.png

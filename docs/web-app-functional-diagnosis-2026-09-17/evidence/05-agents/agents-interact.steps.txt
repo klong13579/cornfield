@@ -1,0 +1,23 @@
+
+──── 筛选 已停用 ────
+step 2 click @button=已停用 → ok
+step 3 wait 1200ms
+step 4 shot → agents-interact-i-filter-stopped.png
+
+──── 切回全部状态 ────
+step 6 click @button=全部状态 → ok
+step 7 wait 1000ms
+
+──── 打开创建员工面板 ────
+step 9 click @button=创建员工 → ok
+step 10 wait 1200ms
+step 11 shot → agents-interact-i-create-panel.png
+
+──── 收起创建面板 ────
+step 13 click @button=收起创建表单 → ok
+step 14 wait 800ms
+
+──── 点击 hr 卡的会话按钮 ────
+step 16 eval (() => { const cards=[...document.querySelectorAll('main .rounded-xl')]; const card=cards.find(c => c.textContent.includes('hr') && c.textContent.includes('WORKER')); if(!card) return 'no hr card'; const btn=[...card.querySelectorAll('button')].find(b => b.textContent.trim()==='会话'); if(!btn) return 'no 会话 btn'; btn.click(); return 'clicked hr 会话'; })() → "clicked hr 会话"
+step 17 wait 2500ms
+step 18 shot → agents-interact-i-after-hr-session.png

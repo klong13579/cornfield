@@ -1,0 +1,44 @@
+CornField · AI Agent 控制台
+
+空闲 · 最近活跃 —
+钉钉已停用
+mcode
+minimax-m3
+WORKER
+默认工作区 · 最近活跃 —
+Skills5
+钉钉
+模型配置
+工具开关
+用户画像
+文件
+Prompts
+启停与身份
+启用
+关闭后该账号钉钉断连 + bridge 停止（保存即热生效，不重启 gateway）
+机器人名
+agentDir
+隐藏思考块
+appKey
+dingowyg7x4gf6wrxvu2
+robotCode
+dingowyg7x4gf6wrxvu2
+所在群（钉钉）
+gateway 未运行或该账号未连接
+仅显示机器人收到过消息的群；运行 cornfield-gateway robot-context probe 可主动探测全量群
+工具黑名单（deniedTools，账号级）
+ast_edit
+lsp
+debug
+notebook
+recipe
+irc
+github
+ssh
+inspect_image
+browser
+render_mermaid
+黑名单内的工具对 LLM 不可见（账号级；与内核 config.yml 工具开关是两个面）
+已同步
+配置来源：~/.cornfield/gateway.json → channels.dingtalk.accounts（按 accountId 匹配 agent）。appSecret 不展示、不可在此修改（凭证走 `$ENV_VAR` 引用或 setup 向导）。
+← 返回 Agent 列表

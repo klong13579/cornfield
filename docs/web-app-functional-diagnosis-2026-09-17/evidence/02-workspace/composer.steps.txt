@@ -1,0 +1,26 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 输入条：fill 文本 + Shift+Enter 换行（不发送） ────
+step 3 fill textarea → ok
+step 4 press Shift+Enter on textarea → ok
+step 5 wait 400ms
+step 6 shot → composer-shift-enter-newline.png
+step 7 eval document.querySelector('textarea').value → "第一行\n"
+
+──── Esc 空闲态：不 streaming 不中止，草稿应保留 ────
+step 9 press Escape on textarea → ok
+step 10 wait 400ms
+step 11 eval document.querySelector('textarea').value → "第一行\n"
+
+──── 斜杠面板：输入 / 打开命令面板 ────
+step 13 fill textarea → ok
+step 14 wait 700ms
+step 15 shot → composer-slash-palette.png
+step 16 eval document.body.innerText.includes('系统命令') → true
+step 17 press Escape on textarea → ok
+
+──── 清空草稿后空 Enter：不应发送（send 空文本直接 return） ────
+step 19 fill textarea → ok
+step 20 press Enter on textarea → ok
+step 21 wait 700ms
+step 22 eval document.querySelector('textarea').value → ""

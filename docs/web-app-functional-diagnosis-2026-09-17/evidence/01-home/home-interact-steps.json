@@ -1,0 +1,158 @@
+[
+	{
+		"mark": "A. Agent 切换 default -> hr"
+	},
+	{
+		"eval": "(()=>{const s=document.querySelector('select[aria-label=\"切换 Agent\"]');const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;setter.call(s,'hr');s.dispatchEvent(new Event('change',{bubbles:true}));return 'dispatch change to hr';})()"
+	},
+	{
+		"wait": 1500
+	},
+	{
+		"eval": "JSON.stringify({select:document.querySelector('select[aria-label=\"切换 Agent\"]').value, ph:document.querySelector('#home-composer').placeholder, ctx:document.querySelector('main').innerText.split('\\n').slice(0,3).join(' | ')})"
+	},
+	{
+		"shot": "agent-hr"
+	},
+	{
+		"mark": "B. 切回 default"
+	},
+	{
+		"eval": "(()=>{const s=document.querySelector('select[aria-label=\"切换 Agent\"]');const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;setter.call(s,'default');s.dispatchEvent(new Event('change',{bubbles:true}));return 'dispatch change to default';})()"
+	},
+	{
+		"wait": 1500
+	},
+	{
+		"eval": "JSON.stringify({select:document.querySelector('select[aria-label=\"切换 Agent\"]').value, ph:document.querySelector('#home-composer').placeholder})"
+	},
+	{
+		"mark": "C. composer 填写 -> 发送键可用 -> 清空 -> 禁用"
+	},
+	{
+		"fill": [
+			"#home-composer",
+			"你好，请回复一个字"
+		]
+	},
+	{
+		"eval": "document.querySelector('button[aria-label=\"发送\"]').disabled ? 'send DISABLED (after fill)' : 'send ENABLED (after fill)'"
+	},
+	{
+		"shot": "composer-filled"
+	},
+	{
+		"fill": [
+			"#home-composer",
+			""
+		]
+	},
+	{
+		"eval": "document.querySelector('button[aria-label=\"发送\"]').disabled ? 'send DISABLED (after clear)' : 'send ENABLED (after clear)'"
+	},
+	{
+		"mark": "D. 空文本点发送键（应点不动 / 无出站帧）"
+	},
+	{
+		"click": "@button=发送"
+	},
+	{
+		"mark": "E. 项目刷新按钮"
+	},
+	{
+		"click": "@button=刷新项目列表"
+	},
+	{
+		"wait": 1000
+	},
+	{
+		"mark": "F. 快捷卡片导航 5 个"
+	},
+	{
+		"click": "@link=检查今天的定时任务"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/"
+	},
+	{
+		"click": "@link=最近会话回顾"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/"
+	},
+	{
+		"click": "@link=语音记录一条指令"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/"
+	},
+	{
+		"click": "@link=切换模型"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/"
+	},
+	{
+		"click": "@link=打开 Agent 管理"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"goto": "#/"
+	},
+	{
+		"mark": "G. 最近活跃卡片 -> 工作台"
+	},
+	{
+		"click": "button:has-text(\"default\")"
+	},
+	{
+		"wait": 1000
+	},
+	{
+		"eval": "location.hash"
+	},
+	{
+		"mark": "H. 转入会话工作台（同一会话）"
+	},
+	{
+		"goto": "#/"
+	},
+	{
+		"click": "@button=转入会话工作台（同一会话）"
+	},
+	{
+		"wait": 800
+	},
+	{
+		"eval": "location.hash"
+	}
+]

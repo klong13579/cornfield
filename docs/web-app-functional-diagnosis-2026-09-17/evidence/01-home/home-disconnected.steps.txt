@@ -1,0 +1,14 @@
+
+──── 未连接态：初始读数 ────
+step 2 eval document.querySelector('main').innerText → "晚上好\n未连接\n重试\n去设置\n快速会话\n未连接\nAgent 未选择\n/\nProject 归属未知\n/\n工作区 —\n/\n会话\n\n未连接 serve——连接后这里显示当前 Agent 的最近一轮。\n\nEnter 发送到当前会话\n转入会话工作台（同一会话）\n项目\n\n未连接——Project registry 不可用\n\n检查今天的定时任务\n最近会话回顾\n语音记录一条指令\n切换模型\n打开 Agent 管理\n打开会话工作台 "
+step 3 eval JSON.stringify({agentSelDisabled:document.querySelector('select[aria-label="切换 Agent"]').disabled, agentSelText:document.querySelector('select[aria-label="切换 Agent"]').selectedOptions[0]?.text, inputDisabled:document.querySelector('#home-composer').disabled, sendDisabled:document.querySelector('button[aria-label="发送"]').disabled}) → "{\"agentSelDisabled\":true,\"agentSelText\":\"未连接\",\"inputDisabled\":true,\"sendDisabled\":true}"
+step 4 shot → home-disconnected-disconnected.png
+
+──── 未连接态：点重试（连死端口，看是否给反馈） ────
+step 6 click @button=重试 → ok
+step 7 wait 2000ms
+step 8 eval document.querySelector('main').innerText → "晚上好\n未连接\n重试\n去设置\n快速会话\n未连接\nAgent 未选择\n/\nProject 归属未知\n/\n工作区 —\n/\n会话\n\n未连接 serve——连接后这里显示当前 Agent 的最近一轮。\n\nEnter 发送到当前会话\n转入会话工作台（同一会话）\n项目\n\n未连接——Project registry 不可用\n\n检查今天的定时任务\n最近会话回顾\n语音记录一条指令\n切换模型\n打开 Agent 管理\n打开会话工作台 "
+step 9 shot → home-disconnected-after-retry.png
+
+──── 未连接态：点发送键（应点不动） ────
+step 11 失败：{"click":"@button=发送"} → click: Timeout 8000ms exceeded.

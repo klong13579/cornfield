@@ -1,0 +1,9 @@
+[debug] [vite] connecting...
+[debug] [vite] connected.
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[error] WebSocket connection to 'ws://127.0.0.1:9/ws' failed: Error in connection establishment: net::ERR_UNSAFE_PORT
+[error] WebSocket connection to 'ws://127.0.0.1:9/ws' failed: Error in connection establishment: net::ERR_UNSAFE_PORT
+[error] WebSocket connection to 'ws://127.0.0.1:9/ws' failed: Error in connection establishment: net::ERR_UNSAFE_PORT
+[error] WebSocket connection to 'ws://127.0.0.1:9/ws' failed: Error in connection establishment: net::ERR_UNSAFE_PORT

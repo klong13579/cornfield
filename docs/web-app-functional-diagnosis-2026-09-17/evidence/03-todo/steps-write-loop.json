@@ -1,0 +1,107 @@
+[
+	{
+		"mark": "禁用态（标题为空）"
+	},
+	{
+		"eval": "(() => { const b = [...document.querySelectorAll('button')].find(x => (x.textContent||'').trim() === '添加'); if (!b) return 'not-found'; const s = getComputedStyle(b); return { disabled: b.disabled, bg: s.backgroundColor, color: s.color, cursor: s.cursor, opacity: s.opacity }; })()"
+	},
+	{
+		"shot": "add-disabled"
+	},
+	{
+		"fill": [
+			"input[placeholder*='长期任务']",
+			"T3-diag-write-loop"
+		]
+	},
+	{
+		"mark": "可用态（标题已填）"
+	},
+	{
+		"eval": "(() => { const b = [...document.querySelectorAll('button')].find(x => (x.textContent||'').trim() === '添加'); if (!b) return 'not-found'; const s = getComputedStyle(b); return { disabled: b.disabled, bg: s.backgroundColor, color: s.color, cursor: s.cursor, opacity: s.opacity }; })()"
+	},
+	{
+		"shot": "add-enabled"
+	},
+	{
+		"mark": "写闭环：创建"
+	},
+	{
+		"click": "@button=添加"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "document.body.innerText.includes('T3-diag-write-loop')"
+	},
+	{
+		"shot": "write-created"
+	},
+	{
+		"mark": "编辑：改备注"
+	},
+	{
+		"click": "@button=编辑"
+	},
+	{
+		"fill": [
+			"textarea[placeholder='留空 = 没有备注']",
+			"T3-note-edit-verify"
+		]
+	},
+	{
+		"click": "@button=保存"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "document.body.innerText.includes('T3-note-edit-verify')"
+	},
+	{
+		"mark": "延期：明天"
+	},
+	{
+		"click": "@button=延期"
+	},
+	{
+		"click": "@button=明天"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "document.body.innerText.includes('截止')"
+	},
+	{
+		"mark": "状态转移：完成（复选框）"
+	},
+	{
+		"click": "input[type=checkbox]"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "document.body.innerText.includes('已完成')"
+	},
+	{
+		"shot": "write-completed"
+	},
+	{
+		"mark": "写闭环：删除清理"
+	},
+	{
+		"click": "button[aria-label^='删除 T3-diag-write-loop']"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "!document.body.innerText.includes('T3-diag-write-loop')"
+	},
+	{
+		"shot": "write-deleted"
+	}
+]

@@ -1,0 +1,24 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 确认焦点 Agent 与通知条 ────
+step 3 eval document.querySelector('textarea').placeholder → "@default 发消息，或直接提问…"
+
+──── 真实发送（本次诊断唯一 1 次真 LLM 调用）：fill + Enter ────
+step 5 eval (()=>{window.__sendT=Date.now();return 't0:'+window.__sendT})() → "t0:1789657824806"
+step 6 fill textarea → ok
+step 7 press Enter on textarea → ok
+step 8 wait 1500ms
+step 9 eval ({dtMs: Date.now()-window.__sendT, streaming: !!document.querySelector('[aria-label="停止"]'), sendBtn: !!document.querySelector('[aria-label="发送"]')}) → {"dtMs":1935,"streaming":false,"sendBtn":true}
+step 10 shot → send-streaming-1.png
+step 11 wait 2500ms
+step 12 eval ({dtMs: Date.now()-window.__sendT, streaming: !!document.querySelector('[aria-label="停止"]'), tail: document.querySelector('main').innerText.slice(-400)}) → {"dtMs":5237,"streaming":true,"tail":"。没跑过的路径就是没验证过的路径——尤其是失败路径、边界值、空/超大输入这些平时不触发的分支。线上 3 点的电话，基本都来自没人测过的那条分支。\n\n2. 测试是写给下一个人的规格说明。 代码说\"怎么做\"，测试说\"承诺什么\"。函数在什么输入下返回什么、什么情况必须报错而不是返回一个看起来合理的假值——这些只有测试能固定下来。没有测试，下一个人（包括三个月后的你）只能靠猜，猜错的代价是静默错误，比崩溃更难查。\n\n3. 测试把\"改代码\"的成本打下来。 没测试的代码会被冻住：谁都不敢动，因为没人知道改完会不会坏别的地方。有测试，重构/换实现就是\n\n当前计划\n本会话的 Session Todo\n本次会话还没有计划\nd\n@default\n附件\ndeepseek-v4-flash\nmedium\nEnter 发送 · Shift+Enter 换行 · Esc 中止\ndraft 自动保留 · 输入自适应增高"}
+step 13 shot → send-streaming-2.png
+
+──── Esc 中止（streaming 中） ────
+step 15 press Escape on textarea → ok
+step 16 wait 1500ms
+step 17 eval ({dtMs: Date.now()-window.__sendT, streaming: !!document.querySelector('[aria-label="停止"]'), sendBtn: !!document.querySelector('[aria-label="发送"]')}) → {"dtMs":7494,"streaming":false,"sendBtn":true}
+step 18 shot → send-after-escape.png
+
+──── 会话文件路径 ────
+step 20 eval [...document.querySelectorAll('[title]')].map(e=>e.title).filter(t=>typeof t==='string'&&t.includes('.jsonl'))[0] → "/Users/sz-0203015357/.cornfield/agents/default/sessions/--private-tmp-cf-ui-demo--/by-date/2026-09-17/221612__e791fd60.jsonl"

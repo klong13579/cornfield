@@ -1,0 +1,186 @@
+a [12,-58 102x35] «跳到主要内容»
+a [14,196 211x35] «首页»
+a [14,234 211x35] «会话工作台»
+a [14,271 211x35] «会话记录»
+a [14,341 211x35] «Agent 总览»
+a [14,410 211x35] «Skills»
+a [14,448 211x35] «Memory»
+a [14,486 211x35] «Todo»
+a [14,523 211x35] «模型»
+a [14,561 211x35] «语音»
+a [14,631 211x35] «定时任务»
+a [14,668 211x35] «用量»
+a [14,706 211x35] «设置»
+button button [252,12 275x39] «新会话»
+button button [252,59 136x28] «列表»
+button button [392,59 136x28] «树»
+input [284,101 232x21] ph="过滤会话…"
+button button [252,135 87x28] «WebUI 会话»
+button button [343,135 69x28] «CLI 会话»
+button button [256,214 12x12] «pin 置顶»
+button button [274,212 249x38] «当前会话当前会话»
+button button [256,306 12x12] «pin 置顶»
+button button [274,304 249x38] «[System note: This is a fresh conversat…hr · 86 条»
+button button [256,360 12x12] «pin 置顶»
+button button [274,358 249x38] «你的工作区在哪？hr · 44 条»
+button button [256,414 12x12] «pin 置顶»
+button button [274,412 249x38] «[CRON-CONTEXT] Task: goal-2-kb-refresh …hr · 101 条»
+button button [256,469 12x12] «pin 置顶»
+button button [274,467 249x38] «[CRON-CONTEXT] Task: goal-1-context-int…hr · 193 条»
+button button [256,560 12x12] «pin 置顶»
+button button [274,558 249x38] «01a0ad85algorithm · 110 条»
+button button [495,864 32x26] «收起会话栏»
+button button [558,10 34x28] «切换会话栏»
+select [707,14 103x19] v="hr" «切换 Agent»
+button button [939,56 31x25] «重新读取项目列表»
+select [616,111 354x28] «工作上下文»
+input [616,312 174x29] ph="project id" «project id»
+input [796,312 174x29] ph="名称" «名称»
+input [616,347 354x29] ph="/绝对/项目/根路径" «项目根路径»
+select [616,384 306x28] «默认 Agent»
+button button [928,382 42x31] «声明»
+button button [1059,10 34x28] «手机预览»
+button button [1105,10 34x28] «收起右栏»
+button button [1151,8 66x31] «compact»
+button button [1229,8 54x31] «新会话»
+button button DISABLED [1058,116 28x28]
+button button [1088,116 28x28]
+button button [607,180 513x30] «活动 · 2 个工具»
+button button DISABLED [602,213 28x28]
+button button DISABLED [632,213 28x28]
+button button DISABLED [662,213 28x28]
+button button DISABLED [692,213 28x28]
+button button [607,277 513x30] «活动 · 0 个工具»
+button button DISABLED [602,431 28x28]
+button button DISABLED [632,431 28x28]
+button button DISABLED [662,431 28x28]
+button button [692,431 28x28]
+button button DISABLED [1058,519 28x28]
+button button [1088,519 28x28]
+button button [607,583 513x30] «活动 · 2 个工具»
+button button DISABLED [602,616 28x28]
+button button DISABLED [632,616 28x28]
+button button DISABLED [662,616 28x28]
+button button DISABLED [692,616 28x28]
+button button [607,680 513x30] «活动 · 2 个工具1 个失败»
+button button DISABLED [602,713 28x28]
+button button DISABLED [632,713 28x28]
+button button DISABLED [662,713 28x28]
+button button DISABLED [692,713 28x28]
+button button [607,777 513x30] «活动 · 1 个工具»
+button button DISABLED [602,810 28x28]
+button button DISABLED [632,810 28x28]
+button button DISABLED [662,810 28x28]
+button button DISABLED [692,810 28x28]
+button button [607,874 513x30] «活动 · 1 个工具1 个失败»
+button button DISABLED [602,907 28x28]
+button button DISABLED [632,907 28x28]
+button button DISABLED [662,907 28x28]
+button button DISABLED [692,907 28x28]
+button button [607,971 513x30] «活动 · 1 个工具1 个失败»
+button button DISABLED [602,1004 28x28]
+button button DISABLED [632,1004 28x28]
+button button DISABLED [662,1004 28x28]
+button button DISABLED [692,1004 28x28]
+button button [607,1068 513x30] «活动 · 3 个工具»
+button button DISABLED [602,1146 28x28]
+button button DISABLED [632,1146 28x28]
+button button DISABLED [662,1146 28x28]
+button button [692,1146 28x28]
+button button [607,1210 513x30] «活动 · 3 个工具»
+button button DISABLED [602,1243 28x28]
+button button DISABLED [632,1243 28x28]
+button button DISABLED [662,1243 28x28]
+button button DISABLED [692,1243 28x28]
+button button [607,1307 513x30] «活动 · 1 个工具»
+button button DISABLED [602,1340 28x28]
+button button DISABLED [632,1340 28x28]
+button button DISABLED [662,1340 28x28]
+button button DISABLED [692,1340 28x28]
+button button [607,1404 513x30] «活动 · 2 个工具»
+button button DISABLED [602,1438 28x28]
+button button DISABLED [632,1438 28x28]
+button button DISABLED [662,1438 28x28]
+button button DISABLED [692,1438 28x28]
+button button [607,1501 513x30] «活动 · 0 个工具»
+button button DISABLED [602,4101 28x28]
+button button DISABLED [632,4101 28x28]
+button button DISABLED [662,4101 28x28]
+button button [692,4101 28x28]
+button button DISABLED [1058,4190 28x28]
+button button [1088,4190 28x28]
+button button [607,4253 513x30] «活动 · 3 个工具»
+button button DISABLED [602,4287 28x28]
+button button DISABLED [632,4287 28x28]
+button button DISABLED [662,4287 28x28]
+button button DISABLED [692,4287 28x28]
+button button [607,4350 513x30] «活动 · 3 个工具»
+button button DISABLED [602,4384 28x28]
+button button DISABLED [632,4384 28x28]
+button button DISABLED [662,4384 28x28]
+button button DISABLED [692,4384 28x28]
+button button [607,4448 513x30] «活动 · 1 个工具»
+button button DISABLED [602,4481 28x28]
+button button DISABLED [632,4481 28x28]
+button button DISABLED [662,4481 28x28]
+button button DISABLED [692,4481 28x28]
+button button [607,4545 513x30] «活动 · 0 个工具»
+a [962,4748 132x18] «429297772@qq.com»
+button button DISABLED [602,6865 28x28]
+button button DISABLED [632,6865 28x28]
+button button DISABLED [662,6865 28x28]
+button button [692,6865 28x28]
+textarea [559,763 562x52] ph="@hr 发消息，或直接提问…"
+button button [569,822 88x34] «h@hr»
+input file [0,0 0x0] ph=""
+button button [674,824 63x31] «附件»
+button button [744,826 33x27]
+button button [794,824 264x31] «Ndeepseek-v4-flash-0731 medium»
+button button [1075,821 36x36] «发送»
+button button [1153,8 63x37] «文件»
+button button [1216,8 63x37] «产物»
+button button [1279,8 63x37] «改动»
+button button [1154,65 273x22] «▾·»
+button button [1154,87 273x22] «▸.backup»
+button button [1154,109 273x22] «▸.cornfield»
+button button [1154,131 273x22] «▸.gbrain»
+button button [1154,153 273x22] «▸.git»
+button button [1154,175 273x22] «▸attachments»
+button button [1154,197 273x22] «▸context»
+button button [1154,219 273x22] «▸cron»
+button button [1154,241 273x22] «▸docs»
+button button [1154,263 273x22] «▸evals»
+button button [1154,285 273x22] «▸external»
+button button [1154,307 273x22] «▸interview-record»
+button button [1154,329 273x22] «▸knowledge»
+button button [1154,351 273x22] «▸logs»
+button button [1154,373 273x22] «▸node_modules»
+button button [1154,395 273x22] «▸pycache»
+button button [1154,417 273x22] «▸python-gateway»
+button button [1154,439 273x22] «▸raw»
+button button [1154,461 273x22] «▸scripts»
+button button [1154,483 273x22] «▸sessions»
+button button [1154,505 273x22] «▸skills»
+button button [1154,527 273x22] «▸terminal-sessions»
+button button [1154,549 273x22] «▸topics»
+button button [1154,571 273x22] «▸wiki»
+button button [1154,593 273x22] «·.DS_Store6K»
+button button [1154,615 273x22] «·.gitignore175»
+button button [1154,637 273x22] «·.mcp.json489»
+button button [1154,659 273x22] «·agent.db180K»
+button button [1154,681 273x22] «·agent.db-shm32K»
+button button [1154,703 273x22] «·agent.db-wal1.6M»
+button button [1154,725 273x22] «·AGENTS.md1K»
+button button [1154,747 273x22] «·BOOT-bak.md188»
+button button [1154,769 273x22] «·CONTEXT.md1K»
+button button [1154,791 273x22] «·log.md44K»
+button button [1154,813 273x22] «·mission.md2K»
+button button [1154,835 273x22] «·package-lock.json450»
+button button [1154,857 273x22] «·package.json51»
+button button [1154,879 273x22] «·prompt-includes.json142»
+button button [1154,901 273x22] «·robot-context.md868»
+button button [1154,923 273x22] «·TODO.md822»
+button button [1154,945 273x22] «·TOOLS.md6K»
+button button [1154,967 273x22] «·user.md5K»
+button button [1154,989 273x22] «·冯正东-简历.pdf166K»
+button button [1154,1011 273x22] «·叶何俊-简历.pdf282K»

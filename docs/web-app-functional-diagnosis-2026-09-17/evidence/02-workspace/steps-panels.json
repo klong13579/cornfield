@@ -1,0 +1,83 @@
+[
+	{
+		"goto": "#/workspace"
+	},
+	{
+		"mark": "右栏展开：文件树"
+	},
+	{
+		"click": "@button=展开右栏"
+	},
+	{
+		"wait": 900
+	},
+	{
+		"shot": "right-panel-files"
+	},
+	{
+		"eval": "document.body.innerText.includes('文件') && document.body.innerText.includes('产物') && document.body.innerText.includes('改动')"
+	},
+	{
+		"mark": "产物 tab"
+	},
+	{
+		"click": "@text=产物"
+	},
+	{
+		"wait": 900
+	},
+	{
+		"shot": "right-panel-artifacts"
+	},
+	{
+		"mark": "改动 tab"
+	},
+	{
+		"click": "@text=改动"
+	},
+	{
+		"wait": 900
+	},
+	{
+		"shot": "right-panel-changes"
+	},
+	{
+		"mark": "手机预览入口"
+	},
+	{
+		"click": "@button=手机预览"
+	},
+	{
+		"wait": 900
+	},
+	{
+		"shot": "phone-preview"
+	},
+	{
+		"eval": "document.body.innerText.includes('移动端预览')"
+	},
+	{
+		"press": [
+			"body",
+			"Escape"
+		]
+	},
+	{
+		"wait": 300
+	},
+	{
+		"mark": "消息流与工具卡：打开历史会话"
+	},
+	{
+		"click": "@text=你的工作区在哪？"
+	},
+	{
+		"wait": 1200
+	},
+	{
+		"shot": "history-session"
+	},
+	{
+		"eval": "document.body.innerText.slice(0, 300)"
+	}
+]

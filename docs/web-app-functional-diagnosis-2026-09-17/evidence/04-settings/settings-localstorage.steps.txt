@@ -1,0 +1,38 @@
+
+──── 通知三开关 + 草稿保留 + 工作目录：读取初始 localStorage ────
+step 2 eval (() => ({ prefs: localStorage.getItem('cornfield.notify.prefs'), keepDraft: localStorage.getItem('cornfield.keepDraft'), workspace: localStorage.getItem('cornfield.desktop.workspace') }))() → {"prefs":null,"keepDraft":null,"workspace":null}
+
+──── 切换 通知·Agent 完成（ON -> OFF） ────
+step 4 click @button=Agent 完成 → ok
+step 5 wait 600ms
+step 6 eval localStorage.getItem('cornfield.notify.prefs') → "{\"agentDone\":false,\"errors\":true,\"cron\":true}"
+
+──── 回滚 通知·Agent 完成（OFF -> ON） ────
+step 8 click @button=Agent 完成 → ok
+step 9 wait 600ms
+step 10 eval localStorage.getItem('cornfield.notify.prefs') → "{\"agentDone\":true,\"errors\":true,\"cron\":true}"
+
+──── 切换 草稿保留（ON -> OFF） ────
+step 12 click @button=草稿保留 → ok
+step 13 wait 600ms
+step 14 eval localStorage.getItem('cornfield.keepDraft') → "0"
+
+──── 回滚 草稿保留（OFF -> ON） ────
+step 16 click @button=草稿保留 → ok
+step 17 wait 600ms
+step 18 eval localStorage.getItem('cornfield.keepDraft') → "1"
+
+──── 改工作目录并保存（写 localStorage） ────
+step 20 fill #conn-workspace → ok
+step 21 wait 300ms
+step 22 eval (() => { const btn = document.querySelector('#conn-workspace')?.parentElement?.querySelector('button'); btn?.click(); return btn?.textContent ?? 'NO-BTN'; })() → "保存"
+step 23 wait 800ms
+step 24 eval localStorage.getItem('cornfield.desktop.workspace') → "/tmp/cf-diag-t4-workspace"
+
+──── 回滚工作目录为 ~/workspace ────
+step 26 fill #conn-workspace → ok
+step 27 wait 300ms
+step 28 eval (() => { const btn = document.querySelector('#conn-workspace')?.parentElement?.querySelector('button'); btn?.click(); return btn?.textContent ?? 'NO-BTN'; })() → "保存"
+step 29 wait 800ms
+step 30 eval localStorage.getItem('cornfield.desktop.workspace') → "~/workspace"
+step 31 shot → settings-localstorage-localstorage-writes-rolled-back.png

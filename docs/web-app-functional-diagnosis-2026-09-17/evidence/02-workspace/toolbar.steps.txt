@@ -1,0 +1,29 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 附件按钮：点击触发隐藏 file input（原生文件选择器） ────
+step 3 click @button=附件 → ok
+step 4 wait 800ms
+step 5 shot → toolbar-attachment-click.png
+step 6 eval document.querySelector('input[type=file]') ? document.querySelector('input[type=file]').accept : 'NO_FILE_INPUT' → "image/*"
+
+──── 语音按钮：跳转 /voice ────
+step 8 click @button=语音输入 → ok
+step 9 wait 800ms
+step 10 eval location.hash → "#/voice"
+step 11 shot → toolbar-voice.png
+step 12 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── 模型下拉：打开（只读，不切模型避免全局写） ────
+step 14 click @text=deepseek-v4-flash → ok
+step 15 wait 900ms
+step 16 shot → toolbar-model-menu.png
+step 17 eval document.body.innerText.includes('思维级别') && document.body.innerText.includes('模型') → true
+step 18 press Escape on body → ok
+step 19 wait 300ms
+
+──── Agent 选择器：打开（只读，不切 agent） ────
+step 21 click @text=@default → ok
+step 22 wait 900ms
+step 23 shot → toolbar-agent-menu.png
+step 24 eval document.body.innerText.includes('CODING') || document.body.innerText.includes('WORKER') → true
+step 25 press Escape on body → ok

@@ -1,0 +1,3 @@
+
+──── 侧栏（canonical activeAgentOf）vs Todo 标题（view.activeAgentId ?? default） ────
+step 2 eval (() => { const nav = document.querySelector('nav[aria-label="主导航"]'); const main = document.querySelector('main'); return { sidebar: nav ? nav.innerText.replace(/\n/g,' | ') : 'no-nav', mainHead: main ? main.innerText.split('\n').slice(0,8).join(' | ') : 'no-main' }; })() → {"sidebar":"cornfield | 当前 AGENT | default | 未声明 | 工作 | 首页 | 会话工作台 | 会话记录 | AGENT | Agent 总览 | 能力 | Skills | Memory | Todo | 模型 | 语音 | 系统 | 定时任务 | 用量 | 设置","mainHead":"Todo | Agent 长期任务 · Project 筛选 | Agent | Agent Todo | owner default | <agentDir>/.cornfield/agent-todos.json（agentDir 为 default 的 home） | 全部 0 | 0 未完成 · 0 已完成"}

@@ -1,0 +1,16 @@
+step 1 goto #/workspace → http://127.0.0.1:4173/#/workspace
+
+──── textarea 的 React props：onPaste 是否存在（图片粘贴通道） ────
+step 3 eval (()=>{const ta=document.querySelector('textarea');const k=Object.keys(ta).find(k=>k.startsWith('__reactProps'));const p=k?ta[k]:null;return {hasProps:!!p, onPaste:p?typeof p.onPaste:'none', onChange:p?typeof p.onChange:'none', onInput:p?typeof p.onInput:'none', onKeyDown:p?typeof p.onKeyDown:'none'}})() → {"hasProps":true,"onPaste":"undefined","onChange":"function","onInput":"function","onKeyDown":"function"}
+
+──── 派发合成 paste（含 image File）后，页面是否出现附件计数 / 草稿变化 ────
+step 5 eval (()=>{const ta=document.querySelector('textarea');const before=ta.value;const f=new File([new Uint8Array([137,80,78,71])],'x.png',{type:'image/png'});const dt=new DataTransfer();dt.items.add(f);let ok=true;try{ta.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}))}catch(e){ok=String(e)}return {dispatch:ok, valueBefore:before, valueAfter:ta.value, fileInputFiles:document.querySelector('input[type=file]').files.length}})() → {"dispatch":true,"valueBefore":"","valueAfter":"","fileInputFiles":0}
+
+──── 页面上 关闭预览 元素（背板按钮 + X 按钮） ────
+step 7 eval [...document.querySelectorAll('[aria-label="关闭预览"]')].map(e=>e.tagName+'|'+e.className.slice(0,30)) → []
+
+──── 右栏默认折叠：aside 宽度与 lg:hidden ────
+step 9 eval [...document.querySelectorAll('aside')].map(a=>({w:Math.round(a.getBoundingClientRect().width), collapsed:a.className.includes('lg:hidden')})) → [{"w":300,"collapsed":false},{"w":0,"collapsed":true}]
+
+──── 默认思考级别/模型读数 ────
+step 11 eval ({model: document.querySelector('button b')?.textContent}) → {"model":"deepseek-v4-flash"}
