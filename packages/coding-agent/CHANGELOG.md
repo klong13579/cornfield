@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-09-16
+
 ### Added
 
 - **扩展上下文新增 `configRoot`（配置/记忆的项目根）**（`src/extensibility/extensions/types.ts`, `src/extensibility/extensions/runner.ts`, `src/sdk.ts`, `src/session/agent-session.ts`, `src/modes/controllers/extension-ui-controller.ts`）：`ExtensionContext` 此前只有「会话工作目录 `cwd`」，扩展要判断「这块记忆该跟谁走」只能自己推一条路径 —— 而两者在 default Agent 跑 serve 时并不相同（会话在仓库里干活，配置/记忆的项目根是它自己的家）。现在宿主把 `Settings#getCwd()` 作为 `configRoot` 交给扩展（与 `cwd` 并列、身份规则仍只在 `Settings` 里实现一处）。**消费方向（handler / tool / command 收到一个 context）是纯加法**；唯一要跟着改的是「自己手搓一个 `ExtensionContext` 字面量」的代码（mock / 测试，或用户自己写的这一类）—— 该字段是**必填**，缺了编译期就报（不选可选的原因见票 27：可选 + 回落到 `cwd` 会把刚修好的分叉又静默带回来）。配套（`@cornfield/self-evolution`）：记忆目录的 key 从「会话 cwd」改为「配置/记忆的项目根」，`evolution` 侧（DB / skills / activity.log）仍跟会话 cwd。
