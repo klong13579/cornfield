@@ -345,8 +345,14 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 	});
 });
 
-/** 只读镜像：证明「前端根本没有新增 agent 入口」——列出页面上所有按钮文案。 */
-test("只读：#/agents 页面上有没有「新增/创建」入口", async ({ page }) => {
+/**
+ * 入口镜像：F1 落地后，这里钉的是「#/agents 有创建员工的入口，点开是那张行内表单」。
+ *
+ * 本用例原先断言的是**没有**入口（记录当时的功能缺口）。入口做出来之后那条断言就不再是真的，
+ * 所以改成钉住新事实。完整的创建闭环（真写盘 → 列表出现 → 详情页打得开）在 `agent-create.spec.ts`，
+ * 这里只证明入口在、开得出，不重复跑一遍流程。
+ */
+test("#/agents 的「创建员工」入口开得出表单", async ({ page }) => {
 	const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-dash-home2-"));
 	const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-dash-proj2-"));
 	execFileSync("git", ["init", "-q"], { cwd: projectDir });
@@ -380,10 +386,12 @@ test("只读：#/agents 页面上有没有「新增/创建」入口", async ({ p
 		);
 		await fsp.mkdir(SHOT_DIR, { recursive: true });
 		await fsp.writeFile(path.join(SHOT_DIR, "agents-page-buttons.json"), JSON.stringify(buttons, null, 2));
-		expect(
-			buttons.some(t => /新增|创建|新建/.test(t)),
-			`页面按钮：${JSON.stringify(buttons)}`,
-		).toBe(false);
+		// 入口存在（两个：筛选行右侧 + 空态里，开的是同一个面板）
+		const entries = page.getByRole("button", { name: "创建员工" });
+		expect(await entries.count(), `页面按钮：${JSON.stringify(buttons)}`).toBeGreaterThan(0);
+		await entries.first().click();
+		await expect(page.getByRole("heading", { name: "创建员工" })).toBeVisible();
+		await expect(page.getByPlaceholder("hr-bot")).toBeVisible();
 	} finally {
 		kill(serve);
 		kill(preview);
