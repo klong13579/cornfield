@@ -1,0 +1,32 @@
+# 输入法组合态判据 —— 用例输出（可复跑）
+
+复跑命令：
+
+```
+bun test packages/web-app/test/diag-home-truthfulness.test.ts
+```
+
+实测输出（bun test v1.3.14）：
+
+```
+bun test v1.3.14 (0d9b296a)
+
+ 11 pass
+ 0 fail
+ 17 expect() calls
+Ran 11 tests across 1 file. [528.00ms]
+```
+
+## 组合态判据断言（`describe "输入法组合态判据"`）
+
+| 断言 | 期望 | 含义 |
+|---|---|---|
+| `shouldSubmitOnEnter("Enter", false)` | `true` | 非组合态按 Enter → 发送 |
+| `shouldSubmitOnEnter("Enter", true)` | `false` | IME 组合态按 Enter（选词确认）→ 不发送 |
+| `shouldSubmitOnEnter("a", false)` | `false` | 非 Enter 键 → 不发送 |
+| `shouldSubmitOnEnter(" ", false)` | `false` | 空格 → 不发送 |
+| `shouldSubmitOnEnter("Shift", false)` | `false` | 修饰键 → 不发送 |
+
+判据是纯函数 `shouldSubmitOnEnter(key, isComposing)`（`packages/web-app/src/pages/home/home-logic.ts`），
+组件侧 `onKeyDown` 以 `e.key` + `e.nativeEvent.isComposing` 调它。真机 IME 的 `isComposing` 由浏览器
+在组合期对确认 Enter 恒设为 true，为平台收敛行为，待真机复核（见交付说明 README）。
