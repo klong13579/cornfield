@@ -17,6 +17,13 @@
  *
  * F6-骨架：`ensureAgentDir` 写出的 `.cornfield/config.yml` 首次加载不被迁移重写
  * （活键 `modelRoutes` 已在文件里，不再靠 `modelRoles` 迁移；迁移会重写整个文件、丢注释）。
+ *
+ * 票 24 A′（配置/记忆的项目根按身份解析）：
+ *   - default Agent：project 根 = **它的家**（→ project 层 = `<home>/.cornfield/config.yml`，写侧跟随读侧）；
+ *     global 层 = **客户端目录那份** `~/.cornfield/agent/config.yml`（用户一直编辑的那份，改什么就生效什么）。
+ *     `<home>/config.yml` **不是任何一层**，不许被创建，也不许压掉用户那份。
+ *   - registry agent：一字不动（global = 它自己的 `<agentDir>/config.yml`，project = 工作根下的那份）。
+ *   - 会话的**工作目录**不跟着走：default 会话的工具 cwd 仍是 serve 的启动目录（会话头记的就是它）。
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -25,6 +32,8 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@cornfield/coding-agent/config/settings";
+import { getMemoryRoot } from "@cornfield/self-evolution/paths";
+import { getDefaultAgentHome, normalizePathForComparison } from "@cornfield/utils";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
 import { migrateLegacyModelConfig } from "../src/config/model-routes";
@@ -44,12 +53,16 @@ let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
 let token = "";
 
-/** default Agent 的家（agentDir = ~/cf-workspace，doc §12）。它的配置层都在家里。 */
-const defaultAgentHome = (): string => path.join(isolatedHome, "cf-workspace");
-/** default Agent 的 global 层（`<agentDir>/config.yml`，Settings 的 configPath）。 */
-const globalConfigPath = (): string => path.join(defaultAgentHome(), "config.yml");
-/** default Agent 的 project 层（`<agentDir>/.cornfield/config.yml`）—— 它自己的那份配置根。 */
+/** default Agent 的家（agentDir = ~/.cornfield/agents/default，doc §12）。 */
+const defaultAgentHome = (): string => path.join(isolatedHome, ".cornfield", "agents", "default");
+/** 客户端目录（`~/.cornfield/agent`）：default Agent 的 **global 层** —— 用户一直编辑的那份。 */
+const clientDir = (): string => path.join(isolatedHome, ".cornfield", "agent");
+/** default Agent 的 global 层（`<clientDir>/config.yml`，Settings 的 configPath）。 */
+const globalConfigPath = (): string => path.join(clientDir(), "config.yml");
+/** default Agent 的 project 层（`<home>/.cornfield/config.yml`）—— 它自己的那份配置根。 */
 const projectConfigPath = (): string => path.join(defaultAgentHome(), ".cornfield", "config.yml");
+/** `<home>/config.yml`：**不是任何一层**，不许被创建、也不许压掉 client 那份（票 26 的定案）。 */
+const unusedHomeConfigPath = (): string => path.join(defaultAgentHome(), "config.yml");
 /** registry agent 的配置文件（没 project 层 → 就是它自己的 config.yml）。 */
 const agentConfigPath = (name: string): string => path.join(isolatedHome, "agents", name, "config.yml");
 /** agentDir 自带 project 层的 agent 的目录与 project 层文件。 */
@@ -95,8 +108,9 @@ beforeAll(async () => {
 		YAML.stringify({ theme: { dark: "anthracite" }, grep: { enabled: true } }, null, 2),
 	);
 
-	// default Agent 的 global 层：自带停用名单（F2 的病灶：它不该影响别的 agent）。
+	// default Agent 的 global 层（客户端目录那份）：自带停用名单（F2 的病灶：它不该影响别的 agent）。
 	await fs.mkdir(defaultAgentHome(), { recursive: true });
+	await fs.mkdir(clientDir(), { recursive: true });
 	await Bun.write(
 		globalConfigPath(),
 		YAML.stringify({ shellPath: "/bin/zsh", disabledProviders: [PROBE_PROVIDER] }, null, 2),
@@ -104,10 +118,9 @@ beforeAll(async () => {
 
 	// 无 key 的探针 provider：让「可用模型列表」在不同 agent 之间有可观测的差别。
 	// models.yml 是**客户端级**的模型目录（ModelRegistry 从 client dir 读），不是某个 agent 的家。
-	const clientDir = path.join(isolatedHome, ".cornfield", "agent");
-	await fs.mkdir(clientDir, { recursive: true });
+	await fs.mkdir(clientDir(), { recursive: true });
 	await Bun.write(
-		path.join(clientDir, "models.yml"),
+		path.join(clientDir(), "models.yml"),
 		YAML.stringify(
 			{
 				providers: {
@@ -149,9 +162,9 @@ beforeAll(async () => {
 			2,
 		),
 	);
-	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
+	const isolatedClientDir = clientDir();
 	await Bun.write(
-		path.join(registryDir, "registry.json"),
+		path.join(isolatedClientDir, "registry.json"),
 		JSON.stringify({
 			version: 2,
 			agents: Object.fromEntries(
@@ -441,6 +454,105 @@ describe("F6 骨架：新建的 agentDir 首次加载不被重写", () => {
 			expect(routes.slow?.primary).toBe("narwal-plan/glm-5.2");
 		} finally {
 			await fs.rm(agentDir, { recursive: true, force: true });
+		}
+	}, 60_000);
+});
+
+describe("A′ 配置/记忆的项目根按身份解析（票 24）", () => {
+	test("default 的活跃配置：project 根 = 它的家，global 层 = 客户端那份，`<home>/config.yml` 不参与", async () => {
+		const conn = await WireConn.connect(url, token);
+		try {
+			const scope = (await conn.request({ type: "get_config_scope" })).result as {
+				hasProjectConfig?: boolean;
+				projectConfigPath?: string;
+				globalConfigPath: string;
+			};
+			// 两个路径都来自 default 的 live Settings（配置项目根 = 它的家），不是 serve 的启动目录。
+			expect(scope.hasProjectConfig).toBe(true);
+			expect(scope.projectConfigPath).toBe(projectConfigPath());
+			expect(scope.globalConfigPath).toBe(globalConfigPath());
+			// 用户一直编辑的那份就是它的 global 层：改什么就读到什么。
+			expect((await conn.request({ type: "get_config", key: "shellPath" })).result).toEqual({
+				config: "/bin/zsh",
+			});
+			// `<home>/config.yml` 不是任何一层，也不许被创建（否则它会静默压掉用户那份）。
+			await expect(Bun.file(unusedHomeConfigPath()).exists()).resolves.toBe(false);
+		} finally {
+			conn.close();
+		}
+	}, 60_000);
+
+	test("default 会话的工具 cwd 仍是 serve 的启动目录（改配置根不许把工具落点带走）", async () => {
+		const conn = await WireConn.connect(url, token);
+		try {
+			// `resolution.sessionCwd` 就是会话的工作目录（附件会话的 `sessionManager.getCwd()`），
+			// `resolution.agentDir` 是它的身份根 —— 两个事实分得开才是「没被带走」。
+			const projection = (await conn.request({ type: "get_memory" })).result as {
+				resolution: { sessionCwd: string; agentDir: string };
+			};
+			expect(normalizePathForComparison(projection.resolution.sessionCwd)).toBe(
+				normalizePathForComparison(projectCwd),
+			);
+			expect(normalizePathForComparison(projection.resolution.sessionCwd)).not.toBe(
+				normalizePathForComparison(getDefaultAgentHome()),
+			);
+			expect(normalizePathForComparison(projection.resolution.agentDir)).toBe(
+				normalizePathForComparison(getDefaultAgentHome()),
+			);
+		} finally {
+			conn.close();
+		}
+	}, 60_000);
+
+	test("default 会话的记忆区跟着配置项目根（= 家）走，不跟会话 cwd", async () => {
+		const conn = await WireConn.connect(url, token);
+		try {
+			const projection = (await conn.request({ type: "get_memory" })).result as {
+				project?: { memoryRoot?: string } | null;
+			};
+			// canonical 根 = getMemoryRoot(配置项目根) —— 与运行时、与 pipeline 同一个根。
+			// 拿会话 cwd 当参数会得到另一个根（就是这条断言要摁住的那个错）。
+			expect(projection.project?.memoryRoot).toBe(getMemoryRoot(getDefaultAgentHome()));
+		} finally {
+			conn.close();
+		}
+	}, 60_000);
+
+	test("wire 面：get_config_scope 报的 project 文件 === set_config(scope:project) 写的 === restore 删的", async () => {
+		const conn = await WireConn.connect(url, token);
+		const KEY = "custom.cfgRootProbe";
+		try {
+			await conn.request({ type: "set_config", key: KEY, value: "from-global", scope: "global" });
+			await conn.request({ type: "set_config", key: KEY, value: "from-project", scope: "project" });
+
+			const scope = (await conn.request({ type: "get_config_scope" })).result as {
+				projectConfigPath?: string;
+				globalConfigPath: string;
+			};
+			expect(scope.globalConfigPath).toBe(globalConfigPath());
+			expect(scope.projectConfigPath).toBe(projectConfigPath());
+			// 报的路径就是真正落盘的那两个文件（写 = 读 = 页面报的）。
+			const globalFile = YAML.parse(await readBytes(scope.globalConfigPath)) as Record<string, unknown>;
+			const projectFile = YAML.parse(await readBytes(scope.projectConfigPath!)) as Record<string, unknown>;
+			expect((globalFile.custom as Record<string, unknown>)?.cfgRootProbe).toBe("from-global");
+			expect((projectFile.custom as Record<string, unknown>)?.cfgRootProbe).toBe("from-project");
+
+			// 「恢复继承」删的是同一个文件，删除后跌回低层的值。
+			const restored = (await conn.request({ type: "restore_config_inheritance", key: KEY })).result as {
+				removed: boolean;
+				effectiveValue: unknown;
+			};
+			expect(restored.removed).toBe(true);
+			expect(restored.effectiveValue).toBe("from-global");
+			const projectAfter = YAML.parse(await readBytes(projectConfigPath())) as Record<string, unknown>;
+			expect((projectAfter.custom as Record<string, unknown>)?.cfgRootProbe).toBeUndefined();
+			const globalAfter = YAML.parse(await readBytes(globalConfigPath())) as Record<string, unknown>;
+			expect((globalAfter.custom as Record<string, unknown>)?.cfgRootProbe).toBe("from-global");
+			// 「恢复继承」的已知边界（wire-server 的注释、票 24 的现象 2）：它只删 project **文件**里的键，
+			// 活着的 Settings 实例仍持有那份覆盖直到重载 —— 所以这里不断言 `get_config` 立刻跟上来
+			// （那是另一张票的事），只钉住本命令自己的契约：删的是这个文件 + 报回低层的值。
+		} finally {
+			conn.close();
 		}
 	}, 60_000);
 });

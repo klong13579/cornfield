@@ -7,6 +7,9 @@
  *   agentDir            哪个目录是它的家 —— `resolveAgentRuntimeDir`（本文件唯一的推导；default agent
  *                       的 meta.agentDir 是 serve 进程 cwd，不是它的家）
  *   会话根 sessionCwd    已 attach 会话的 cwd（= registry agent 的 agentDir；未 attach 时按 agentDir 推算）
+ *   配置/记忆项目根      已 attach = 那个会话活着的 `Settings#getCwd()`（按 agent 身份解析：default 在
+ *                       serve 里是它的家）；未 attach = 它的家 / agentDir。记忆的 canonical 根与
+ *                       config 的 project 层是同一个根，两者不许各报一个
  *   Project             已 attach = 会话的归属，`session/session-workspace` 判（会话头记的
  *                       `projectId` 权威，旧会话才按 cwd 匹配回落）；未 attach = 按 agentDir 这条
  *                       声明过的替身目录匹配（没有会话可问，来源如实标 `cwd`）
@@ -34,6 +37,13 @@ export interface AgentScopeAnchor {
 	agentDir: string;
 	/** 会话根：项目级技能/记忆的判定依据。 */
 	sessionCwd: string;
+	/**
+	 * 配置/记忆的**项目根**（`Settings#getCwd()`）：config 的 project 层与记忆的 canonical 根都落
+	 * 在它下面。它是 f(Agent 身份) —— default Agent 在 serve 里 = 它的家，registry agent = 会话的
+	 * 工作根 —— 而 `sessionCwd` 是「会话在哪干活」，两者不能互相替代（default 会话在工作中，
+	 * 配置根却是它自己的家）。未 attach 时退化成 `agentDir`。
+	 */
+	configRoot: string;
 	/** 本会话的 session 文件（未 attach = undefined）。 */
 	sessionFile?: string;
 	/** 是否已 attach（false 时 sessionCwd 是按 agentDir 推算的）。 */
@@ -80,10 +90,13 @@ export async function resolveAgentScope(input: ResolveAgentScopeInput): Promise<
 	const { agentId, meta, attached } = input;
 	const agentDir = resolveAgentRuntimeDir({ agentId, agentDir: meta?.agentDir }) ?? getDefaultAgentHome();
 	const sessionCwd = attached?.session.sessionManager.getCwd() ?? agentDir;
+	// 配置/记忆的项目根问会话活着的那份 Settings（不在本模块重推一份身份规则）。
+	const configRoot = attached?.session.settings.getCwd() ?? agentDir;
 	const anchor: AgentScopeAnchor = {
 		agentId,
 		agentDir,
 		sessionCwd,
+		configRoot,
 		attached: attached !== undefined,
 	};
 	const sessionFile = attached?.session.sessionFile;

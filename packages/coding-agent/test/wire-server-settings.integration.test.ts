@@ -148,13 +148,14 @@ test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 co
 		const pyAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
 		expect((pyAfter.result as { pythonToolMode: string }).pythonToolMode).toBe("bash-only");
 
-		// ── 6. default agent：set_config 落它自己家的 config.yml（~/cf-workspace，非 cwd）──
+		// ── 6. default agent：set_config 落它的 global 层 = 客户端目录那份（用户一直编辑的那份）──
 		const defSet = await conn.request({ type: "set_config", key: "custom.perAgentProbe", value: 7 });
 		expect(defSet.ok).toBe(true);
 		const defGet = await conn.request({ type: "get_config", key: "custom.perAgentProbe" });
 		expect((defGet.result as { config: unknown }).config).toBe(7);
-		// default Agent 的配置根是它的家（doc §12），不是客户端目录、也不是 serve 的 cwd。
-		const globalConfigPath = path.join(isolatedHome, "cf-workspace", "config.yml");
+		// default Agent 的 global 层是客户端目录那份（票 24 的层定案：用户改什么就生效什么）；
+		// `<home>/config.yml` 不是任何一层，serve 的 cwd 也不是。
+		const globalConfigPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
 		const globalConfig = YAML.parse(await Bun.file(globalConfigPath).text()) as Record<string, unknown>;
 		expect(globalConfig.custom).toEqual({ perAgentProbe: 7 });
 

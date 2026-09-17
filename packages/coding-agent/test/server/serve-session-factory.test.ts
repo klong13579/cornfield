@@ -194,6 +194,8 @@ describe("装配：工作根 / session 目录 / 配置根", () => {
 			expect(assembly.calls[0]?.settings).toBe(attached.session.settings);
 			expect(manager.getCwd()).toBe(repoRoot);
 			expect(attached.session.settings.getCwd()).toBe(repoRoot);
+			// registry agent：两把 key 相等（工作根 = 它的身份根）⇒ 票 27 的 memory/evolution 拆 key 对它逐字节不变。
+			expect(attached.session.settings.getCwd()).toBe(attached.session.sessionManager.getCwd());
 			expect(attached.session.settings.getAgentDir()).toBe(agentDir);
 
 			// 归属是**记录下来的事实**：会话头带着 id 与来源，后续所有读方不必再猜。

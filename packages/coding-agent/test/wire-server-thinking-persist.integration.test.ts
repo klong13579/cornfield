@@ -9,9 +9,10 @@
  *   2. `persist:true` → 同一个文件里真的出现 `defaultThinkingLevel: <新档位>`；
  *   3. 之后再不带 `persist` 改档 → 文件里仍是第 2 步写下的值（不是「写了一次就随便改」）。
  *
- * 落点也一并钉住（F6 要把两份 config 收成一份，先要看清今天写的是哪一份）：
- * default agent 的配置根是它的家，即 `<HOME>/cf-workspace/config.yml`（doc §12）；
- * 家里的 `.cornfield/config.yml`（Settings 的项目覆盖层，存在时才是落点）不应被这条命令创建。
+ * 落点也一并钉住（票 24 的层定案，F6 要把两份 config 收成一份）：
+ * default agent 的 global 层是**客户端目录**那份（`<HOME>/.cornfield/agent/config.yml`，用户一直编辑的
+ * 那份，改什么就生效什么）；家里的 `.cornfield/config.yml`（Settings 的 project 覆盖层，存在时才是
+ * 落点）不应被这条命令创建。
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -30,7 +31,9 @@ let proc: ReturnType<typeof Bun.spawn> | undefined;
 let info = { url: "", token: "" };
 
 /** default agent 的配置根：`Settings.init()` 的 agentDir（它的家），不是 serve 的 cwd。 */
-const agentDir = (): string => path.join(isolatedHome, "cf-workspace");
+const agentDir = (): string => path.join(isolatedHome, ".cornfield", "agents", "default");
+/** default agent 的 global 层（客户端目录那份）—— persist 落的就是它。 */
+const globalConfigPath = (): string => path.join(isolatedHome, ".cornfield", "agent", "config.yml");
 /** Settings 的项目覆盖层（`<agentDir>/.cornfield/config.yml`）—— 本命令不该碰它。 */
 const projectConfigPath = (): string => path.join(agentDir(), ".cornfield", "config.yml");
 
@@ -83,15 +86,15 @@ afterAll(async () => {
 	await fs.rm(isolatedHome, { recursive: true, force: true });
 });
 
-/** 读配置文件的 `defaultThinkingLevel`；文件不存在返回 undefined（不是「读失败」）。 */
+/** 读 global 层的 `defaultThinkingLevel`；文件不存在返回 undefined（不是「读失败」）。 */
 async function readPersistedLevel(): Promise<unknown> {
-	if (!(await Bun.file(path.join(agentDir(), "config.yml")).exists())) return undefined;
-	const parsed = YAML.parse(await Bun.file(path.join(agentDir(), "config.yml")).text()) as Record<string, unknown>;
+	if (!(await Bun.file(globalConfigPath()).exists())) return undefined;
+	const parsed = YAML.parse(await Bun.file(globalConfigPath()).text()) as Record<string, unknown>;
 	return parsed.defaultThinkingLevel;
 }
 
 describe("set_thinking_level 的 persist 开关", () => {
-	test("不带 persist 不落盘；persist:true 落到 <agentDir>/config.yml", async () => {
+	test("不带 persist 不落盘；persist:true 落到它的 global 层（客户端目录那份）", async () => {
 		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
 		await client.connect();
 		try {
@@ -128,7 +131,7 @@ describe("set_thinking_level 的 persist 开关", () => {
 			await Bun.sleep(SAVE_SETTLE_MS);
 			expect(await readPersistedLevel()).toBe(withPersist);
 
-			// 落点是 <agentDir>/config.yml，不是 <agentDir>/.cornfield/config.yml（F6 的两份 config）。
+			// 落点是 default agent 的 global 层（客户端目录那份），不是 `<home>/.cornfield/config.yml`。
 			await expect(Bun.file(projectConfigPath()).exists()).resolves.toBe(false);
 		} finally {
 			client.close();

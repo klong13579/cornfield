@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
-import { getClientDir, getDefaultAgentHome, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
+import { getClientDir, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
@@ -1078,6 +1078,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 								agentId: anchor.agentId,
 								agentDir: anchor.agentDir,
 								sessionCwd: anchor.sessionCwd,
+								configRoot: anchor.configRoot,
 								projectRoot: anchor.project?.root,
 								declaredMemoryDir: anchor.declaredMemoryDir,
 								sessionFile: anchor.sessionFile,
@@ -1456,15 +1457,18 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				// 已知边界：restore_config_inheritance 只删 project 文件里的键，活着的 Settings 实例
 				// 仍持有该覆盖直到重载。
 				case "get_config_scope": {
-					const agentId = agentOf(ctx, command.sessionId);
-					const meta = registry.getMeta(agentId);
-					if (!meta) {
-						fail(`unknown agent: ${agentId}`);
+					const target = resolveTarget(ctx, command);
+					if ("error" in target) {
+						fail(target.error);
 						return;
 					}
 					try {
-						const globalPath = agentConfigPathFor(meta);
-						const projectPath = agentProjectConfigPathFor(meta);
+						// 两个路径都问目标 agent 的 live Settings —— 按身份的解析只在 `Settings` 里有一处实现
+						// （`getGlobalConfigPath` / `getProjectConfigPath`）。本命令过去自己按 `agentHomeFor(meta)`
+						// 推一份，于是「页面报的文件 / 写侧落的文件」可以给出两个答案。
+						const liveSettings = target.attached.session.settings;
+						const globalPath = liveSettings.getGlobalConfigPath();
+						const projectPath = liveSettings.getProjectConfigPath();
 						const globalConfig = await readAgentConfigYaml(globalPath);
 						const projectConfig = await readAgentConfigYaml(projectPath);
 						// 与 Settings#hasProjectConfigFile 同源：文件存在即 true（空文件也算）
@@ -1495,10 +1499,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "restore_config_inheritance": {
-					const agentId = agentOf(ctx, command.sessionId);
-					const meta = registry.getMeta(agentId);
-					if (!meta) {
-						fail(`unknown agent: ${agentId}`);
+					const target = resolveTarget(ctx, command);
+					if ("error" in target) {
+						fail(target.error);
 						return;
 					}
 					const key = (command as { key?: string }).key?.trim();
@@ -1506,7 +1509,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail("key is required");
 						return;
 					}
-					const projectPath = agentProjectConfigPathFor(meta);
+					// 删的是目标 agent 那份 project 文件（写侧落点的同一个文件），跌回值读它的 global 文件。
+					const liveSettings = target.attached.session.settings;
+					const projectPath = liveSettings.getProjectConfigPath();
 					try {
 						const projectConfig = await readAgentConfigYaml(projectPath);
 						const removed = configDeleteByPath(projectConfig, key.split("."));
@@ -1515,7 +1520,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						}
 						// 删除后的生效值回落全局/ schema 默认（项目覆盖已不存在）
 						const globalValue = configGetByPath(
-							await readAgentConfigYaml(agentConfigPathFor(meta)),
+							await readAgentConfigYaml(liveSettings.getGlobalConfigPath()),
 							key.split("."),
 						);
 						done({
@@ -3643,22 +3648,6 @@ function parseGitLog(stdout: string): { hash: string; author: string; message: s
 }
 
 // ── 配置读写（票 03）──
-
-/** 目标 agent 的 config.yml 路径：每个 agent 都是自己的 agentDir（default = 它的家 ~/cf-workspace）。 */
-function agentConfigPathFor(meta: AgentMeta): string {
-	return path.join(agentHomeFor(meta), "config.yml");
-}
-
-/** #05 项目级配置路径（Settings 的 project 覆盖层同源：<cwd>/.cornfield/config.yml）。
- * 每个 agent 的配置根就是它自己的家 —— default 的家是 ~/cf-workspace，不是启动目录。 */
-function agentProjectConfigPathFor(meta: AgentMeta): string {
-	return path.join(agentHomeFor(meta), ".cornfield", "config.yml");
-}
-
-/** agent 的家（agentDir）；default 没有注册表条目时是固定的 ~/cf-workspace。 */
-function agentHomeFor(meta: AgentMeta): string {
-	return meta.id === "default" ? getDefaultAgentHome() : meta.agentDir;
-}
 
 async function readAgentConfigYaml(filePath: string): Promise<Record<string, unknown>> {
 	try {

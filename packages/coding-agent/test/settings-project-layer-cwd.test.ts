@@ -1,7 +1,7 @@
 /**
  * `Settings` 的两个基座各有主人，别混：
  *
- *   - `agentDir` 默认 = **default Agent 的家**（`~/cf-workspace`）—— 它的 `config.yml` / 会话 / 记忆。
+ *   - `agentDir` 默认 = **default Agent 的家**（`~/.cornfield/agents/default`）—— 它的 `config.yml` / 会话 / 记忆。
  *     客户端作用域的东西（凭证、registry、缓存）在客户端目录（`~/.cornfield/agent`），不是这里。
  *   - `cwd` 默认 = **进程的项目目录**（`getProjectDir()`）—— 它决定**项目层**读哪一个
  *     `<cwd>/.cornfield/config.yml`。F6 的「写侧跟随读侧优先级」也靠它。
@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getDefaultAgentHome, setProjectDir } from "@cornfield/utils";
+import { getDefaultAgentHome, getProjectDir, setProjectDir } from "@cornfield/utils";
 import { Settings } from "../src/config/settings";
 
 let tmp: string;
@@ -57,7 +57,11 @@ describe("Settings 的两个基座", () => {
 		expect(settings.get("grep.enabled")).toBe(false);
 		// 另一头：agentDir 默认是 default Agent 的家（客户端目录不在这里）
 		expect(settings.getAgentDir()).toBe(getDefaultAgentHome());
-		expect(settings.getAgentDir()).toBe(path.join(tmp, "cf-workspace"));
+		// 字面路径也钉一次：函数的取值不能悄悄换个布局。
+		expect(settings.getAgentDir()).toBe(path.join(tmp, ".cornfield", "agents", "default"));
+		// 裸跑 CLI（无 agent 身份）：配置根 = 进程项目目录 ⇒ 记忆与演化两把 key 相等，
+		// 票 27 的拆 key 对裸跑 CLI 逐字节不变。
+		expect(settings.getCwd()).toBe(getProjectDir());
 	});
 
 	test("换一个 cwd，项目层跟着换（家不变）", async () => {

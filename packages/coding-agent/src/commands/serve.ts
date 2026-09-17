@@ -12,7 +12,7 @@
 
 import * as path from "node:path";
 import type { CanUseToolContext } from "@cornfield/agent";
-import { logger, setProjectDir } from "@cornfield/utils";
+import { getDefaultAgentHome, logger, setProjectDir } from "@cornfield/utils";
 import { Command, Flags } from "@cornfield/utils/cli";
 import type { PermissionRequestPush } from "@cornfield/wire";
 import { parseArgs } from "../cli/args";
@@ -71,10 +71,11 @@ export default class Serve extends Command {
 			const authStorage = await discoverAuthStorage();
 			const modelRegistry = new ModelRegistry(authStorage);
 			Bun.env.PI_NO_TITLE = "1";
-			// 初始化全局 settings（default agent 的配置根 = 全局 agent 目录；registry agent 各自
-			// Settings.create({ agentDir }) 在 sessionFactory 内惰性创建）。后续 Settings.instance
-			// 读取（如 get_available_models 的 disabled 名单）依赖此初始化。
-			await Settings.init();
+			// 初始化全局 settings（default agent 的配置：项目根 = 它的家 → project 层 = 家里那份
+			// `.cornfield/config.yml`；global 层 = 客户端目录那份，`Settings#globalConfigPathFor` 一处解析。
+			// registry agent 各自 `Settings.create({ cwd: 工作根, agentDir })` 在 sessionFactory 内惰性创建）。
+			// 注意：这里改的只是**配置项目根**，会话的工作目录仍是 serve 的启动目录（`options.cwd`）。
+			await Settings.init({ cwd: getDefaultAgentHome(), agentDir: getDefaultAgentHome() });
 			// 模型目录快速就位：静态 + 磁盘缓存本地加载（offline 不发网络），在线发现转后台补齐。
 			// serve 冷启动实测每次会并发拉 discoverable provider 列表等网络（4-10s 抖动），
 			// 是桌面客户端「打开首页要等几秒才显示连接上」的另一个根因；HTTP 30+ 连接等待时不阻塞启动。
