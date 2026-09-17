@@ -1,0 +1,16 @@
+
+──── 打开工作台 → Agent 选择菜单（ComposerBar 的 agent 下拉） ────
+step 2 goto #/workspace → http://localhost:4183/#/workspace
+step 3 wait 2000ms
+step 4 eval (() => { const b = [...document.querySelectorAll('main button')].find(x => /@/.test(x.textContent || '')); if (!b) return 'no-agent-button'; b.click(); return (b.textContent || '').trim().replace(/\s+/g, ' '); })() → "d@default"
+step 5 wait 800ms
+step 6 shot → after-agent-menu.png
+
+──── 菜单每行的 footer 文本（技能 / 定时）——改动前含 cronCount 那半句 ────
+step 8 eval (() => { const spans = [...document.querySelectorAll('span')].filter(s => s.children.length === 0 && /(技能|定时)/.test(s.textContent || '')); return spans.map(s => s.textContent.trim()); })() → ["定时任务","1 技能","11 技能","20 技能","11 技能","19 技能","7 技能","5 技能"]
+
+──── 菜单整行按钮文本（同一行的全部可见文本） ────
+step 10 eval (() => { const rows = [...document.querySelectorAll('button')].filter(b => /技能|定时/.test(b.textContent || '')); return rows.map(b => (b.textContent || '').trim().replace(/\s+/g, ' ')); })() → ["d@default1 技能WORKER","h@hr11 技能WORKER","a@algorithm20 技能WORKER","m@me11 技能WORKER","d@dataAgent19 技能WORKER","s@sw7 技能WORKER","m@mcode已停用5 技能WORKER"]
+
+──── 菜单容器 innerText（含工作区分组标题） ────
+step 12 eval (() => { const el = [...document.querySelectorAll('div')].find(d => /CODING|WORKER/.test(d.innerText || '') && /技能|定时/.test(d.innerText || '')); return el ? el.innerText.replace(/\n+/g, ' | ') : 'menu-not-found'; })() → "跳到主要内容 | cornfield | 当前 AGENT | default | 未声明 | 工作 | 首页 | 会话工作台 | 会话记录 | AGENT | Agent 总览 | 能力 | Skills | Memory | Todo | 模型 | 语音 | 系统 | 定时任务 | 用量 | 设置 | 新会话 | 列表 | 树 | WebUI 会话 | CLI 会话 | 当前会话 | 1 | 当前会话 | 当前会话 | HR | 4 | [System note: This is a fresh conversat… | hr · 86 条 | 你的工作区在哪？ | hr · 44 条 | [CRON-CONTEXT] Task: goal-2-kb-refresh … | hr · 101 条 | [CRON-CONTEXT] Task: goal-1-context-int… | hr · 193 条 | ALGORITHM | 1 | 01a0ad85 | algorithm · 110 条 | 已连接 · 7 agents | 已连接 | default | hr（idle） | algorithm（idle） | me（idle） | dataAgent（idle） | sw（idle） | mcode（idle） | / | default · | / | 未声明 | / | 01a0afb9-9dc6-7000-84c2-be92e791fd60 | compact | 新会话 | 请用三点说明为什么代码要写测试 | deepseek-v4-flash | ✓ 完成 | 活动 · 0 个工具 | 三点： | 1. 测试是唯一能证明\"真的能跑\"的东西。 编译过、看起来对，都不算验证。没跑过的路径就是没验证过的路径——尤其是失败路径、边界值、空/超大输入这些平时不触发的分支。线上 3 点的电话，基本都来自没人测过的那条分支。 | 2. 测试是写给下一个人的规格说明。 代码说\"怎么做\"，测试说\"承诺什么\"。函数在什么输入下返回什么、什么情况必须

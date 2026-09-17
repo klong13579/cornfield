@@ -1,0 +1,125 @@
+CornField · AI Agent 控制台
+
+新会话
+列表
+树
+WebUI 会话
+CLI 会话
+当前会话
+1
+当前会话
+当前会话
+HR
+4
+[System note: This is a fresh conversat…
+hr · 86 条
+你的工作区在哪？
+hr · 44 条
+[CRON-CONTEXT] Task: goal-2-kb-refresh …
+hr · 101 条
+[CRON-CONTEXT] Task: goal-1-context-int…
+hr · 193 条
+ALGORITHM
+1
+01a0ad85
+algorithm · 110 条
+已连接 · 7 agents
+已连接
+default
+hr（idle）
+algorithm（idle）
+me（idle）
+dataAgent（idle）
+sw（idle）
+mcode（idle）
+/
+default ·
+/
+未声明
+/
+01a0afb9-9dc6-7000-84c2-be92e791fd60
+compact
+新会话
+请用三点说明为什么代码要写测试
+deepseek-v4-flash
+✓ 完成
+活动 · 0 个工具
+
+三点：
+
+1. 测试是唯一能证明"真的能跑"的东西。 编译过、看起来对，都不算验证。没跑过的路径就是没验证过的路径——尤其是失败路径、边界值、空/超大输入这些平时不触发的分支。线上 3 点的电话，基本都来自没人测过的那条分支。
+
+2. 测试是写给下一个人的规格说明。 代码说"怎么做"，测试说"承诺什么"。函数在什么输入下返回什么、什么情况必须报错而不是返回一个看起来合理的假值——这些只有测试能固定下来。没有测试，下一个人（包括三个月后的你）只能靠猜，猜错的代价是静默错误，比崩溃更难查。
+
+3. 测试把"改代码"的成本打下来。 没测试的代码会被冻住：谁都不敢动，因为没人知道改完会不会坏别的地方。有测试，重构/换实现就是跑一遍的事。这是唯一能让代码长期演进而不是腐烂的方式——省下的时间是复利。
+
+一句话：测试不是为了证明你现在对，是为了让以后的人（包括你自己）敢改、知道什么时候改坏了。
+
+帮我看看这张图（真发送 1 次）
+deepseek-v4-flash
+✓ 完成
+活动 · 2 个工具
+1 个失败
+deepseek-v4-flash
+✓ 完成
+活动 · 2 个工具
+1 个失败
+deepseek-v4-flash
+✓ 完成
+活动 · 2 个工具
+deepseek-v4-flash
+✓ 完成
+活动 · 0 个工具
+
+没收到图。这条消息到我这里只有一行文字（帮我看看这张图（真发送 1 次）），没有任何图片附件内容，工作目录 /private/tmp/cf-ui-demo 也是空的。
+
+我不会凭空描述一张没看到的图。
+
+要我看图，给我其中一个：
+
+图片的本地绝对路径（例如 ~/Downloads/xxx.png），我用 inspect_image 读；
+或者把图放到当前工作目录，告诉我文件名。
+
+顺带确认一下：如果你是在测「消息会不会重复发」——我这边只收到 1 条消息，没有重复投递。
+
+当前计划
+本会话的 Session Todo
+本次会话还没有计划
+d
+@default
+默认工作区
+d
+@default
+1 技能 · 0 定时
+WORKER
+h
+@hr
+11 技能 · 0 定时
+WORKER
+a
+@algorithm
+20 技能 · 0 定时
+WORKER
+m
+@me
+11 技能 · 0 定时
+WORKER
+d
+@dataAgent
+19 技能 · 0 定时
+WORKER
+s
+@sw
+7 技能 · 0 定时
+WORKER
+m
+@mcode
+已停用
+5 技能 · 0 定时
+WORKER
+附件
+N
+deepseek-v4-flash
+medium
+Enter 发送 · Shift+Enter 换行 · Esc 中止
+draft 自动保留 · 输入自适应增高
