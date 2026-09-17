@@ -580,13 +580,13 @@ export type WireExtensionCommand =
 	| { id?: string; type: "git_show"; sessionId?: string; revision: string }
 	/** 分支列表（local + remote + current）。 */
 	| { id?: string; type: "git_branches"; sessionId?: string }
-	/** 配置读写（票 03）：读目标 agent 的 config.yml 域（sessionId 定向，缺省 active）。 */
+	/** 配置读写（票 03）：读目标 agent 的配置合并视图（project 压 global；sessionId 定向，缺省 active）。 */
 	| { id?: string; type: "get_config"; sessionId?: string; key?: string }
 	/**
 	 * 写指定域并持久化（sessionId 定向；与 set_skill_enabled/set_model_disabled 不双写）。
-	 * #05 起支持按作用域写：scope 缺省 = "global"（现行为，写 agentDir/config.yml）；
-	 * "project" 写 <cwd>/.cornfield/config.yml（文件不存在时创建）。record 值（如 modelRoles）
-	 * 整键替换，与 Settings.set 语义一致。
+	 * `scope` 缺省 = 跟随读侧优先级（有 project 层 `<cwd>/.cornfield/config.yml` 就写它，
+	 * 否则写该 agent 自己的 `config.yml`）；显式 "global"/"project" 点名一层。
+	 * record 值（如 modelRoutes）整键替换，与 Settings.set 语义一致。
 	 */
 	| { id?: string; type: "set_config"; sessionId?: string; key: string; value: unknown; scope?: ConfigScope }
 	/** 工具开关语义视图（get_config 的域化封装）：返回目标 agent 每个工具的 enabled 开关 + python 工具模式。 */

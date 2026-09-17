@@ -878,7 +878,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		deobfuscateSessionContext(sessionManager.buildSessionContext(), obfuscator),
 	);
 	const existingBranch = logger.time("getSessionBranch", () => sessionManager.getBranch());
-	const modelFallbacks = resolveFallbackModels(settings, modelRegistry, modelRegistry.getAvailable());
+	// 停用名单来自本次构造用的 Settings（每个 agent 自己那份）：拿全局单例会让别的
+	// agent 的停用决定这个会话能用什么模型。
+	const modelFallbacks = resolveFallbackModels(settings, modelRegistry, modelRegistry.getAvailable(settings));
 
 	const hasExistingSession = existingBranch.length > 0;
 	const hasThinkingEntry = existingBranch.some(entry => entry.type === "thinking_level_change");
@@ -889,7 +891,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		usageOrder: settings.getStorage()?.getModelUsageOrder(),
 	};
 	const defaultRoleSpec = logger.time("resolveDefaultModelRole", () =>
-		resolveModelRoleValue(settings.getModelRole("default"), modelRegistry.getAvailable(), {
+		resolveModelRoleValue(settings.getModelRole("default"), modelRegistry.getAvailable(settings), {
 			settings,
 			matchPreferences: modelMatchPreferences,
 			modelRegistry,

@@ -91,6 +91,10 @@ test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 co
 		// hello 自动推送先消费掉（server_snapshot + session_snapshot）
 		await conn.nextPush("server_snapshot");
 		await conn.nextPush("session_snapshot");
+		// serve 的预挂载是后台的（listening 之后才跑）：定向命令前显式 attach（幂等），
+		// 不赌预挂载的时序 —— 否则这条测试会随机器负载随机报「agent not attached」。
+		await conn.request({ type: "attach", sessionId: "hr" });
+		await conn.request({ type: "attach", sessionId: "ops" });
 
 		// ── 1. get_tool_switches：hr 的默认开关视图（未配置 → 内核默认）──
 		const swResp = await conn.request({ type: "get_tool_switches", sessionId: "hr" });

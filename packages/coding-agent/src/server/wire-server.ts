@@ -11,7 +11,6 @@ import type {
 	ModelSelectionDto,
 	PermissionRequestPush,
 	ServerFrame,
-	ToolSwitchesDto,
 	WireCommand,
 	WireCommandOfType,
 	WireEnvironmentSummary,
@@ -1375,32 +1374,26 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					}
 					return;
 				}
-				// ── 配置读写（票 03）—— per-agent：sessionId 定向到该 agent 的 config.yml ──
-				// default agent 的配置根 ~/.cornfield/agent（Settings.init 的 agentDir），非 process.cwd()；
-				// registry agent 的配置根 <agentDir>/config.yml（与 serve sessionFactory 的
-				// Settings.create({ agentDir }) 同源）。
+				// ── 配置读写（票 03 / F6）—— per-agent：sessionId 定向到该 agent 的配置 ──
+				// 读的是**目标 agent 自己的 Settings 实例**的合并视图（project 压 global），与
+				// set_config / get_tool_switches / 模型停用名单同一个来源。自己拼文件读会漏掉另一层
+				// （写进 project 的值在 global 文件里读不到），也会让运行中的会话看到的是另一份事实。
+				// 配置属于活着的 agent，所以定位与 get_tool_switches 同层：需要该 agent 已 attach
+				// （serve 启动即预挂载全部注册 agent）。
 				case "get_config": {
-					const agentId = agentOf(ctx, command.sessionId);
-					const meta = registry.getMeta(agentId);
-					if (!meta) {
-						fail(`unknown agent: ${agentId}`);
+					const target = resolveTarget(ctx, command);
+					if ("error" in target) {
+						fail(target.error);
 						return;
 					}
-					try {
-						const config = await readAgentConfigYaml(agentConfigPathFor(meta));
-						const key = (command as { key?: string }).key;
-						const value = key ? configGetByPath(config, key.split(".")) : config;
-						done({ config: value });
-					} catch (err) {
-						fail(`get_config failed: ${err instanceof Error ? err.message : String(err)}`);
-					}
+					const key = (command as { key?: string }).key;
+					done({ config: target.attached.session.settings.getRawValue(key) });
 					return;
 				}
 				case "set_config": {
-					const agentId = agentOf(ctx, command.sessionId);
-					const meta = registry.getMeta(agentId);
-					if (!meta) {
-						fail(`unknown agent: ${agentId}`);
+					const target = resolveTarget(ctx, command);
+					if ("error" in target) {
+						fail(target.error);
 						return;
 					}
 					const cmd = command as { key: string; value?: unknown; scope?: ConfigScope };
@@ -1409,21 +1402,25 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						fail("key is required");
 						return;
 					}
-					// #05 作用域写入：scope 缺省 = global（agentDir/config.yml 现行为）；
-					// project 写 <agentDir>/.cornfield/config.yml（文件不存在时创建）。
-					const scope: ConfigScope = cmd.scope ?? "global";
-					const targetPath = scope === "project" ? agentProjectConfigPathFor(meta) : agentConfigPathFor(meta);
+					// 落点规则只有 Settings#setEffective 一处实现：#05 的显式 scope 只是把自动判定
+					// 换成点名的层；缺省 = 合并视图解析这个键的那一层（有 project 层就写 project，
+					// 否则写该 agent 自己的 config.yml）。回包报的就是真的落到的那一层。
+					const settings = target.attached.session.settings;
 					try {
-						const config = await readAgentConfigYaml(targetPath);
-						configSetByPath(config, key.split("."), cmd.value);
-						await writeAgentConfigYaml(targetPath, config);
-						done({ ok: true, key, value: cmd.value, scope });
+						settings.setEffective(key, cmd.value, cmd.scope);
+						// 命令语义是「写并持久化」：保存是防抖的，回包前先落盘。
+						await settings.flush();
+						done({ ok: true, key, value: cmd.value, scope: cmd.scope ?? settings.getEffectiveScope() });
 					} catch (err) {
 						fail(`set_config failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;
 				}
-				// ── 配置作用域（#05）：与 get_config/set_config 同源 per-agent 文件读解 ──
+				// ── 配置作用域（#05）：按**文件**看两层（global / project）的取值与覆盖 ──
+				// 与 get_config/set_config 不同源：那两个走目标 agent 的 Settings 合并视图（活的那份）；
+				// 这里回答的是「哪个文件写了什么、项目层覆盖了哪些键」，所以直读两个文件。
+				// 已知边界：restore_config_inheritance 只删 project 文件里的键，活着的 Settings 实例
+				// 仍持有该覆盖直到重载。
 				case "get_config_scope": {
 					const agentId = agentOf(ctx, command.sessionId);
 					const meta = registry.getMeta(agentId);
@@ -1498,7 +1495,8 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				// ── agentDir 的 prompt 源清单 ──
-				// 工作面是 agentDir（不是会话），所以与 get_config 同一层：只查注册表、不 attach。
+				// 工作面是 agentDir（不是会话），所以只查注册表、不 attach（不同于 get_config：
+				// 那个读的是活着的 agent 的配置实例）。
 				// 清单本身来自 agentDir 文件的单一真相（skeleton/agent-dir-files.ts），前端不另抄一份。
 				case "get_agent_prompt_sources": {
 					const agentId = agentOf(ctx, command.sessionId);
@@ -1873,23 +1871,18 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 
 				// ── Model ──
 				case "get_tool_switches": {
-					// 工具开关语义视图：config.yml 文件优先（与 cornfield TUI 显示一致），未配置项回落
-					// 内核默认（session.settings，attach 时加载）。修改走 set_config 写同一文件。
+					// 工具开关语义视图：读**本会话自己的 Settings 合并视图**（project 压 global，未配置项
+					// 回落内核默认）。与 set_config 写的是同一层——显示的就是生效的那份。
 					try {
-						const config = await readAgentConfigYaml(agentConfigPathFor(attached.meta));
+						const agentSettings = session.settings;
 						done({
 							tools: TOOL_SWITCH_DEFS.map(({ tool, label, path }) => ({
 								tool,
 								label,
 								path,
-								enabled:
-									(configGetByPath(config, path.split(".")) as boolean | undefined) ??
-									session.settings.get(path) === true,
+								enabled: agentSettings.get(path) === true,
 							})),
-							pythonToolMode:
-								(configGetByPath(config, ["python", "toolMode"]) as
-									| ToolSwitchesDto["pythonToolMode"]
-									| undefined) ?? session.settings.get("python.toolMode"),
+							pythonToolMode: agentSettings.get("python.toolMode"),
 						});
 					} catch (err) {
 						fail(`get_tool_switches failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1913,21 +1906,25 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					break;
 				}
 				case "get_available_models": {
-					// P3 真实现：返回目标 session 的可用模型全量列表（按 disabledProviders /
-					// disabledModels 过滤后），并随响应带两份停用名单——前端「已停用」分区恢复入口。
-					const currentSettings = Settings.instance;
+					// P3 真实现：返回目标 session 的可用模型全量列表（按**该 agent 自己的**
+					// disabledProviders / disabledModels 过滤后），并随响应带两份停用名单——前端
+					// 「已停用」分区恢复入口。列表与名单取自同一个 Settings 实例（会话自己的那份）：
+					// 读全局单例会让一个 agent 的停用名单对所有 agent 生效。
+					const agentSettings = session.settings;
 					done({
 						models: session.getAvailableModels(),
-						disabledProviders: currentSettings.get("disabledProviders") ?? [],
-						disabledModels: currentSettings.get("disabledModels") ?? [],
+						disabledProviders: agentSettings.get("disabledProviders") ?? [],
+						disabledModels: agentSettings.get("disabledModels") ?? [],
 					});
 					break;
 				}
 				case "set_model_disabled": {
 					// W3 模型禁用写协议（pi-wire）：provider 级写 disabledProviders，模型级
 					// 写 disabledModels（`provider/modelId` 精确 pattern）。settings 是活引用——
-					// isModelAvailable 每调用都读当前值，无需重载注册表即全局生效；持久化配置 yml。
-					const currentSettings = Settings.instance;
+					// isModelAvailable 每调用都读当前值，无需重载注册表即生效；落点跟随读侧优先级
+					// 持久化到 yml。写的是**目标 agent 自己的**那份（旧实现用全局 Settings.instance，
+					// 会把停用名单写进 default agent 的 config.yml —— 写错人 + 读侧读不到）。
+					const currentSettings = session.settings;
 					const provider = command.provider.trim();
 					if (!provider) {
 						fail("provider is required");
@@ -3652,19 +3649,6 @@ function configGetByPath(obj: Record<string, unknown>, segments: string[]): unkn
 		current = (current as Record<string, unknown>)[segment];
 	}
 	return current;
-}
-
-function configSetByPath(obj: Record<string, unknown>, segments: string[], value: unknown): void {
-	let current: Record<string, unknown> = obj;
-	for (let i = 0; i < segments.length - 1; i++) {
-		const segment = segments[i];
-		const next = current[segment];
-		if (typeof next !== "object" || next === null || Array.isArray(next)) {
-			current[segment] = {};
-		}
-		current = current[segment] as Record<string, unknown>;
-	}
-	current[segments[segments.length - 1]] = value;
 }
 
 /** 删除指定路径的键（#05 恢复继承）；父对象空了则逐级剪枝。返回是否实际删除。 */

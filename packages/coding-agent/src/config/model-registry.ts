@@ -779,17 +779,22 @@ function normalizeSuppressedSelector(selector: string): string {
 	return `${parsed.provider}/${parsed.id}`;
 }
 
-function getDisabledProviderIdsFromSettings(): Set<string> {
+/**
+ * 停用名单的来源：调用方自己的 Settings 实例（每个 agent 一份配置），缺省 = 全局单例。
+ * 传实例进过滤链是 per-agent 模型可见性的关键——读全局单例会让一个 agent 的停用名单
+ * 影响所有 agent。
+ */
+function getDisabledProviderIdsFromSettings(source: Settings = settings): Set<string> {
 	try {
-		return new Set(settings.get("disabledProviders"));
+		return new Set(source.get("disabledProviders"));
 	} catch {
 		return new Set();
 	}
 }
 
-function getDisabledModelPatternsFromSettings(): Set<string> {
+function getDisabledModelPatternsFromSettings(source: Settings = settings): Set<string> {
 	try {
-		return new Set(settings.get("disabledModels"));
+		return new Set(source.get("disabledModels"));
 	} catch {
 		return new Set();
 	}
@@ -1955,9 +1960,13 @@ export class ModelRegistry {
 		return this.#models;
 	}
 
-	#isModelAvailable(model: Model<Api>): boolean {
-		const disabledProviders = getDisabledProviderIdsFromSettings();
-		const disabledModelPatterns = getDisabledModelPatternsFromSettings();
+	/**
+	 * 这个模型对这个调用方可用吗。`source` = 调用方的 Settings（缺省 = 模块级全局单例）——
+	 * 停用名单是**每个 agent 各自的配置**，所以调用方必须把自己的实例传进来。
+	 */
+	#isModelAvailable(model: Model<Api>, source: Settings = settings): boolean {
+		const disabledProviders = getDisabledProviderIdsFromSettings(source);
+		const disabledModelPatterns = getDisabledModelPatternsFromSettings(source);
 		const selector = `${model.provider}/${model.id}`;
 		return (
 			!disabledProviders.has(model.provider) &&
@@ -2088,9 +2097,11 @@ export class ModelRegistry {
 	/**
 	 * Get only models that have auth configured.
 	 * This is a fast check that doesn't refresh OAuth tokens.
+	 *
+	 * `source` = 过滤用的 Settings（停用名单来自它）；缺省 = 模块级全局单例。
 	 */
-	getAvailable(): Model<Api>[] {
-		return this.#models.filter(model => this.#isModelAvailable(model));
+	getAvailable(source: Settings = settings): Model<Api>[] {
+		return this.#models.filter(model => this.#isModelAvailable(model, source));
 	}
 
 	/**
@@ -2116,9 +2127,9 @@ export class ModelRegistry {
 	 * or returned no models, nothing is shown for that provider — the bundled
 	 * list is not used as a fallback since those models would not actually work.
 	 */
-	getVerifiedAvailable(): Model<Api>[] {
+	getVerifiedAvailable(source: Settings = settings): Model<Api>[] {
 		return this.#models.filter(model => {
-			if (!this.#isModelAvailable(model)) return false;
+			if (!this.#isModelAvailable(model, source)) return false;
 			const discovered = this.#discoveredModelIds.get(model.provider);
 			if (!discovered) return true; // No discovery configured — include all
 			return discovered.has(model.id);
