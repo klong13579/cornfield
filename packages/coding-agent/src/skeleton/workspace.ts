@@ -189,3 +189,63 @@ export async function ensureWorkspace(
 	await Bun.write(workspaceFilePath(agentDir), `${JSON.stringify(declaration, null, 2)}\n`);
 	return declaration;
 }
+
+/**
+ * Declare extra read/write roots (`attachedRoots`) on an existing declaration.
+ *
+ * `attachedRoots` had readers but no writer: `session/session-workspace.ts` folds every
+ * declared root into the session's work surface — a root that is not a real directory does
+ * not degrade, it makes the agent's sessions fail to resolve. So each root is resolved to an
+ * absolute path and verified to exist as a directory *before* anything is written: a refused
+ * declaration leaves the file exactly as it was.
+ *
+ * Read-modify-write on the parsed JSON: every other key (and its position) is preserved —
+ * re-serializing a canonical object would silently drop keys this module does not know about.
+ * Adding a root is additive; the roots already declared stay declared, deduplicated by
+ * resolved path.
+ */
+export async function attachRoots(agentDir: string, roots: readonly string[]): Promise<WorkspaceDeclaration> {
+	const read = await readWorkspaceDeclaration(agentDir);
+	if (read.state === "absent") {
+		throw new Error(`No workspace declaration at ${workspaceFilePath(agentDir)}`);
+	}
+	if (read.state === "invalid") {
+		throw new Error(`Invalid workspace declaration at ${workspaceFilePath(agentDir)}: ${read.reason}`);
+	}
+
+	const self = await fs.realpath(agentDir);
+	const resolved: string[] = [];
+	for (const root of roots) {
+		let real: string;
+		try {
+			real = await fs.realpath(path.resolve(root));
+		} catch (err) {
+			if (isEnoent(err)) throw new Error(`--root does not exist: ${root}`);
+			throw err;
+		}
+		let stat: Awaited<ReturnType<typeof fs.stat>>;
+		try {
+			stat = await fs.stat(real);
+		} catch (err) {
+			if (isEnoent(err)) throw new Error(`--root does not exist: ${root}`);
+			throw err;
+		}
+		if (!stat.isDirectory()) throw new Error(`--root is not a directory: ${root}`);
+		if (real === self) {
+			// Not a harmless no-op: the agentDir is already a root, so declaring it again reads as
+			// "this agent also reads somewhere else" while pointing at itself.
+			throw new Error(`--root is the agentDir itself: ${root}`);
+		}
+		if (!resolved.includes(real)) resolved.push(real);
+	}
+
+	const merged = [...(read.declaration.attachedRoots ?? [])];
+	for (const root of resolved) if (!merged.includes(root)) merged.push(root);
+	const next: WorkspaceDeclaration = {
+		...read.declaration,
+		attachedRoots: merged,
+		updatedAt: new Date().toISOString(),
+	};
+	await Bun.write(workspaceFilePath(agentDir), `${JSON.stringify(next, null, 2)}\n`);
+	return next;
+}

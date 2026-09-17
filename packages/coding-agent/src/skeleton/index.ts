@@ -28,8 +28,10 @@ export {
 export { resolveAgentDir } from "./resolve";
 export { buildAgentSessionPath } from "./session";
 export {
+	attachRoots,
 	ensureWorkspace,
 	loadWorkspace,
+	readWorkspaceDeclaration,
 	WORKSPACE_SCHEMA_VERSION,
 	type WorkspaceDeclaration,
 	type WorkspaceKnowledgePaths,

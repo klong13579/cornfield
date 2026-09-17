@@ -62,6 +62,11 @@ export default class Agent extends Command {
 		}),
 		template: Flags.string({ description: "Template name (init). Only `default` is supported." }),
 		mission: Flags.string({ description: "Path to a custom mission.md (init)" }),
+		root: Flags.string({
+			description:
+				"Extra read/write root to declare on the agentDir (init; repeatable). Must be an existing directory.",
+			multiple: true,
+		}),
 		force: Flags.boolean({ description: "Allow overwriting an existing agentDir (init)" }),
 		fix: Flags.boolean({ description: "Auto-repair MECE violations (validate)" }),
 		semantic: Flags.boolean({ description: "Run LLM semantic audit (validate)" }),
@@ -76,6 +81,7 @@ export default class Agent extends Command {
 		"  cornfield agent init hr-bot                          Create ~/.cornfield/agents/hr-bot/ with default template",
 		"  cornfield agent init hr-bot --dir /opt/agents         Custom parent directory",
 		"  cornfield agent init hr-bot --mission ./mission.md    Seed from existing mission.md",
+		"  cornfield agent init hr-bot --root /srv/shared          Declare an extra read/write root (repeatable)",
 		"  cornfield agent init hr-bot --template default        Explicit template (default only, for now)",
 		"",
 		"  ======== 查看 ========",
@@ -131,7 +137,7 @@ export default class Agent extends Command {
 			case "init": {
 				if (!name) {
 					console.error(
-						"Usage: cornfield agent init <name> [--dir <path>] [--template default] [--mission <file>]",
+						"Usage: cornfield agent init <name> [--dir <path>] [--template default] [--mission <file>] [--root <path>]...",
 					);
 					process.exitCode = 1;
 					return;
@@ -143,6 +149,7 @@ export default class Agent extends Command {
 					mission: flags.mission as string | undefined,
 					force: flags.force as boolean | undefined,
 					json: flags.json as boolean | undefined,
+					roots: flags.root as string[] | undefined,
 				});
 				if (flags.json) {
 					console.log(JSON.stringify(result, null, 2));
@@ -154,6 +161,7 @@ export default class Agent extends Command {
 						: `✓ AgentDir exists at ${result.agentDir} (additive update — existing files preserved)`,
 				);
 				if (result.created) console.log(`  ${result.filesWritten} content files written`);
+				if (result.attachedRoots?.length) console.log(`  Extra roots: ${result.attachedRoots.join(", ")}`);
 				console.log(
 					`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`cornfield agent show ${name}\``,
 				);

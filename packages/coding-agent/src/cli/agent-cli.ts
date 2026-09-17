@@ -19,6 +19,7 @@ import {
 	ensureAgentDir,
 	findAgent,
 	pruneStaleEntries,
+	readWorkspaceDeclaration,
 	reconcileSkeletonFiles,
 	registerAgent,
 	resolveAgentDir,
@@ -42,6 +43,8 @@ export interface InitArgs {
 	mission?: string;
 	force?: boolean;
 	json?: boolean;
+	/** Extra read/write roots to declare on the agentDir (repeatable). Must exist as directories. */
+	roots?: readonly string[];
 }
 
 export interface InitResult {
@@ -49,6 +52,8 @@ export interface InitResult {
 	agentDir: string;
 	created: boolean;
 	filesWritten: number;
+	/** Resolved absolute roots declared on the agentDir, when `roots` was given. */
+	attachedRoots?: string[];
 }
 
 export async function runAgentInit(args: InitArgs): Promise<InitResult> {
@@ -106,8 +111,15 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 
 	// Write the workspace declaration (`.cornfield/workspace.json`) so the agentDir
 	// carries its structured metadata with it (registry stays a thin index).
-	const { ensureWorkspace } = await import("../skeleton/workspace");
+	const { attachRoots, ensureWorkspace } = await import("../skeleton/workspace");
 	await ensureWorkspace(agentDir, { name: args.name });
+
+	// `roots`: extra read/write roots land in the same declaration. Written before registerAgent
+	// so the registry's workspaceUpdatedAt cache matches the file it just read. A root that is not
+	// a real directory throws here -- declaring it would make every session of this agent fail to
+	// resolve its work surface, which is worse than a failed init.
+	const attachedRoots =
+		args.roots && args.roots.length > 0 ? (await attachRoots(agentDir, args.roots)).attachedRoots : undefined;
 
 	// Persist the (name, path) mapping so `cornfield agent list` / `show` can find
 	// this agentDir regardless of where it lives (default `~/.cornfield/agents/`,
@@ -116,7 +128,13 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	// declaration just written.
 	await registerAgent(args.name, agentDir, args.template ?? "default");
 
-	return { name: args.name, agentDir, created: effectiveCreated, filesWritten };
+	return {
+		name: args.name,
+		agentDir,
+		created: effectiveCreated,
+		filesWritten,
+		...(attachedRoots ? { attachedRoots } : {}),
+	};
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -490,6 +508,32 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 		const p = path.join(agentDir, rel);
 		if (!(await pathExists(p))) {
 			issues.push({ level: "warning", file: rel, message: "Missing recommended runtime file" });
+		}
+	}
+
+	// 3b. declared extra roots. `session/session-workspace.ts` folds every declared root into the
+	// session's work surface, so a declared root that is gone makes this agent's sessions fail to
+	// resolve. Saying `valid: true` here would be a lie about a directory that cannot be used.
+	const declarationRead = await readWorkspaceDeclaration(agentDir);
+	if (declarationRead.state === "invalid") {
+		issues.push({
+			level: "error",
+			file: ".cornfield/workspace.json",
+			message: `Invalid workspace declaration: ${declarationRead.reason}`,
+		});
+	} else if (declarationRead.state === "declared") {
+		for (const root of declarationRead.declaration.attachedRoots ?? []) {
+			const isDir = await fs.stat(root).then(
+				stat => stat.isDirectory(),
+				() => false,
+			);
+			if (!isDir) {
+				issues.push({
+					level: "error",
+					file: ".cornfield/workspace.json",
+					message: `Declared attached root is missing or not a directory: ${root}`,
+				});
+			}
 		}
 	}
 
