@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
 ### Added
 
 - **`hello_ack` 增加可选 `gatewayWirePort`**（`src/frames.ts`）：服务端报它自己用的 gateway wire 端口（`CORNFIELD_GATEWAY_WIRE_PORT`，缺省 7892，与 serve 内部代调 gateway 的值同源）。浏览器读不到 env，前端该连哪个端口只能由握手告诉它 —— 此前 web-app 自己写死 7892，于是用**隔离 HOME** 起的 serve 里打开页面，前端照样连到本机真实运营中的 gateway。stdio 语义的握手不代调 gateway，因此不报（客户端在拿到之前必须明说端口未知，不得回退到一个猜的端口）。

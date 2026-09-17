@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
 ### Fixed
 
 - **`narwal-plan/gpt-6-astra`（及同族的 `gpt-5.6-luna` / `gpt-5.6-terra`）在 `chat/completions` 上带工具必 400 —— 三个 id 改走 `/v1/responses`**（`src/provider-models/narwal-plan.ts`、`src/provider-models/openai-compat.ts`、`src/models.json` 重新生成、新增 `test/narwal-plan-responses-routing.test.ts` + 扩写 `test/narwal-plan-provider.test.ts`）：网关这三个 id 的上游拒绝「function tools + reasoning」组合，且**不发 `reasoning_effort` 也一样 400**（实测 2026-09-17 直打 `coder.narwal.com/v1`：任何非空 `tools` → 400「Function tools with reasoning_effort are not supported … use /v1/responses」；照它的提示改 `reasoning_effort: none` 反而回「Unsupported value … Supported values are: 'low', 'medium', 'high', and 'xhigh'」）—— agent 每一轮都带工具，所以这三个 id 在原来那条通路上没有任何可用请求形态。修法：种子把这三个 id 声明为 `api: "openai-responses"`（同族 `gpt-5.5` / `gpt-5.6-sol` 同日实测 200，不动；`gpt-5.4` 上游整体不支持，另有其事），`NARWAL_PLAN_STATIC_MODELS` 类型放宽为 `Model<NarwalPlanApi>` 并贯穿 `narwalPlanModelManagerOptions`（discovery 只给裸 id，未种子 id 仍留在 completions）；`compat` 是按 API 的条件类型、只有 completions 有，故这三个条目不再携带它（responses 通路的兼容决策走 baseUrl）。同一条请求在 `/v1/responses` 实测 200，含 harness 实际会发的 `store:false` / `include:["reasoning.encrypted_content"]` / `reasoning:{effort,summary}` 与扁平工具 schema。

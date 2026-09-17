@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
 ### Added
 
 - **Schedule 持久化 resolved agentId + 定时任务写面**（`src/scheduler/agent-binding.ts`, `src/scheduler/types.ts`, `src/scheduler/storage.ts`, `src/scheduler/file-store.ts`, `src/wire-endpoint.ts`）：`ScheduledTask` 落盘解析后的 Agent 身份（`agentId` + `agentDir`）——到点执行按自己存下来的身份走，不读 UI 当前选中；绑定三态 `registered` / `unregistered`（有 home 但认不出是哪个 Agent）/ `unbound` 分开上报，`accountId` 不再被 agentDir 冒充。`cron_create` / `cron_update` 的 agent 绑定由 agent-domain 解析（**声明的 agentId 不存在或 Agent home 不在 → `ok:false`，不写一条跑不起来的调度**；未声明绑定则允许创建、运行面拒执行）；`cron_update` / `cron_remove` 用 `taskId`（wire 的 `id` 是关联 id，不复用）。`get_cron_tasks` 行补 `agentId`/`agentDir`/`agentDisplayName`/`agentResolution`/`agentEnabled`/`agentError`/`projectIds`/`taskType`/`timeoutMs`/`retry`/`repeatCount`/`repeatCompleted`/`delivery`/`lastDeliveryError`/时间戳，`get_cron_logs` 补 `agentSessionPath`（执行到会话的权威链接）。

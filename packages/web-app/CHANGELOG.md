@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
 ### Changed
 
 - **用量面板的 Project 匹配改用 pi-wire 的规则**（`src/pages/insights/insights-scope.ts`）：删掉本地那份 `matchProjectForPath`（与 serve 同算法的第二份），改为 `normalizePath` 词法归一后调 pi-wire 的 `pickDeepestRootIndex`。规则一份（pi-wire），归一化按侧不同且不可避免（serve = realpath，浏览器 = 词法；归一结果不同就可能命中不同，前端认不出的 symlink 路径仍是未归属，不猜）。`undefined` = registry 未读到 ≠ 未归属的语义不变。
