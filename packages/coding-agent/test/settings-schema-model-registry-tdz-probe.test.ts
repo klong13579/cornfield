@@ -19,8 +19,8 @@
  * mode is order-dependent — whichever module evaluates first decides whether
  * the schema body can read the ids. By importing nothing else, this file
  * pins the failure mode regardless of where future tests sit in the import
- * graph. Anyone reverting to "我 import 了别的兄弟模块就能不拑" cannot use
- * the other test as cover.
+ * graph. A future change that tries to dodge this probe by importing
+ * sibling modules cannot use the other test as cover.
  *
  * Both belong. Removing either would leave a path where the cycle can be
  * re-introduced without either test catching it.
