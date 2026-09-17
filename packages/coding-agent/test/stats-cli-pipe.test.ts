@@ -40,12 +40,16 @@ const ASSISTANT_MESSAGE = `${JSON.stringify({
 })}\n`;
 
 let root = "";
-let agentDir = "";
+/** The default Agent's home: the session tree `stats` scans is `<home>/sessions`. */
+let defaultHome = "";
 
 beforeEach(async () => {
 	root = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-stats-pipe-"));
-	agentDir = path.join(root, "agent");
-	const sessionsDir = path.join(agentDir, "sessions");
+	// The home is derived from the config root (`<root>/agents/default`), so the
+	// sessions have to be seeded where that derivation points — `CORNFIELD_CONFIG_DIR`
+	// below is what decides it.
+	defaultHome = path.join(root, "agents", "default");
+	const sessionsDir = path.join(defaultHome, "sessions");
 	for (let i = 0; i < FOLDERS; i++) {
 		const folder = path.join(
 			sessionsDir,
@@ -66,9 +70,12 @@ function outPath(name: string): string {
 }
 
 function env(): Record<string, string> {
-	// HOME owns the stats database, the agent dir owns the session tree; both are
-	// temp so the run neither reads nor writes a real history.
-	return { HOME: path.join(root, "home"), CORNFIELD_AGENT_DIR: agentDir };
+	// Both roots point at the temp tree: the config root owns `stats.db` and derives
+	// the default Agent's home (the session tree the command scans), the client dir
+	// owns the client-scoped caches. `CORNFIELD_AGENT_DIR` — what this fixture used to
+	// set — names neither root any more, so the seeded sessions sat where nothing
+	// looked and the dashboard reported the machine's own history instead.
+	return { CORNFIELD_CONFIG_DIR: root, CORNFIELD_CLIENT_DIR: path.join(root, "agent") };
 }
 
 describe("stats output through a pipe", () => {

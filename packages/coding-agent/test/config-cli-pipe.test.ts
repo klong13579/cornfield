@@ -19,17 +19,18 @@ const ENTRIES = 4000;
 const LAST_ENTRY = `seed-provider/model-with-a-long-identifier-${String(ENTRIES - 1).padStart(5, "0")}`;
 
 let root = "";
-let agentDir = "";
+/** The client dir: the default Agent's global config is read from `<client dir>/config.yml`. */
+let clientDir = "";
 
 beforeEach(async () => {
 	root = await fs.mkdtemp(path.join(os.tmpdir(), "cornfield-config-pipe-"));
-	agentDir = path.join(root, "agent");
-	await fs.mkdir(agentDir, { recursive: true });
+	clientDir = path.join(root, "agent");
+	await fs.mkdir(clientDir, { recursive: true });
 	const list = Array.from(
 		{ length: ENTRIES },
 		(_, i) => `  - seed-provider/model-with-a-long-identifier-${String(i).padStart(5, "0")}`,
 	);
-	await Bun.write(path.join(agentDir, "config.yml"), `enabledModels:\n${list.join("\n")}\n`);
+	await Bun.write(path.join(clientDir, "config.yml"), `enabledModels:\n${list.join("\n")}\n`);
 });
 
 afterEach(async () => {
@@ -41,8 +42,16 @@ function outPath(name: string): string {
 	return path.join(root, name);
 }
 
+/**
+ * Point both roots at the temp tree: `CORNFIELD_CONFIG_DIR` names the config root,
+ * `CORNFIELD_CLIENT_DIR` the client dir the default Agent's global config is read
+ * from. `CORNFIELD_AGENT_DIR` — which this fixture used to set — names neither root
+ * any more, so the command fell back to the developer's own `~/.cornfield` and the
+ * document came out far below the pipe buffer: the three size assertions above then
+ * failed against a document this fixture never produced.
+ */
 function env(): Record<string, string> {
-	return { CORNFIELD_AGENT_DIR: agentDir };
+	return { CORNFIELD_CONFIG_DIR: root, CORNFIELD_CLIENT_DIR: clientDir };
 }
 
 describe("config output through a pipe", () => {

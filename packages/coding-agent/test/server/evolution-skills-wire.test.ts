@@ -214,7 +214,11 @@ describe("readEvolvedSkills — 读不到", () => {
 
 		const failure = await failureOf(() => readEvolvedSkills(sessionCwd));
 
-		expect(failure.code).toBe("SQLITE_CANTOPEN");
+		// 契约是「抛」，不是某一个平台的 SQLite 错误码：路径上是目录时 macOS 报
+		// SQLITE_CANTOPEN、Linux 报 SQLITE_IOERR_READ（CI 实测）。两者都只是「打不开这个
+		// 文件」，钉死其中一个会让这条断言在另一个平台上红，而契约并没有被破坏。
+		const unreadablePathCodes = ["SQLITE_CANTOPEN", "SQLITE_IOERR_READ"];
+		expect(unreadablePathCodes.some(code => code === failure.code)).toBe(true);
 		expect(failure.message.length).toBeGreaterThan(0);
 	});
 

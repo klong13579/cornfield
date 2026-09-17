@@ -11,9 +11,12 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fsp from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { settings } from "@cornfield/coding-agent/config/settings";
 import { ListenController } from "@cornfield/coding-agent/stt/listen-controller";
 import { buildFilename } from "@cornfield/coding-agent/stt/listen-service";
+import { setConfigRootDir } from "@cornfield/utils";
 
 // Shared mock instances — hoisted before static imports, shared across tests.
 const detectRecordingTools = vi.fn<() => string[]>();
@@ -42,6 +45,11 @@ vi.mock("@cornfield/coding-agent/stt/transcriber", () => ({ transcribe }));
 
 // Import Settings AFTER vi.mock registrations (hoisted)
 let Settings: Awaited<typeof import("@cornfield/coding-agent/config/settings")>["Settings"];
+
+// 隔离 config 根：`getListenDir()` 是 `<config root>/listen`。不隔离的话，存的是开发者真机上那份，
+// 而且 audio 存档（saveListenText 里的 copyFile，本文件没有打桩）会真的往 `~/.cornfield/listen/audio`
+// 里写。
+const isoRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-listen-controller-test-"));
 
 // ────────────────────────────────────────────────────────────────────────────
 // buildFilename
@@ -96,6 +104,7 @@ describe("ListenController", () => {
 	let onStatusChange: ReturnType<typeof vi.fn>;
 
 	beforeEach(async () => {
+		setConfigRootDir(isoRoot);
 		// Initialize Settings singleton (inMemory) so settings.get() doesn't
 		// throw "Settings not initialized" in stopRecording/transcribeFile.
 		if (!Settings) {
@@ -119,6 +128,7 @@ describe("ListenController", () => {
 	afterEach(async () => {
 		ctrl?.dispose();
 		vi.restoreAllMocks();
+		setConfigRootDir(undefined);
 		// Reset settings singleton for next test
 		await Settings.init({ inMemory: true });
 	});
@@ -225,8 +235,11 @@ describe("ListenController", () => {
 		const content = writeCall[1] as string;
 		const parsed = JSON.parse(content);
 
-		expect(filePath).toMatch(/\.cornfield\/listen\/\d{4}-\d{2}-\d{2}-/);
-		expect(parsed.version).toBe(1);
+		// 落盘根是隔离出来的那个，不是开发者真机上的 `~/.cornfield`。
+		expect(path.dirname(filePath)).toBe(path.join(isoRoot, "listen"));
+		expect(path.basename(filePath)).toMatch(/^\d{4}-\d{2}-\d{2}-\d{6}\.json$/);
+		// v2 加了 provenance（T10C）；stopRecording() 末传 description，名字就是 HHMMSS。
+		expect(parsed.version).toBe(2);
 		expect(parsed.text).toBe("这是测试转写文本");
 		expect(parsed.recorded_at).toBeDefined();
 	});
