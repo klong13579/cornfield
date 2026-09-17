@@ -19,6 +19,7 @@
 
 import { logger } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
+import type { AgentBridge } from "../agent-bridge";
 import type { ChannelRegistry } from "../channels/registry";
 import type { HostToolHandler, HostToolResultBody, RpcHostToolDefinition } from "../host-tool-dispatcher";
 import type { InboundMessage } from "../types";
@@ -49,9 +50,9 @@ export interface CronToolContext {
 	/** Returns the active AgentBridge for delivery auto-inference. Lazy
 	 *  because the bridge is constructed after the dispatcher in the
 	 *  gateway's start sequence. */
-	getBridge: () => import("../agent-bridge").AgentBridge;
+	getBridge: () => AgentBridge;
 	registry: ChannelRegistry;
-	getStorage: () => import("./types").SchedulerStorage | null;
+	getStorage: () => SchedulerStorage | null;
 	/**
 	 * AccountId of the agent that owns this dispatcher instance. Stamped
 	 * on every `cron.add` so the row's `createdByAccountId` audit field

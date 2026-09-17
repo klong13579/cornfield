@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { isEnoent } from "@cornfield/utils";
 import { validateLearningContent } from "./learning-admission";
 import type { SqliteLearningStore } from "./storage/learnings";
-import type { Learning, LearningKind } from "./types";
+import type { Learning, LearningKind, LearningScope } from "./types";
 
 export interface LearningSeedEntry {
 	kind: LearningKind;
@@ -91,7 +91,7 @@ export async function applyLearningsSeed(
 			source: pin ? "manual_pin" : "session_llm",
 			confidence: 5,
 			lifecycle: pin ? "active" : "candidate",
-			scope: "global" as import("./types").LearningScope,
+			scope: "global" as LearningScope,
 			sessionId: "seed",
 			createdAt: now,
 			updatedAt: now,

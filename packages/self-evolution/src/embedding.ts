@@ -8,6 +8,7 @@
 import type { Model } from "@cornfield/ai";
 import { getEnvApiKey } from "@cornfield/ai";
 import { logger } from "@cornfield/utils";
+import type { VectorStore } from "./vector-store";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,7 +219,7 @@ export class EmbeddingGenerator {
 	 * Generate an embedding and store it directly in the vector store.
 	 */
 	async embedAndStore(
-		store: import("./vector-store").VectorStore,
+		store: VectorStore,
 		id: string,
 		namespace: string,
 		content: string,

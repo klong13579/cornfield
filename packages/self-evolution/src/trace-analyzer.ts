@@ -14,10 +14,13 @@ import traceAnalysisSystemTemplate from "./prompts/trace-analysis.md" with { typ
 import traceAnalysisInputTemplate from "./prompts/trace-analysis-input.md" with { type: "text" };
 import type {
 	CascadePattern,
+	CrossSessionDiagnosis,
+	ImplicitSignals,
 	ReadFailureAnalysis,
 	ReadFailureType,
 	SessionTrace,
 	ToolChainDiagnosis,
+	TraceEnhancement,
 	TraceEntry,
 } from "./types";
 
@@ -656,8 +659,8 @@ export class TraceAnalyzer {
 	 * - Same tool consecutive failures ≥ 3 times
 	 * - User accepts modifications without follow-up corrections
 	 */
-	#extractImplicitSignals(trace: SessionTrace, paired: PairedToolCall[]): import("./types").ImplicitSignals {
-		const signals: import("./types").ImplicitSignals = {
+	#extractImplicitSignals(trace: SessionTrace, paired: PairedToolCall[]): ImplicitSignals {
+		const signals: ImplicitSignals = {
 			userRevertedEdit: false,
 			duplicateRequestCount: 0,
 			consecutiveFailureTools: [],
@@ -731,7 +734,7 @@ export class TraceAnalyzer {
 	 * - Record model_error entries with status codes
 	 * - Truncate tool results to 2KB for storage
 	 */
-	#enhanceTrace(trace: SessionTrace, paired: PairedToolCall[]): import("./types").TraceEnhancement {
+	#enhanceTrace(trace: SessionTrace, paired: PairedToolCall[]): TraceEnhancement {
 		// Last 3 assistant_message entries
 		const assistantMessages = trace.entries
 			.filter(e => e.type === "assistant_message" && e.content)
@@ -765,10 +768,7 @@ export class TraceAnalyzer {
 /**
  * Aggregate trace-level diagnoses across multiple episodes for cross-session analysis.
  */
-export function aggregateDiagnoses(
-	diagnoses: ToolChainDiagnosis[],
-	project: string,
-): import("./types").CrossSessionDiagnosis {
+export function aggregateDiagnoses(diagnoses: ToolChainDiagnosis[], project: string): CrossSessionDiagnosis {
 	const totalEpisodes = diagnoses.length;
 	const failedEpisodes = diagnoses.filter(d => d.readFailures.length > 0 || d.cascadePatterns.length > 0).length;
 

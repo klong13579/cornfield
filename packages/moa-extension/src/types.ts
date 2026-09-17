@@ -1,4 +1,5 @@
 import type { MoaQualityMeta, MoaQualitySettings } from "./quality/types";
+import type { TaskContextObject } from "./tco";
 
 export type MoaPlannerToolMode = "all" | "read-only";
 
@@ -374,7 +375,7 @@ export interface MoaRoundTrace {
 
 export interface MoaExecutionResult {
 	plan: MoaPlan;
-	tco?: import("./tco").TaskContextObject;
+	tco?: TaskContextObject;
 	askSummary?: MoaAskUserSummary;
 	discovery?: MoaWorkerResult;
 	rewrite?: MoaWorkerResult;

@@ -5,6 +5,8 @@
  * and the OMP agent, routing messages bidirectionally.
  */
 
+import type { ForwardStreamHandlers as AgentBridgeForwardStreamHandlers } from "./agent-bridge";
+
 // ═══════════════════════════════════════════════════════════════════════
 // Message Types
 // ═══════════════════════════════════════════════════════════════════════
@@ -164,9 +166,9 @@ export interface Channel {
 	 */
 	streamCard?(
 		inbound: InboundMessage,
-		session: import("./types").SessionRecord,
+		session: SessionRecord,
 		context: ReplyFormatterContext,
-		submit: (handlers?: import("./types").ForwardStreamHandlers) => Promise<AgentResponseMeta | null>,
+		submit: (handlers?: ForwardStreamHandlers) => Promise<AgentResponseMeta | null>,
 	): Promise<OutboundMessage | null>;
 }
 
@@ -281,7 +283,7 @@ export interface AgentResponseToolResult {
  * See `packages/gateway/src/agent-bridge.ts` for the authoritative
  * definition.
  */
-export type ForwardStreamHandlers = import("./agent-bridge").ForwardStreamHandlers;
+export type ForwardStreamHandlers = AgentBridgeForwardStreamHandlers;
 
 /** Deep connection health for a single channel instance. */
 export interface ChannelHealth {

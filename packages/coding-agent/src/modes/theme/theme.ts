@@ -9,7 +9,7 @@ import {
 	highlightCode as nativeHighlightCode,
 	supportsLanguage as nativeSupportsLanguage,
 } from "@cornfield/natives";
-import type { EditorTheme, MarkdownTheme, SelectListTheme, SymbolTheme } from "@cornfield/tui";
+import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme, SymbolTheme } from "@cornfield/tui";
 import { adjustHsv, getCustomThemesDir, isEnoent, logger } from "@cornfield/utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
@@ -2386,7 +2386,7 @@ export function getEditorTheme(): EditorTheme {
 	};
 }
 
-export function getSettingsListTheme(): import("@cornfield/tui").SettingsListTheme {
+export function getSettingsListTheme(): SettingsListTheme {
 	return {
 		label: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : text),
 		value: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : theme.fg("muted", text)),

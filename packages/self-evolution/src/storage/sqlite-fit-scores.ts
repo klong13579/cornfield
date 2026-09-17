@@ -2,7 +2,7 @@
  * SqliteFitScoreStore — SQLite-backed storage for fit evaluation scores.
  */
 import type { Database } from "bun:sqlite";
-import type { FitScoreRecord } from "../types";
+import type { FitScoreRecord, FitVerdict } from "../types";
 import type { FitScoreStore } from "./types";
 
 export class SqliteFitScoreStore implements FitScoreStore {
@@ -90,7 +90,7 @@ export class SqliteFitScoreStore implements FitScoreStore {
 			predictionScore: row.prediction_score,
 			historyScore: row.history_score,
 			changeFromLast: row.change_from_last,
-			verdict: row.verdict as import("../types").FitVerdict,
+			verdict: row.verdict as FitVerdict,
 			detailJson: row.detail_json,
 			computedAt: row.computed_at,
 		};
@@ -126,13 +126,13 @@ export class SqliteFitScoreStore implements FitScoreStore {
 			predictionScore: row.prediction_score,
 			historyScore: row.history_score,
 			changeFromLast: row.change_from_last,
-			verdict: row.verdict as import("../types").FitVerdict,
+			verdict: row.verdict as FitVerdict,
 			detailJson: row.detail_json,
 			computedAt: row.computed_at,
 		};
 	}
 
-	async listRecent(limit: number): Promise<import("../types").FitScoreRecord[]> {
+	async listRecent(limit: number): Promise<FitScoreRecord[]> {
 		const stmt = this.db.prepare("SELECT * FROM fit_scores ORDER BY date DESC LIMIT ?");
 		const rows = stmt.all(limit) as Array<{
 			date: string;
@@ -158,7 +158,7 @@ export class SqliteFitScoreStore implements FitScoreStore {
 			predictionScore: row.prediction_score,
 			historyScore: row.history_score,
 			changeFromLast: row.change_from_last,
-			verdict: row.verdict as import("../types").FitVerdict,
+			verdict: row.verdict as FitVerdict,
 			detailJson: row.detail_json,
 			computedAt: row.computed_at,
 		}));

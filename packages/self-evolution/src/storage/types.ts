@@ -3,9 +3,17 @@ import type {
 	EpisodeEffectiveness,
 	EpisodeIntent,
 	EvolvedSkill,
+	FitScoreRecord,
+	InjectionOutcome,
 	NudgeRecord,
+	RegressionFixture,
+	RegressionTrial,
+	SessionTrace,
 	SkillEffectiveness,
+	SkillPopulationRecord,
+	SkillPopulationState,
 	SkillVersion,
+	ToolChainDiagnosis,
 	WorkflowPattern,
 } from "../types";
 
@@ -81,59 +89,51 @@ export interface NudgeHistoryStore {
 	dismiss(id: string): Promise<void>;
 	markContextInjected(ids: string[], injectedAt: number): Promise<void>;
 	recordOutcome(id: string, update: NudgeOutcomeUpdate): Promise<void>;
-	listUnscoredInjectedForSession(sessionId: string): Promise<import("../types").NudgeRecord[]>;
+	listUnscoredInjectedForSession(sessionId: string): Promise<NudgeRecord[]>;
 }
 
 export interface DetailedOutcomeStore {
-	record(outcome: import("../types").InjectionOutcome): Promise<void>;
-	get(episodeId: string): Promise<import("../types").InjectionOutcome | undefined>;
-	listRecent(limit: number): Promise<import("../types").InjectionOutcome[]>;
+	record(outcome: InjectionOutcome): Promise<void>;
+	get(episodeId: string): Promise<InjectionOutcome | undefined>;
+	listRecent(limit: number): Promise<InjectionOutcome[]>;
 }
 
 export interface FitScoreStore {
-	upsert(record: import("../types").FitScoreRecord): Promise<void>;
-	get(date: string): Promise<import("../types").FitScoreRecord | undefined>;
-	getLast(): Promise<import("../types").FitScoreRecord | undefined>;
-	listRecent(limit: number): Promise<import("../types").FitScoreRecord[]>;
+	upsert(record: FitScoreRecord): Promise<void>;
+	get(date: string): Promise<FitScoreRecord | undefined>;
+	getLast(): Promise<FitScoreRecord | undefined>;
+	listRecent(limit: number): Promise<FitScoreRecord[]>;
 }
 export interface EpisodeDiagnosisStore {
-	insert(diagnosis: import("../types").ToolChainDiagnosis): Promise<void>;
-	get(episodeId: string): Promise<import("../types").ToolChainDiagnosis | undefined>;
-	listRecent(limit: number): Promise<import("../types").ToolChainDiagnosis[]>;
-	listByEpisodeIds(episodeIds: string[]): Promise<import("../types").ToolChainDiagnosis[]>;
+	insert(diagnosis: ToolChainDiagnosis): Promise<void>;
+	get(episodeId: string): Promise<ToolChainDiagnosis | undefined>;
+	listRecent(limit: number): Promise<ToolChainDiagnosis[]>;
+	listByEpisodeIds(episodeIds: string[]): Promise<ToolChainDiagnosis[]>;
 	count(): Promise<number>;
 	deleteOld(keepCount: number): Promise<number>;
 }
 export interface RegressionFixtureStore {
-	insert(fixture: import("../types").RegressionFixture): Promise<void>;
-	listRecent(limit: number): Promise<import("../types").RegressionFixture[]>;
-	listForErrorTool(tool: string | undefined, limit: number): Promise<import("../types").RegressionFixture[]>;
+	insert(fixture: RegressionFixture): Promise<void>;
+	listRecent(limit: number): Promise<RegressionFixture[]>;
+	listForErrorTool(tool: string | undefined, limit: number): Promise<RegressionFixture[]>;
 }
 
 export interface RegressionTrialStore {
-	insert(trial: import("../types").RegressionTrial): Promise<void>;
-	listRecent(limit: number): Promise<import("../types").RegressionTrial[]>;
+	insert(trial: RegressionTrial): Promise<void>;
+	listRecent(limit: number): Promise<RegressionTrial[]>;
 }
 
 export interface SessionTraceStore {
-	upsert(trace: import("../types").SessionTrace, episodeId: string): Promise<void>;
-	getBySessionId(sessionId: string): Promise<import("../types").SessionTrace | undefined>;
+	upsert(trace: SessionTrace, episodeId: string): Promise<void>;
+	getBySessionId(sessionId: string): Promise<SessionTrace | undefined>;
 }
 
 export interface SkillPopulationStore {
-	insert(record: import("../types").SkillPopulationRecord): Promise<void>;
-	get(name: string): Promise<import("../types").SkillPopulationRecord | undefined>;
-	list(filter?: {
-		state?: import("../types").SkillPopulationState;
-		minScore?: number;
-	}): Promise<import("../types").SkillPopulationRecord[]>;
-	update(record: import("../types").SkillPopulationRecord): Promise<void>;
+	insert(record: SkillPopulationRecord): Promise<void>;
+	get(name: string): Promise<SkillPopulationRecord | undefined>;
+	list(filter?: { state?: SkillPopulationState; minScore?: number }): Promise<SkillPopulationRecord[]>;
+	update(record: SkillPopulationRecord): Promise<void>;
 	delete(name: string): Promise<void>;
-	transitionState(
-		name: string,
-		newState: import("../types").SkillPopulationState,
-		reason: string,
-		score: number,
-	): Promise<void>;
-	countByState(state: import("../types").SkillPopulationState): Promise<number>;
+	transitionState(name: string, newState: SkillPopulationState, reason: string, score: number): Promise<void>;
+	countByState(state: SkillPopulationState): Promise<number>;
 }

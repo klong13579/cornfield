@@ -28,6 +28,7 @@ import type {
 	ExtensionRuntime as IExtensionRuntime,
 	LoadExtensionsResult,
 	MessageRenderer,
+	ProviderConfig,
 	RegisteredCommand,
 	ToolDefinition,
 	ToolInfo,
@@ -47,8 +48,7 @@ export class ExtensionRuntimeNotInitializedError extends Error {
  */
 export class ExtensionRuntime implements IExtensionRuntime {
 	flagValues = new Map<string, boolean | string>();
-	pendingProviderRegistrations: Array<{ name: string; config: import("./types").ProviderConfig; sourceId: string }> =
-		[];
+	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; sourceId: string }> = [];
 
 	sendMessage(): void {
 		throw new ExtensionRuntimeNotInitializedError();
@@ -118,7 +118,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 	readonly flagValues = new Map<string, boolean | string>();
 	readonly pendingProviderRegistrations: Array<{
 		name: string;
-		config: import("./types").ProviderConfig;
+		config: ProviderConfig;
 		sourceId: string;
 	}> = [];
 
@@ -249,7 +249,7 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		return this.runtime.setSessionName(name);
 	}
 
-	registerProvider(name: string, config: import("./types").ProviderConfig): void {
+	registerProvider(name: string, config: ProviderConfig): void {
 		this.runtime.pendingProviderRegistrations.push({ name, config, sourceId: this.extension.path });
 	}
 }

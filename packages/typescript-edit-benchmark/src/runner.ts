@@ -42,7 +42,7 @@ type ConversationDumpSessionState = {
 /** Common interface for both RPC and in-process clients */
 interface BenchmarkClient {
 	start(): Promise<void>;
-	setThinkingLevel(level: import("@cornfield/agent").ResolvedThinkingLevel): Promise<void>;
+	setThinkingLevel(level: ResolvedThinkingLevel): Promise<void>;
 	onEvent(listener: (event: { type: string; [key: string]: unknown }) => void): () => void;
 	prompt(text: string): Promise<void>;
 	followUp(text: string): Promise<void>;

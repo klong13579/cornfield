@@ -293,7 +293,7 @@ export class DailyReportGenerator {
 		return [`${episode.errorCount} error(s) occurred`];
 	}
 
-	#extractHighlights(episode: Episode, effectiveness?: import("./types").EpisodeEffectiveness): string[] {
+	#extractHighlights(episode: Episode, effectiveness?: EpisodeEffectiveness): string[] {
 		const highlights: string[] = [];
 		if (episode.completedSuccessfully) {
 			highlights.push("Completed successfully");

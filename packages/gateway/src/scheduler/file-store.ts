@@ -11,7 +11,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { logger } from "@cornfield/utils";
-import type { SchedulerStorage, TaskFileDefinition } from "./types";
+import type { RetryConfig, ScheduledTask, SchedulerStorage, TaskFileDefinition } from "./types";
 import { parseSchedule } from "./types";
 
 const TASK_FILE_GLOB = /\.json5?$/i;
@@ -68,11 +68,11 @@ export class SchedulerFileStore {
 				enabledToolsets?: string[];
 				repeatCount?: number;
 				timeoutMs?: number;
-				retry?: import("./types").RetryConfig;
+				retry?: RetryConfig;
 				skills?: string[];
 				preScript?: string;
 				agentDir?: string;
-				delivery?: import("./types").TaskFileDefinition["delivery"];
+				delivery?: TaskFileDefinition["delivery"];
 				accountId?: string;
 			};
 			if (!data.name || !data.cron || !data.command) {
@@ -130,7 +130,7 @@ export class SchedulerFileStore {
 		if (!this.#dir) return result;
 
 		let fileTasks: Map<string, TaskFileDefinition>;
-		let dbTasks: import("./types").ScheduledTask[];
+		let dbTasks: ScheduledTask[];
 
 		try {
 			fileTasks = this.loadAll();

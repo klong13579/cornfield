@@ -546,7 +546,7 @@ export class CronLifecycle {
 
 	// attach_to_session: implementation moved to ./scheduler/attach-to-session.ts
 	async #mirrorDeliveryToSession(params: {
-		task: import("./scheduler/types").ScheduledTask;
+		task: ScheduledTask;
 		brief: string;
 		delivery: { channel: string; accountId?: string; toUserId?: string; toConversationId?: string };
 	}): Promise<{ ok: boolean; error?: string }> {

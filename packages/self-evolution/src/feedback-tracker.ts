@@ -3,7 +3,7 @@
  */
 import { isInternalUrlPath } from "./internal-url-path";
 import type { DetailedOutcomeStore, EffectivenessStore, SkillEffectivenessStore } from "./storage/types";
-import type { InjectionOutcome, SessionTrace } from "./types";
+import type { InjectionOutcome, SessionTrace, TraceEntry } from "./types";
 
 export interface ParsedFeedback {
 	type: "approval" | "correction" | "new_negative_rule" | "new_preference" | "none";
@@ -229,8 +229,8 @@ export class FeedbackTracker {
 		return { outcomeDeltas, triggerMutation, mutationReason };
 	}
 
-	#pairEditCalls(trace: SessionTrace): Array<{ call: import("./types").TraceEntry; index: number }> {
-		const pairs: Array<{ call: import("./types").TraceEntry; index: number }> = [];
+	#pairEditCalls(trace: SessionTrace): Array<{ call: TraceEntry; index: number }> {
+		const pairs: Array<{ call: TraceEntry; index: number }> = [];
 		for (let i = 0; i < trace.entries.length; i++) {
 			const entry = trace.entries[i];
 			if (

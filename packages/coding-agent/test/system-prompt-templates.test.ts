@@ -8,6 +8,7 @@ import { countTokens } from "@cornfield/natives";
 import { prompt } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
 import Handlebars from "handlebars";
+import type { Skill } from "../src/extensibility/skills";
 
 const baseGitContext = {
 	isRepo: true,
@@ -288,7 +289,7 @@ describe("system Handlebars prompt templates", () => {
 		const rendered = await buildSystemPrompt({
 			cwd: os.tmpdir(),
 			contextFiles: [{ path: "/tmp/project/AGENTS.md", content: agentsMd }],
-			skills: (baseRenderContext.skills ?? []) as unknown as [import("../src/extensibility/skills").Skill],
+			skills: (baseRenderContext.skills ?? []) as unknown as [Skill],
 			rules: (baseRenderContext.rules ?? []) as unknown as
 				| { name: string; description?: string; path: string; globs?: string[] }[]
 				| undefined,
@@ -309,7 +310,7 @@ describe("system Handlebars prompt templates", () => {
 		const rendered = await buildSystemPrompt({
 			cwd: os.tmpdir(),
 			contextFiles: [],
-			skills: (baseRenderContext.skills ?? []) as unknown as [import("../src/extensibility/skills").Skill],
+			skills: (baseRenderContext.skills ?? []) as unknown as [Skill],
 			rules: (baseRenderContext.rules ?? []) as unknown as
 				| { name: string; description?: string; path: string; globs?: string[] }[]
 				| undefined,
