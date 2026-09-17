@@ -1,6 +1,5 @@
 import type {
 	HostToolDefinitionDto,
-	ModelInfoDto,
 	SkillScopeRowDto,
 	SkillsResultDto,
 	ToolSwitchDto,
@@ -20,6 +19,7 @@ import {
 } from "../skills/skill-display";
 import { FileExplorer } from "../workspace/FileExplorer";
 import { KindBadge } from "./AgentsView";
+import { ModelPicker } from "./ModelPicker";
 
 /**
  * Agent 详情（FR-2）—— 7 tab：Skills / 钉钉 / 模型 / 工具 / 画像 / 文件 / Prompts。
@@ -45,8 +45,6 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 	const view = useSession();
 	const store = useSessionStore();
 	const [tab, setTab] = useState<TabId>("skills");
-	const [models, setModels] = useState<ModelInfoDto[]>([]);
-	const [selProvider, setSelProvider] = useState("anthropic");
 	// C3：host tool 注册态（set_host_tools 真命令本地权威态；snapshot 无工具开关数据，wire 面未提供）
 	const [hostTools, setHostToolsState] = useState<HostToolDefinitionDto[]>(() => store.getHostTools());
 	const [newHostName, setNewHostName] = useState("");
@@ -71,15 +69,10 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 		store.setHostTools(next);
 	};
 
-	useEffect(() => {
-		void store.fetchModels().then(result => setModels(result.models));
-	}, [store]);
-
 	const agent = view.agents.find(a => a.id === agentId);
 	const name = agent?.name ?? (view.agents.length === 0 ? "等待 Agent 注册表" : "未知 Agent");
-	const provider = agent?.model?.split("/")[0] ?? (view.model ?? "").split("/")[0] ?? "anthropic";
+	// 当前模型（裸 id，与「模型配置」tab 的 Provider/Model 两个下拉同源：AgentDetailView → ModelPicker）。
 	const currentModel = agent?.model ?? view.model ?? "";
-	const providers = Array.from(new Set(models.map(m => m.provider)));
 
 	return (
 		<div className="px-10 pt-8 pb-12">
@@ -116,7 +109,10 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					</div>
 					<div className="flex items-baseline gap-4">
 						<h1 className="text-[32px] font-semibold leading-snug tracking-[-0.8px] text-ink">{name}</h1>
-						<span className="rounded bg-accent-dim px-2.5 py-1 font-mono text-[12px] text-ink">
+						<span
+							data-testid="agent-model-badge"
+							className="rounded bg-accent-dim px-2.5 py-1 font-mono text-[12px] text-ink"
+						>
 							{currentModel}
 						</span>
 						{agent && <KindBadge kind={agent.kind} />}
@@ -151,37 +147,8 @@ export function AgentDetailView({ agentId, onClose }: { agentId: string; onClose
 					<div>
 						<h4 className="mb-3.5 section-title text-ink-faint">模型选择</h4>
 						<div className="flex max-w-[420px] flex-col gap-2.5">
-							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
-								<span className="w-[90px] shrink-0">Provider</span>
-								<select
-									value={selProvider}
-									onChange={e => setSelProvider(e.target.value)}
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-								>
-									{providers.length > 0 ? (
-										providers.map(p => <option key={p}>{p}</option>)
-									) : (
-										<option>{provider}</option>
-									)}
-								</select>
-							</label>
-							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
-								<span className="w-[90px] shrink-0">Model</span>
-								<select
-									value={currentModel}
-									onChange={e => {
-										if (e.target.value) store.setModel(e.target.value, selProvider, agentId);
-									}}
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-								>
-									{models
-										.filter(m => m.provider === selProvider)
-										.map(m => (
-											<option key={m.id}>{m.id}</option>
-										))}
-									{models.length === 0 && <option>{currentModel || "—"}</option>}
-								</select>
-							</label>
+							{/* Provider / Model 两个下拉（含目录读取态）：真数据路径在 ModelPicker.tsx；key 换 agent 重挂。 */}
+							<ModelPicker key={agentId} agentId={agentId} currentModel={currentModel} />
 							<label className="flex items-center gap-3 text-[13px] text-ink-subtle">
 								<span className="w-[90px] shrink-0">Thinking</span>
 								<select
