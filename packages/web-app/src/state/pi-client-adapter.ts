@@ -557,6 +557,10 @@ export class PiClientAdapter implements PiClient {
 		return this.#req({ type: "attach", sessionId }).then(() => undefined);
 	}
 
+	detach(sessionId: string): Promise<void> {
+		return this.#req({ type: "detach", sessionId }).then(() => undefined);
+	}
+
 	switchSession(sessionId: string): Promise<void> {
 		return this.#req({ type: "switch_session", sessionId }).then(() => undefined);
 	}

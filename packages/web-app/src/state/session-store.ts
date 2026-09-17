@@ -245,6 +245,14 @@ function maybeNotifyTurnEnd(view: SessionView): void {
 export type FocusAgentResult = { ok: true } | { ok: false; error: string };
 
 /**
+ * detach 一个 agent 进程内实例的结果。
+ *
+ * `busy:true` 是客户端侧的忙态拦截（正在执行/流式/压缩/重试的会话不许拆），
+ * 不是 serve 的判决 —— 那种情况根本没发 `detach` 命令；其余 `ok:false` 的 `error` 是 serve 原文。
+ */
+export type DetachAgentResult = { ok: true } | { ok: false; error: string; busy?: boolean };
+
+/**
  * 一次新建会话的结局。
  *
  * 三态必须分开，不许折叠：`not-created` 是**确定没建**（serve 拒了、或目标 Agent 根本没切过去），
@@ -870,6 +878,32 @@ export class SessionStore {
 			return { ok: false, error: errorMessageOf(err) };
 		}
 		return { ok: true };
+	}
+
+	/**
+	 * 释放一个已 attached agent 的进程内实例（detach）。
+	 *
+	 * 忙态拦截在发命令**之前**：`phase` 在 streaming/executing_tool/compacting/retrying 时说明
+	 * 有会话正在这个 agent 上跑，detach 会把它在跑的会话一起拆掉 —— 这类「拆别人正在跑的会话」
+	 * 不允许悄悄发生，所以直接返回 `busy:true` 且**一个字节都不发**。想停一个跑挂的 agent 是
+	 * 另一件事（进程级 stop），不在 detach 语义内（见本票交付说明的缺口）。
+	 *
+	 * 成功后刷新列表（`fetchAgents`）：把 `attached:false` 的现状刷进 `view.agents`，列表与详情
+	 * 同步落到「未挂载」；serve 侧也因 `detached` 事件广播了 server_snapshot，但这里不假手推送，
+	 * 与 `createAgent` 同一条「写状态归 store」的纪律。失败原样回 serve 原文，不另造一句。
+	 */
+	async detachAgent(agentId: string): Promise<DetachAgentResult> {
+		const agent = this.getSnapshot().agents.find(a => a.id === agentId);
+		if (agent?.status === "busy") {
+			return { ok: false, busy: true, error: `agent is busy: ${agentId}` };
+		}
+		try {
+			await this.#client.detach(agentId);
+			await this.fetchAgents();
+			return { ok: true };
+		} catch (err) {
+			return { ok: false, error: serveVerdictOf(err).message };
+		}
 	}
 
 	/** 把焦点读数退回上一个值（只改读数，不动转录与面板：那些属于即将到来的新快照）。 */

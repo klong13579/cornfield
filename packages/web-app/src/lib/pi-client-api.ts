@@ -519,6 +519,8 @@ export interface PiClient {
 	createAgent(input: AgentCreateInput): Promise<AgentCreateDto>;
 	/** lazy attach 一个注册表 agent 到本进程（attach）。 */
 	attach(sessionId: string): Promise<void>;
+	/** 释放一个已 attached agent 的进程内实例（detach；serve 侧拒绝 default / 忙态 / 有连接聚焦时 ok:false）。 */
+	detach(sessionId: string): Promise<void>;
 	/** 切换本连接的活动会话（switch_session；server 随后推新 session_snapshot）。 */
 	switchSession(sessionId: string): Promise<void>;
 	/** 注册 host tool 声明（set_host_tools；双向帧协议见 wire frames）。 */
