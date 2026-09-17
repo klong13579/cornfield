@@ -1,0 +1,37 @@
+a [12,-58 102x35] «跳到主要内容»
+a [14,196 211x35] «首页»
+a [14,234 211x35] «会话工作台»
+a [14,271 211x35] «会话记录»
+a [14,341 211x35] «Agent 总览»
+a [14,410 211x35] «Skills»
+a [14,448 211x35] «Memory»
+a [14,486 211x35] «Todo»
+a [14,523 211x35] «模型»
+a [14,561 211x35] «语音»
+a [14,631 211x35] «定时任务»
+a [14,668 211x35] «用量»
+a [14,706 211x35] «设置»
+button button [0,0 0x0] «打开主导航»
+button button [313,207 48x27] «全部»
+button button [363,207 84x27] «默认工作区»
+button button [461,207 72x27] «全部状态»
+button button [534,207 60x27] «运行中»
+button button [596,207 60x27] «执行中»
+button button [658,207 48x27] «空闲»
+button button [708,207 60x27] «已停用»
+input [1105,211 153x21] ph="搜索 Agent…"
+button button [1279,206 91x29] «创建员工»
+button button [327,415 151x31] «会话»
+button button [486,415 153x31] «详情»
+button button [684,415 151x31] «会话»
+button button [843,415 153x31] «详情»
+button button [1042,415 151x31] «会话»
+button button [1200,415 153x31] «详情»
+button button [327,591 151x31] «会话»
+button button [486,591 153x31] «详情»
+button button [684,591 151x31] «会话»
+button button [843,591 153x31] «详情»
+button button [1042,591 151x31] «会话»
+button button [1200,591 153x31] «详情»
+button button [327,768 151x31] «会话»
+button button [486,768 153x31] «详情»
