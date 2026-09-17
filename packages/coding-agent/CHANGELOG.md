@@ -4,6 +4,8 @@
 
 ### Added
 
+- **扩展上下文新增 `configRoot`（配置/记忆的项目根）**（`src/extensibility/extensions/types.ts`, `src/extensibility/extensions/runner.ts`, `src/sdk.ts`, `src/session/agent-session.ts`, `src/modes/controllers/extension-ui-controller.ts`）：`ExtensionContext` 此前只有「会话工作目录 `cwd`」，扩展要判断「这块记忆该跟谁走」只能自己推一条路径 —— 而两者在 default Agent 跑 serve 时并不相同（会话在仓库里干活，配置/记忆的项目根是它自己的家）。现在宿主把 `Settings#getCwd()` 作为 `configRoot` 交给扩展（与 `cwd` 并列、身份规则仍只在 `Settings` 里实现一处）。**消费方向（handler / tool / command 收到一个 context）是纯加法**；唯一要跟着改的是「自己手搓一个 `ExtensionContext` 字面量」的代码（mock / 测试，或用户自己写的这一类）—— 该字段是**必填**，缺了编译期就报（不选可选的原因见票 27：可选 + 回落到 `cwd` 会把刚修好的分叉又静默带回来）。配套（`@cornfield/self-evolution`）：记忆目录的 key 从「会话 cwd」改为「配置/记忆的项目根」，`evolution` 侧（DB / skills / activity.log）仍跟会话 cwd。
+
 - **`cornfield agent init --root <path>`：声明额外读写根**（`src/cli/agent-cli.ts`, `src/skeleton/workspace.ts`, `src/commands/agent.ts`, `test/agent-cli-attached-roots.test.ts`）：`attachedRoots` 此前只有读者（`src/session/session-workspace.ts` 把每个声明的 root 折进会话工作面），全仓没有写侧 ——「一个 agent 读多个根」只能手改 JSON 才可达。现在每个 root 先解析成绝对 realpath 并校验存在、是目录、不是 agentDir 自己，任一不合法就报错且**不改动声明文件**（声明一个不存在的 root 会让这个 agent 每次会话解析都失败，宁可 init 失败）；写入是读-改-写，其它键（含本模块不认识的键）与键序原样保留。`agent validate` 对「声明了但已不存在」的 root 报 error（此前它会说 valid: true）。
 
 - **agentDir 文件单一真相 + `get_agent_prompt_sources` 读命令**（`src/skeleton/agent-dir-files.ts`, `src/server/wire-server.ts`, `test/skeleton-agent-dir-files.test.ts`, `test/wire-server-prompt-sources.integration.test.ts`）：agentDir 里有哪些文件、每一项是 prompt 面还是配置/技能面、缺失算 error 还是 warning，收在 `skeleton/agent-dir-files.ts` 一处；`agent validate` 的三个校验集改从它推导（元素与顺序不变）。新增 wire 读命令按这份清单**逐项报 `exists`**（缺的那项也在清单里），前端不再自备一份会漂移的 prompt 源清单。

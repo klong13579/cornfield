@@ -41,7 +41,9 @@ async function writeFile(filePath: string, content: string): Promise<string> {
 function baseFacts(
 	overrides: Partial<MemoryScopeAnchor> & Pick<MemoryScopeAnchor, "agentDir" | "sessionCwd">,
 ): MemoryScopeAnchor {
-	return { agentId: "hr", attached: true, ...overrides };
+	// `configRoot` 缺省 = `sessionCwd`：registry agent 的常态（会话工作根就是它的配置根）。
+	// default Agent 里两者不同（会话在工作中、配置根是它自己的家）—— 那是单独一条用例。
+	return { agentId: "hr", attached: true, configRoot: overrides.sessionCwd, ...overrides };
 }
 
 afterEach(async () => {
@@ -91,7 +93,7 @@ describe("buildMemoryScopeProjection — Agent / Project / User 分区", () => {
 		expect(projection.agent?.scope).toBe("agent");
 	});
 
-	test("project 区锚在会话 cwd 的 canonical 记忆根，并列出搜过的候选根", async () => {
+	test("project 区锚在配置项目根的 canonical 记忆根，并列出搜过的候选根", async () => {
 		await isolateHome();
 		const root = await tmpDir("scope-memory-project-");
 		const agentDir = path.join(root, "agents", "hr");
@@ -128,6 +130,39 @@ describe("buildMemoryScopeProjection — Agent / Project / User 分区", () => {
 		// 而不是 self-evolution/memory/<encoded> —— 这是解析器自己的规则，投影原样反映。
 		expect(projection.project?.memoryRoot).toBe(path.join(isolatedHome, ".cornfield", "memory"));
 		expect(projection.project?.rootKind).toBe("canonical");
+	});
+
+	test("canonical 根跟**配置项目根**走，不是会话 cwd（default Agent 的形状）", async () => {
+		await isolateHome();
+		const root = await tmpDir("scope-memory-config-root-");
+		const configRoot = path.join(root, ".cornfield", "agents", "default"); // 它的家 = 配置项目根
+		const sessionCwd = path.join(root, "project"); // 会话在别处干活
+		const agentDir = configRoot;
+		const canonical = path.join(
+			isolatedHome,
+			".cornfield",
+			"self-evolution",
+			"memory",
+			encodeProjectPath(configRoot),
+		);
+		await writeFile(path.join(canonical, "MEMORY.md"), "- config-root seed\n");
+
+		const projection = await buildMemoryScopeProjection(baseFacts({ agentDir, sessionCwd, configRoot }));
+
+		expect(projection.project?.memoryRoot).toBe(canonical);
+		expect(projection.project?.memoryMd?.content).toContain("config-root seed");
+		expect(projection.project?.searchedRoots).toContain(canonical);
+		// 拿会话 cwd 算出来的两个候选根都不在搜索路径里（canonical 与 agent 级 legacy 都按 memoryKey）：
+		// 换错参数就会让面板与运行时各报一个根，也会去读已经被换掉的旧 key。
+		expect(projection.project?.searchedRoots).not.toContain(
+			path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(sessionCwd)),
+		);
+		expect(projection.project?.searchedRoots).not.toContain(
+			path.join(agentDir, "memories", encodeProjectPath(sessionCwd)),
+		);
+		expect(projection.agent?.searchedRoots).not.toContain(
+			path.join(agentDir, "memories", encodeProjectPath(sessionCwd)),
+		);
 	});
 });
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **记忆目录的 key 改为「配置/记忆的项目根」，演化数据仍跟会话 cwd**（`src/paths.ts`, `src/memory/index.ts`, `src/index.ts`, `src/commands.ts`, `src/evolution-memory.ts`, `src/unified-skills.ts`）：`resolveEvolutionPathLayout(evolutionKey, globalStore?, memoryKey = evolutionKey)` 把两把 key 拆开 —— `memoryDir` 只由 `memoryKey` 派生（default Agent 在 serve 下 = 它的家；registry agent = 工作根；裸跑 CLI = 进程项目目录，与今天逐字节相同），`evolutionDir` / `skillsDir` / `dbPath` / `activityLogPath` 仍由 `evolutionKey`（会话 cwd）派生。修的是 default Agent 在 serve 下「pipeline 按会话 cwd 写记忆、面板与运行时按配置根读」的分叉。`getMemoryRoot` 的第一个参数（从未被使用）已删除，签名改为 `getMemoryRoot(memoryKey, options?)`。**数据不迁**（用户裁定：未来重构整个记忆系统）—— 旧 key 目录下的记忆不再被读到，也不做兼容读。
+
 ## [1.1.4] - 2026-09-12
 
 ### Fixed

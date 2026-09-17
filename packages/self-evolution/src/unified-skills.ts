@@ -2,7 +2,6 @@
  * Load skills for context injection from the canonical skills directory + SQLite.
  */
 import { type UnifiedSkill, UnifiedSkillRegistry } from "@cornfield/cognitive-coordination";
-import { getDefaultAgentHome } from "@cornfield/utils";
 import { getMemoryRoot } from "./paths";
 import { ensureUnifiedSkillStorage } from "./skill-storage";
 import type { SkillStore } from "./storage/types";
@@ -53,10 +52,12 @@ function mergeByName(existing: UnifiedSkill, incoming: UnifiedSkill): UnifiedSki
 export async function loadUnifiedSkillsForInjection(
 	cwd: string,
 	skillStore: SkillStore,
-	options?: { globalStore?: boolean },
+	options?: { globalStore?: boolean; memoryKey?: string },
 ): Promise<UnifiedSkill[]> {
 	const globalStore = options?.globalStore ?? true;
-	const memoryRoot = getMemoryRoot(getDefaultAgentHome(), cwd);
+	// 这里的 memoryRoot 只是「嵌套在记忆树里的技能」的迁移来源，是**记忆**路径 ⇒ 跟记忆同一个 key
+	//（缺省 = cwd：裸跑 CLI / registry agent 下两者相等，逐字节不变）。
+	const memoryRoot = getMemoryRoot(options?.memoryKey ?? cwd);
 	const skillsDir = await ensureUnifiedSkillStorage(cwd, memoryRoot, globalStore);
 
 	const registry = new UnifiedSkillRegistry();

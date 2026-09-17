@@ -1155,7 +1155,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		internalRouter.register(new ArtifactProtocolHandler({ getArtifactsDir }));
 		internalRouter.register(
 			new MemoryProtocolHandler({
-				getMemoryRoot: () => getMemoryRoot(agentDir, settings.getCwd()),
+				getMemoryRoot: () => getMemoryRoot(settings.getCwd()),
 			}),
 		);
 		// One `local://` root for the whole session: the router resolves reads with
@@ -1410,6 +1410,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd,
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根（与 cwd 分开：default Agent 在 serve 里会话在工作、配置根是它的家）。
+				settings.getCwd(),
 			);
 		}
 		const getSessionContext = () => ({
@@ -1518,7 +1520,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				.map(tool => tool.definition.promptSnippet)
 				.filter((snippet): snippet is string => typeof snippet === "string" && snippet.trim().length > 0);
 			const extensionToolGuidelines = registeredTools.flatMap(tool => tool.definition.promptGuidelines ?? []);
-			const memoryInstructions = await buildMemoryToolDeveloperInstructions(agentDir, settings);
+			const memoryInstructions = await buildMemoryToolDeveloperInstructions(settings);
 
 			// Build combined append prompt: memory instructions + MCP server instructions
 			const serverInstructions = mcpManager?.getServerInstructions();
@@ -1908,7 +1910,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				session,
 				settings,
 				modelRegistry,
-				agentDir,
 				taskDepth,
 			}),
 		);

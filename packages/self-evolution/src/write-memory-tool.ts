@@ -49,6 +49,14 @@ export interface WriteMemoryToolDetails {
 
 export interface WriteMemoryToolDeps {
 	getStore(): SqliteLearningStore;
+	/**
+	 * **会话 cwd**（接线处是 `latestCwd` ← `_ensureInit(ctx.cwd)`）—— 写进去的条目落在演化侧
+	 * （learning store 的 DB 行，按其 key 记）。
+	 *
+	 * 它不是记忆目录的 key：票 27 之后记忆根跟「配置/记忆的项目根」（`settings.getCwd()`），
+	 * 两者在 default Agent 跑 serve 时并不相同（会话在仓库里干活，配置根是它自己的家）。
+	 * 这里刻意保持会话 cwd —— 换它要连演化 DB 一起搬，用户已裁定不迁。
+	 */
 	getCwd(): string;
 	ensureInit(cwd: string): void;
 }

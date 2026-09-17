@@ -80,7 +80,6 @@ try {
 		session,
 		settings,
 		modelRegistry: registry,
-		agentDir,
 		phase: phase2Only ? "phase2" : "all",
 	});
 } catch (err) {

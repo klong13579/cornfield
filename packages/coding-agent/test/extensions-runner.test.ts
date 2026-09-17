@@ -64,6 +64,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const shortcuts = runner.getShortcuts();
 
@@ -103,6 +105,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const shortcuts = runner.getShortcuts();
 
@@ -138,6 +142,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const tools = runner.getAllRegisteredTools();
 
@@ -166,6 +172,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const commands = runner.getRegisteredCommands();
 
@@ -191,6 +199,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const cmd = runner.getCommand("my-cmd");
@@ -223,6 +233,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const commands = runner.getRegisteredCommands();
@@ -252,6 +264,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
@@ -284,6 +298,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const renderer = runner.getMessageRenderer("my-type");
@@ -313,6 +329,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const flags = runner.getFlags();
 
@@ -337,6 +355,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			// Setting a flag value should not throw
@@ -366,6 +386,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			// The pre-set false must survive registerFlag's default: true
@@ -401,6 +423,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const payload = await runner.emitBeforeProviderRequest({ chain: ["base"] });
@@ -433,6 +457,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
 			runner.onError(err => {
@@ -487,6 +513,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
 			runner.onError(err => {
@@ -550,6 +578,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const chained = await runner.emitToolResult({
@@ -604,6 +634,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			const chained = await runner.emitToolResult({
@@ -646,6 +678,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 			runner.initialize(
 				{
@@ -720,6 +754,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				// 配置/记忆的项目根：测试里与 cwd 相同（裸跑 CLI / registry agent 的常态）。
+				tempDir.path(),
 			);
 
 			expect(runner.hasHandlers("tool_call")).toBe(true);

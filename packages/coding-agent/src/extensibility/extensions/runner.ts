@@ -190,6 +190,8 @@ export class ExtensionRunner {
 		private readonly cwd: string,
 		private readonly sessionManager: SessionManager,
 		private readonly modelRegistry: ModelRegistry,
+		/** 配置/记忆的项目根（`Settings#getCwd()`）；与 `cwd` 是两件事，见 `ExtensionContext#configRoot`。 */
+		private readonly configRoot: string,
 	) {
 		this.#uiContext = noOpUIContext;
 	}
@@ -423,6 +425,7 @@ export class ExtensionRunner {
 			compact: instructionsOrOptions => this.#compactFn(instructionsOrOptions),
 			hasUI: this.hasUI(),
 			cwd: this.cwd,
+			configRoot: this.configRoot,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			scopedModels: this.#getScopedModelsFn(),

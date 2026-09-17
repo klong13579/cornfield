@@ -2814,6 +2814,7 @@ export class AgentSession {
 			mode: "print",
 			hasUI: false,
 			cwd: this.sessionManager.getCwd(),
+			configRoot: this.settings.getCwd(),
 			sessionManager: this.sessionManager,
 			modelRegistry: this.#modelRegistry,
 			model: this.model ?? undefined,
@@ -5712,7 +5713,7 @@ export class AgentSession {
 	 *
 	 * 走 `setEffective`（落点跟随读侧优先级）：这两个键立刻就会被 `autoCompactionEnabled`
 	 * 从合并视图里读回来，写进读侧不看的那一层就是「写进去、读不到」。default Agent 的家
-	 * （`~/cf-workspace`）自带一个 project 层（`.cornfield/config.yml`），所以这条不再是理论问题。
+	 * （`~/.cornfield/agents/default`）自带一个 project 层（`.cornfield/config.yml`），所以这条不再是理论问题。
 	 */
 	setAutoCompactionEnabled(enabled: boolean): void {
 		this.settings.setEffective("compaction.enabled", enabled);

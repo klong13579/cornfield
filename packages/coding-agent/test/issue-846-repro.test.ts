@@ -149,7 +149,6 @@ describe("issue #846: phase1 stage1 failures must be logged", () => {
 			session: session as unknown as Parameters<typeof startMemoryStartupTask>[0]["session"],
 			settings,
 			modelRegistry: modelRegistry as unknown as Parameters<typeof startMemoryStartupTask>[0]["modelRegistry"],
-			agentDir,
 			taskDepth: 0,
 		});
 

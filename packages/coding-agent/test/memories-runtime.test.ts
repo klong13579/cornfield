@@ -145,7 +145,6 @@ describe("memories runtime", () => {
 			session: disabled.session,
 			settings: disabled.settings,
 			modelRegistry: disabled.modelRegistry,
-			agentDir: disabled.agentDir,
 			taskDepth: 0,
 		});
 		expect(openSpy).not.toHaveBeenCalled();
@@ -155,7 +154,6 @@ describe("memories runtime", () => {
 			session: subagent.session,
 			settings: subagent.settings,
 			modelRegistry: subagent.modelRegistry,
-			agentDir: subagent.agentDir,
 			taskDepth: 1,
 		});
 		expect(openSpy).not.toHaveBeenCalled();
@@ -172,7 +170,6 @@ describe("memories runtime", () => {
 			session: fx.session,
 			settings: fx.settings,
 			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
 			taskDepth: 0,
 		});
 
@@ -233,11 +230,12 @@ describe("memories runtime", () => {
 			session: fx.session,
 			settings: fx.settings,
 			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
 			taskDepth: 0,
 		});
 
-		const memoryRoot = getMemoryRoot(fx.agentDir, fx.session.sessionManager.getCwd());
+		// 记忆目录的 key = **配置/记忆的项目根**（`settings.getCwd()`）—— 这个 fixture 里它与会话 cwd
+		//（`session.sessionManager.getCwd()`）不同，正是 serve default agent 的形状。
+		const memoryRoot = getMemoryRoot(fx.settings.getCwd());
 		await waitFor(async () => {
 			expect(await fs.readFile(path.join(memoryRoot, "MEMORY.md"), "utf8")).toContain("Consolidated body");
 			expect((await fs.readFile(path.join(memoryRoot, "memory_summary.md"), "utf8")).trim()).toContain(
@@ -251,6 +249,13 @@ describe("memories runtime", () => {
 		expect(fx.session.refreshBaseSystemPrompt).toHaveBeenCalledTimes(1);
 		expect(ai.completeSimple).toHaveBeenCalled();
 		expect(ai.completeSimple).toHaveBeenCalledTimes(2);
+
+		// 反过来：**会话 cwd 那个 key 下什么都没写**（那就是被换掉的旧 key）——
+		// 数据不迁、也不做兼容读，所以旧 key 下的记忆不会被 pipeline 重建、也不会被回填。
+		expect(fx.settings.getCwd()).not.toBe(fx.session.sessionManager.getCwd());
+		await expect(
+			Bun.file(path.join(getMemoryRoot(fx.session.sessionManager.getCwd()), "MEMORY.md")).exists(),
+		).resolves.toBe(false);
 	});
 
 	test("phase2 sync prunes stale summaries and preserves raw memory ordering", async () => {
@@ -302,7 +307,9 @@ describe("memories runtime", () => {
 		});
 		memoryStorage.closeMemoryDb(db);
 
-		const memoryRoot = getMemoryRoot(fx.agentDir, fx.session.sessionManager.getCwd());
+		// 记忆目录的 key = **配置/记忆的项目根**（`settings.getCwd()`）—— 这个 fixture 里它与会话 cwd
+		//（`session.sessionManager.getCwd()`）不同，正是 serve default agent 的形状。
+		const memoryRoot = getMemoryRoot(fx.settings.getCwd());
 		await fs.mkdir(path.join(memoryRoot, "rollout_summaries"), { recursive: true });
 		await fs.writeFile(path.join(memoryRoot, "rollout_summaries", "old.md"), "stale");
 
@@ -310,7 +317,6 @@ describe("memories runtime", () => {
 			session: fx.session,
 			settings: fx.settings,
 			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
 			taskDepth: 0,
 		});
 
@@ -325,7 +331,9 @@ describe("memories runtime", () => {
 
 	test("phase2 empty-input cleanup removes consolidated files and skills dir", async () => {
 		const fx = await createFixture();
-		const memoryRoot = getMemoryRoot(fx.agentDir, fx.session.sessionManager.getCwd());
+		// 记忆目录的 key = **配置/记忆的项目根**（`settings.getCwd()`）—— 这个 fixture 里它与会话 cwd
+		//（`session.sessionManager.getCwd()`）不同，正是 serve default agent 的形状。
+		const memoryRoot = getMemoryRoot(fx.settings.getCwd());
 		await fs.mkdir(path.join(memoryRoot, "skills", "legacy"), { recursive: true });
 		await fs.writeFile(path.join(memoryRoot, "MEMORY.md"), "legacy memory");
 		await fs.writeFile(path.join(memoryRoot, "memory_summary.md"), "legacy summary");
@@ -341,7 +349,6 @@ describe("memories runtime", () => {
 			session: fx.session,
 			settings: fx.settings,
 			modelRegistry: fx.modelRegistry,
-			agentDir: fx.agentDir,
 			taskDepth: 0,
 		});
 
@@ -382,12 +389,12 @@ describe("buildMemoryToolDeveloperInstructions", () => {
 		const projectDir = await makeTempDir("memories-runtime-project-empty");
 		const settings = Settings.isolated({ "memories.enabled": true }, { cwd: projectDir, agentDir });
 
-		expect(await buildMemoryToolDeveloperInstructions(agentDir, settings)).toBeUndefined();
+		expect(await buildMemoryToolDeveloperInstructions(settings)).toBeUndefined();
 
-		const memoryRoot = getMemoryRoot(agentDir, settings.getCwd());
+		const memoryRoot = getMemoryRoot(settings.getCwd());
 		await fs.mkdir(memoryRoot, { recursive: true });
 		await fs.writeFile(path.join(memoryRoot, "memory_summary.md"), "   \n\t\n");
-		expect(await buildMemoryToolDeveloperInstructions(agentDir, settings)).toBeUndefined();
+		expect(await buildMemoryToolDeveloperInstructions(settings)).toBeUndefined();
 	});
 
 	test("renders payload with truncation for non-empty summary", async () => {
@@ -400,14 +407,14 @@ describe("buildMemoryToolDeveloperInstructions", () => {
 			},
 			{ cwd: projectDir, agentDir },
 		);
-		const memoryRoot = getMemoryRoot(agentDir, settings.getCwd());
+		const memoryRoot = getMemoryRoot(settings.getCwd());
 		await fs.mkdir(memoryRoot, { recursive: true });
 		await fs.writeFile(
 			path.join(memoryRoot, "memory_summary.md"),
 			`${"A".repeat(120)}\n${"B".repeat(120)}\n${"C".repeat(120)}`,
 		);
 
-		const payload = await buildMemoryToolDeveloperInstructions(agentDir, settings);
+		const payload = await buildMemoryToolDeveloperInstructions(settings);
 		expect(payload).toBeDefined();
 		expect(payload).toContain("memory://root/memory_summary.md");
 		expect(payload).not.toContain(memoryRoot);

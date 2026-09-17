@@ -52,9 +52,9 @@ describe("evolution paths", () => {
 	it("getMemoryRoot defaults to global user memory dir", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-mem-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
-		const agentDir = path.join(tempDir, "agent");
 
-		expect(getMemoryRoot(agentDir, cwd)).toBe(
+		// 票 27：记忆根只由 memory key（配置/记忆的项目根）派生，签名里不再有 agentDir。
+		expect(getMemoryRoot(cwd)).toBe(
 			path.join(resolveGlobalEvolutionDir(), "memory", encodeProjectPathForGlobalMemory(cwd)),
 		);
 	});
@@ -62,11 +62,33 @@ describe("evolution paths", () => {
 	it("getMemoryRoot uses project memory when globalStore is false", () => {
 		tempDir = path.join(os.tmpdir(), `evolution-paths-mem-proj-${Date.now()}`);
 		const cwd = path.join(tempDir, "repo");
-		const agentDir = path.join(tempDir, "agent");
 
-		expect(getMemoryRoot(agentDir, cwd, { globalStore: false })).toBe(
-			path.join(resolveProjectEvolutionDir(cwd), "memory"),
-		);
+		expect(getMemoryRoot(cwd, { globalStore: false })).toBe(path.join(resolveProjectEvolutionDir(cwd), "memory"));
+	});
+
+	it("memoryKey 缺省 = evolutionKey：两把 key 相等时五条路径逐字节不变（裸跑 CLI / registry agent 的形状）", () => {
+		tempDir = path.join(os.tmpdir(), `evolution-paths-keys-${Date.now()}`);
+		const cwd = path.join(tempDir, "repo");
+
+		expect(resolveEvolutionPathLayout(cwd, true, cwd)).toEqual(resolveEvolutionPathLayout(cwd, true));
+		expect(resolveEvolutionPathLayout(cwd, false, cwd)).toEqual(resolveEvolutionPathLayout(cwd, false));
+	});
+
+	it("memoryKey 与 evolutionKey 分开时：只有 memoryDir 跟 memoryKey 走（票 27 的 serve default 形状）", () => {
+		tempDir = path.join(os.tmpdir(), `evolution-paths-split-${Date.now()}`);
+		const evolutionKey = path.join(tempDir, "repo");
+		const memoryKey = path.join(tempDir, ".cornfield", "agents", "default");
+
+		const split = resolveEvolutionPathLayout(evolutionKey, true, memoryKey);
+		const byEvolutionKey = resolveEvolutionPathLayout(evolutionKey, true);
+
+		expect(split.memoryDir).toBe(getMemoryRoot(memoryKey));
+		expect(split.memoryDir).not.toBe(byEvolutionKey.memoryDir);
+		// 另外四项与 memoryKey 无关（DB / skills / activity.log / 全局根都不跟记忆搬家）。
+		expect(split.evolutionDir).toBe(byEvolutionKey.evolutionDir);
+		expect(split.skillsDir).toBe(byEvolutionKey.skillsDir);
+		expect(split.dbPath).toBe(byEvolutionKey.dbPath);
+		expect(split.activityLogPath).toBe(byEvolutionKey.activityLogPath);
 	});
 
 	it("resolveUserEvolutionDir is under agent dir not project", () => {

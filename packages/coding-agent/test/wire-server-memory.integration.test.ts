@@ -1,8 +1,11 @@
 /**
  * W3 D3 e2e — serve `get_memory` 只读记忆投影（真实 serve 子进程 + bun WS 客户端）。
  *
- * 预置：$HOME/.omp/user.md（user 区）+ $HOME/agent/memories/<encoded-cwd>/ 下 MEMORY.md
- * / memory_summary.md（project 区）；memory 区为空的 self-evolution 库（断言形状 + 空态）。
+ * 预置：$HOME/.cornfield/user.md（user 区）+ <配置项目根>/.cornfield/memory/ 下的
+ * MEMORY.md / memory_summary.md（project 区）；memory 区为空的 self-evolution 库（断言形状 + 空态）。
+ *
+ * 票 24 A′：default Agent 的**配置/记忆项目根**是它的家（`~/.cornfield/agents/default`），不是 serve 的 cwd ——
+ * 记忆面板的 canonical 根与运行时 `getMemoryRoot(settings.getCwd())` 同一个根。
  *
  * 验证：
  *   1. 三分区结构齐全（user/project/memoryStore）
@@ -22,17 +25,14 @@ import { waitForServe } from "./wait-for-serve";
 
 type Frame = { type: string; [k: string]: unknown };
 
-/** 与 self-evolution paths.encodeProjectPathForGlobalMemory 同规则。 */
-function encodeProjectPath(cwd: string): string {
-	return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-}
-
 let isolatedHome: string;
 let savedHome: string | undefined;
 let proc: ReturnType<typeof Bun.spawn> | undefined;
 let url = "";
 let serveCwd = "";
 let repoRoot: string;
+/** default Agent 的配置/记忆项目根（它的家）—— 票 24 A′ 的 canonical 根按它算。 */
+let configRoot = "";
 
 async function connect(wsUrl: string): Promise<WebSocket> {
 	const ws = new WebSocket(wsUrl);
@@ -107,11 +107,10 @@ describe("W3 D3 — serve get_memory 只读记忆投影", () => {
 			expect(result.user?.path.endsWith("user.md")).toBe(true);
 			expect(result.user?.content).toContain("测试用户画像");
 
-			// project 区：canonical evolution 目录（self-evolution/memory）优先；
-			// 有效 cwd 经 resolveServeProjectRoot 归一到 repo 根。memoryRoot 应指向 seed 的 canonical 目录。
-			expect(result.project?.memoryRoot).toBe(
-				path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot)),
-			);
+			// project 区：记忆的项目根 = default Agent 的**配置项目根**（它的家），不是会话干活的 repo。
+			// 家落在 `~/.cornfield` 里 ⇒ 解析器当它系统路径（`isSystemPath`），canonical 根是
+			// `<配置项目根>/.cornfield/memory`，不是 `self-evolution/memory/<encoded>`。
+			expect(result.project?.memoryRoot).toBe(path.join(configRoot, ".cornfield", "memory"));
 			expect(result.project?.memoryMd?.content).toContain("项目记忆 seed");
 			expect(result.project?.summaryMd?.content).toContain("summary seed");
 			expect(result.project?.rawMd).toBeNull();
@@ -154,8 +153,10 @@ beforeAll(async () => {
 	repoRoot = repoRootLocal;
 	serveCwd = `${repoRootLocal}/packages/coding-agent`;
 
-	// project 区 seed：canonical evolution 目录 $HOME/self-evolution/memory/<encoded repoRoot>/{MEMORY.md, memory_summary.md}
-	const memoryRoot = path.join(isolatedHome, ".cornfield", "self-evolution", "memory", encodeProjectPath(repoRoot));
+	// project 区 seed：配置项目根 = default Agent 的家（`getDefaultAgentHome()`），与会话干活的 repo 不是同一个目录。
+	// 家在 `~/.cornfield` 里面 ⇒ `isSystemPath(配置项目根)` 为真 ⇒ canonical 记忆根 = `<配置项目根>/.cornfield/memory`。
+	configRoot = path.join(isolatedHome, ".cornfield", "agents", "default");
+	const memoryRoot = path.join(configRoot, ".cornfield", "memory");
 	await fs.mkdir(memoryRoot, { recursive: true });
 	await Bun.write(path.join(memoryRoot, "MEMORY.md"), "# Memory Report\n\n## project\n\n- 项目记忆 seed\n");
 	await Bun.write(path.join(memoryRoot, "memory_summary.md"), "# Memory Summary\n\n- summary seed\n");

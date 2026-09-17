@@ -295,6 +295,8 @@ describe("AgentSession handoff", () => {
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			// 配置/记忆的项目根：测试里与 cwd 相同。
+			tempDir.path(),
 		);
 		const emitBeforeAgentStart = vi.spyOn(extensionRunner, "emitBeforeAgentStart").mockResolvedValueOnce({
 			systemPrompt: "Hook override",

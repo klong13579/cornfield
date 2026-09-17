@@ -7,7 +7,11 @@
  *   user     `~/.cornfield/user.md`（身份画像，跨 Project）
  *   agent    Agent 自己的记忆 home：WP1 `WorkspaceContext.memoryDir`（`<agentDir>/<声明>`）
  *            + 旧版列布局 `<agentDir>/memories/<encoded-cwd>`（resolveGlobalMemoryRootCandidates）
- *   project  本会话所在 Project 的记忆投影（`getMemoryRoot` 的 canonical 目录 + 旧版回落）
+ *   project  本会话所在 Project 的记忆投影（`getMemoryRoot` 的 canonical 目录 + 旧版回落）。
+ *            canonical 根用**配置/记忆的项目根**（`anchor.configRoot` = 目标会话活着的
+ *            `Settings#getCwd()`），与运行时（`sdk.ts` 的 `getMemoryRoot(agentDir, settings.getCwd())`）
+ *            同一个根；用 `sessionCwd` 会让 default 的记忆面板与运行时各报一个根（会话在工作中，
+ *            配置根却是它自己的家）。旧版安全回落仍按 `sessionCwd` 算（运行时那边也是 `ctx.cwd`）。
  *   session  本会话的 stage-1 记忆（evolution.db 的 threads ⨝ stage1_outputs，按会话文件）
  *   memoryStore ~/.cornfield/self-evolution 的 vector_embeddings 分区（全局库，跨 Project）
  *
@@ -45,6 +49,11 @@ export interface MemoryScopeAnchor {
 	agentDir: string;
 	/** 会话 cwd（未 attach 的 registry agent = agentDir，就是它会话的根）。 */
 	sessionCwd: string;
+	/**
+	 * 配置/记忆的项目根（目标会话活着的 `Settings#getCwd()`；未 attach = agentDir）。
+	 * canonical 记忆根按它算 —— 与 config 的 project 层、与运行时 `getMemoryRoot` 同一个根。
+	 */
+	configRoot: string;
 	/** 会话所属 Project 的 root（未归属 = undefined）。 */
 	projectRoot?: string;
 	/** WP1 `WorkspaceContext.memoryDir`（agentDir 声明的记忆目录，绝对路径）。 */
@@ -179,7 +188,7 @@ export async function buildMemoryScopeProjection(anchor: MemoryScopeAnchor): Pro
 	const agentCandidates: MemoryZoneCandidate[] = [];
 	if (anchor.declaredMemoryDir) agentCandidates.push({ path: anchor.declaredMemoryDir, kind: "declared" });
 	try {
-		for (const legacy of resolveGlobalMemoryRootCandidates(anchor.agentDir, anchor.sessionCwd)) {
+		for (const legacy of resolveGlobalMemoryRootCandidates(anchor.agentDir, anchor.configRoot)) {
 			agentCandidates.push({ path: legacy, kind: "legacy" });
 		}
 	} catch (err) {
@@ -192,10 +201,10 @@ export async function buildMemoryScopeProjection(anchor: MemoryScopeAnchor): Pro
 	// 系统路径下 `getMemoryRoot` 会把根指向 project-store 目录（`<cwd>/.cornfield/memory`）而不是
 	// canonical 全局库路径 —— 这是解析器自己的规则，这里原样反映，不另外发明一条「不适用」。
 	const projectCandidates: MemoryZoneCandidate[] = [];
-	const canonicalProjectRoot = getMemoryRoot(anchor.agentDir, anchor.sessionCwd);
+	const canonicalProjectRoot = getMemoryRoot(anchor.configRoot);
 	if (canonicalProjectRoot) projectCandidates.push({ path: canonicalProjectRoot, kind: "canonical" });
 	try {
-		for (const legacy of resolveGlobalMemoryRootCandidates(anchor.agentDir, anchor.sessionCwd)) {
+		for (const legacy of resolveGlobalMemoryRootCandidates(anchor.agentDir, anchor.configRoot)) {
 			projectCandidates.push({ path: legacy, kind: "legacy" });
 		}
 	} catch {
