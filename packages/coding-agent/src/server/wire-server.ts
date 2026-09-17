@@ -169,6 +169,14 @@ const PROGRESS_EVENT_TYPES = new Set([
 ]);
 
 /**
+ * server_snapshot 的挂载门闸上限。
+ *
+ * 预挂载在后台跑（不阻塞 serve 就绪），门闸等它结算；超时则按当时的真实状态发，
+ * 不把「还没挂上」说成「已挂上」。上限存在的意义是不让一个挂不上的 agent 永久扣住列表。
+ */
+const PRELOAD_SNAPSHOT_MAX_WAIT_MS = 10_000;
+
+/**
  * 工具开关语义注册表（get_tool_switches 数据源）。
  *
  * 与 tools/index.ts `createTools` 的 isToolAllowed 中 settings 门控路径同源；
@@ -198,7 +206,7 @@ const TOOL_SWITCH_DEFS: Array<{ tool: string; label: string; path: SettingPath }
 ];
 
 /**
- * `omp serve` 的 WS 传输层（P3 多 Agent 版）。
+ * `cornfield serve` 的 WS 传输层（P3 多 Agent 版）。
  *
  * 职责（且仅此）：
  * - 升级 /ws 连接前校验 query token；hello → hello_ack
@@ -276,6 +284,32 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 		store: defaultSession.store,
 	});
 
+	// ── 预挂载 + 快照门闸 ──
+	// 预挂载注册表里的 agent，不 await：serve 就绪不等它们（桌面端「打开即连接」的关键）。
+	// 但 server_snapshot 必须等它结算：不等的话首帧会把「已注册但还没挂上」的 agent 报成
+	// attached:false，随即被 attached 事件广播纠正——那正是 c481a2a214 要修的「未挂载」闪现。
+	// 单个 agent 挂载失败仅告警，不拖住其余 agent，也不永久扣住门闸。
+	const preloadSettled =
+		options.loadAgents === false
+			? Promise.resolve()
+			: Promise.allSettled(
+					registry
+						.listMetas()
+						.filter(meta => meta.id !== "default")
+						.map(async meta => {
+							try {
+								await registry.attach(meta.id);
+							} catch (err) {
+								logger.warn("serve:preload attach failed", { agentId: meta.id, error: String(err) });
+							}
+						}),
+				);
+	let snapshotGateOpen = false;
+	let snapshotPending = false;
+	const snapshotGate = Promise.race([preloadSettled, Bun.sleep(PRELOAD_SNAPSHOT_MAX_WAIT_MS)]).then(() => {
+		snapshotGateOpen = true;
+	});
+
 	const targets = new Set<WireCoreTarget>();
 	const addTarget = (t: WireCoreTarget): (() => void) => {
 		targets.add(t);
@@ -317,13 +351,27 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 		return ids;
 	};
 	const broadcastServerSnapshot = (): void => {
-		const event: WireServerEvent = {
-			type: "server_snapshot",
-			sessions: registry.buildSessionList(activeAgentIds()),
+		const send = (): void => {
+			const event: WireServerEvent = {
+				type: "server_snapshot",
+				sessions: registry.buildSessionList(activeAgentIds()),
+			};
+			for (const target of targets) {
+				target.send({ type: "push", event });
+			}
 		};
-		for (const target of targets) {
-			target.send({ type: "push", event });
+		if (snapshotGateOpen) {
+			send();
+			return;
 		}
+		// 门闸未开：只排一次。预挂载期间每个 attached 事件都会调到这里，逐个排队只会把
+		// 同一份尚未结算的状态重复发 N 遍；结算后发的那份是那一刻的最新状态。
+		if (snapshotPending) return;
+		snapshotPending = true;
+		void snapshotGate.then(() => {
+			snapshotPending = false;
+			send();
+		});
 	};
 	const sendSessionSnapshotTo = (target: WireCoreTarget): void => {
 		const focused = focusedAttachment(registry, target.getActiveAgentId());
@@ -1033,7 +1081,7 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					return;
 				}
 				case "get_stats": {
-					// W3 D1：与 `omp stats --json` 同源——先增量同步会话文件再读聚合。
+					// W3 D1：与 `cornfield stats --json` 同源——先增量同步会话文件再读聚合。
 					// 只读转发 stats.db（本地聚合缓存），不触碰任何 attached session。
 					// W3 D2：可选 period 对聚合做时间窗口；响应附带 models.json 单价目录。
 					// 性能：聚合查询扫全量 messages 表 ~700ms-1s——TTL 10s 内同 period 复用响应
@@ -2493,7 +2541,9 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 				// 用的是同一个值。不报的话前端只能自己猜 7892 —— 隔离环境里那会连到真实 gateway。
 				gatewayWirePort: GATEWAY_WIRE_PORT,
 			});
-			// 列表 + 当前焦点快照（P1 兼容：客户端仍能只靠 session_snapshot 重建）
+			// 列表 + 当前焦点快照（P1 兼容：客户端仍能只靠 session_snapshot 重建）。
+			// 快照要等预挂载结算这一步在 core.broadcastServerSnapshot 内部完成，
+			// 因此这里与 attach 事件广播走的是同一条路、同一个门闸。
 			core.broadcastServerSnapshot();
 			core.sendSessionSnapshotTo(target);
 			return;
@@ -2637,22 +2687,6 @@ export async function startWireServer(options: WireServerOptions): Promise<void>
 		sessionId: defaultSession.session.sessionId,
 		agents: registry.listMetas().map(meta => meta.id),
 	});
-
-	// 启动即预挂载所有注册 agent（与 gateway bridge 常驻语义对齐）——挪到 listening 之后后台执行：
-	// 不阻塞 serve 就绪（桌面客户端「打开即连接」的关键）；列表仍立即完整（metas 只读加载），
-	// 每个 attach 完成后经 registry attached 事件自动广播 server_snapshot；实例化失败仅告警。
-	void Promise.allSettled(
-		registry
-			.listMetas()
-			.filter(meta => meta.id !== "default")
-			.map(async meta => {
-				try {
-					await registry.attach(meta.id);
-				} catch (err) {
-					logger.warn("serve:preload attach failed", { agentId: meta.id, error: String(err) });
-				}
-			}),
-	);
 
 	const stop = async (): Promise<void> => {
 		connections.clear();

@@ -31,6 +31,16 @@ import { ImageInputTooLargeError, loadImageInput, MAX_IMAGE_INPUT_BYTES } from "
 import { convertFileWithMarkit } from "../utils/markit";
 import { type ArchiveReader, openArchive, parseArchivePathCandidates } from "./archive-reader";
 import {
+	type ConflictScope,
+	formatConflictSummary,
+	formatConflictWarning,
+	getConflictHistory,
+	parseConflictUri,
+	renderConflictRegion,
+	scanConflictLines,
+	scanFileForConflicts,
+} from "./conflict-detect";
+import {
 	executeReadUrl,
 	isReadableUrlPath,
 	loadReadUrlCacheEntry,
@@ -46,7 +56,16 @@ import {
 	type OutputMeta,
 	persistToolOutputArtifact,
 } from "./output-meta";
-import { expandPath, formatPathRelativeToCwd, type LineRange, parseLineRanges, resolveReadPath } from "./path-utils";
+import { expandPath, formatPathRelativeToCwd, type LineRange, resolveReadPath } from "./path-utils";
+import { parsePdfPageReadPath, renderPdfPageToFile } from "./read-pdf";
+import {
+	formatRangeLabel,
+	isMultiRange,
+	type ParsedSelector,
+	parseSel,
+	resolveTailSelector,
+	selToOffsetLimit,
+} from "./read-selector";
 import { type ReadSummarySettings, summarizeFileContent } from "./read-summary";
 import { formatAge, formatBytes, shortenPath, wrapBrackets } from "./render-utils";
 import {
@@ -96,6 +115,27 @@ function formatTextWithMode(
 }
 
 const READ_CHUNK_SIZE = 8 * 1024;
+
+/**
+ * Separates blocks of a multi-range read. A bare ellipsis on its own line is
+ * never file content under either display mode (numbered lines carry `N|`, raw
+ * lines are verbatim but a multi-range read implies the caller wants the
+ * addresses), so it cannot be mistaken for a line that was read.
+ */
+const RANGE_ELISION = "…";
+
+/**
+ * Collects one absolute line window and reports the source's total line count.
+ * The two sources read cannot share a slice implementation — a file streams
+ * under a byte budget, an in-memory body slices a `\n` split — so the multi-
+ * range renderer takes this instead and both sources stay one implementation
+ * of their own kind.
+ */
+type RangeLineSource = (
+	startLine: number,
+	maxLines: number,
+	maxBytes: number,
+) => Promise<{ lines: string[]; totalLines: number }>;
 
 // Cap on reading a whole file into memory for structured summarization (see #readFileText).
 const MAX_SUMMARIZE_BYTES = 8 * 1024 * 1024;
@@ -279,6 +319,39 @@ async function streamLinesFromFile(
 	};
 }
 
+/**
+ * Count the lines {@link streamLinesFromFile} reports for `filePath`: one per
+ * `\n` plus a trailing segment, so a file ending in a newline has one more line
+ * than it has newlines and an empty file counts as one empty line.
+ *
+ * A `-N` tail selector needs the total before it can pick a start line, and
+ * `streamLinesFromFile` only reports it after a full scan. Counting here is a
+ * second scan of the same bytes, deliberately: the alternative is a ring buffer
+ * that reimplements line collection, the byte budget, and the truncation
+ * notices, and then has to agree with them forever.
+ */
+async function countFileLines(filePath: string, signal?: AbortSignal): Promise<number> {
+	const bufferChunk = Buffer.allocUnsafe(READ_CHUNK_SIZE);
+	let lines = 1;
+	let fileHandle: fs.FileHandle | null = null;
+	try {
+		fileHandle = await fs.open(filePath, "r");
+		while (true) {
+			throwIfAborted(signal);
+			const { bytesRead } = await fileHandle.read(bufferChunk, 0, bufferChunk.length, null);
+			if (bytesRead === 0) break;
+			for (let i = 0; i < bytesRead; i++) {
+				if (bufferChunk[i] === 0x0a) lines++;
+			}
+		}
+	} finally {
+		if (fileHandle) {
+			await fileHandle.close();
+		}
+	}
+	return lines;
+}
+
 // Maximum image file size (20MB) - larger images will be rejected to prevent OOM during serialization
 const MAX_IMAGE_SIZE = MAX_IMAGE_INPUT_BYTES;
 const GLOB_TIMEOUT_MS = 5000;
@@ -344,6 +417,30 @@ function decodeUtf8Text(bytes: Uint8Array): string | null {
 	}
 }
 
+const CONFLICTS_PATH_SUFFIX = ":conflicts";
+
+/**
+ * Strip the `:conflicts` sub-target from a read path, or return `null` when
+ * the path does not carry it.
+ *
+ * It belongs to the same colon-suffixed family as `archive.zip:entry` and
+ * `db.sqlite:table`, with one difference: it applies to any file, so it is
+ * also the one whose suffix could be a real file name. A path that exists
+ * on disk wins — the selector reading is the fallback, never an override.
+ */
+async function splitConflictPathSuffix(readPath: string, cwd: string): Promise<string | null> {
+	if (!readPath.toLowerCase().endsWith(CONFLICTS_PATH_SUFFIX)) return null;
+	const base = readPath.slice(0, -CONFLICTS_PATH_SUFFIX.length);
+	if (base.length === 0) return null;
+	try {
+		await Bun.file(resolveReadPath(readPath, cwd)).stat();
+		return null;
+	} catch (error) {
+		if (!isNotFoundError(error)) throw error;
+		return base;
+	}
+}
+
 function prependSuffixResolutionNotice(text: string, suffixResolution?: { from: string; to: string }): string {
 	if (!suffixResolution) return text;
 
@@ -353,7 +450,12 @@ function prependSuffixResolutionNotice(text: string, suffixResolution?: { from: 
 
 const readSchema = Type.Object({
 	path: Type.String({ description: "path or url", examples: ["src/foo.ts", "https://example.com"] }),
-	sel: Type.Optional(Type.String({ description: "line range or mode", examples: ["50", "50-200", "50+150", "raw"] })),
+	sel: Type.Optional(
+		Type.String({
+			description: "line range, last-N tail, comma-separated ranges, or a mode",
+			examples: ["50", "50-200", "50+150", "-60", "1-2,40-45", "raw"],
+		}),
+	),
 	timeout: Type.Optional(Type.Number({ description: "timeout in seconds", default: 20 })),
 });
 
@@ -373,41 +475,15 @@ export interface ReadToolDetails {
 	meta?: OutputMeta;
 	/** Raw text + start line for user-visible TUI rendering, set when content is text-like.
 	 * Mirrors the same lines the model receives but without hashline/line-number prefixes,
-	 * so the TUI can render the file content with its own gutter without re-parsing the formatted text. */
+	 * so the TUI can render the file content with its own gutter without re-parsing the formatted text.
+	 * For a multi-range read the text holds every window joined by `…` and `startLine`
+	 * names the first window only — the windows are not contiguous by construction. */
 	displayContent?: { text: string; startLine: number };
+	/** Number of unresolved git conflicts surfaced by this read (drives the footer and the TUI badge). */
+	conflictCount?: number;
 }
 
 type ReadParams = ReadToolInput;
-
-/** Parsed representation of the `sel` parameter. */
-type ParsedSelector = { kind: "none" } | { kind: "raw" } | { kind: "lines"; ranges: [LineRange, ...LineRange[]] };
-
-/**
- * Parse `sel`. A selector that is not recognized is an error, never "none":
- * reading the whole resource after the caller asked for a slice silently widens
- * the request. Bare `N` is open-ended from N, which is what read.md documents.
- */
-function parseSel(sel: string | undefined): ParsedSelector {
-	if (!sel || sel.length === 0) return { kind: "none" };
-	if (sel === "raw") return { kind: "raw" };
-	const ranges = parseLineRanges(sel);
-	if (ranges) return { kind: "lines", ranges };
-	throw new ToolError(`Unsupported selector "${sel}". Use N, N-M, N+K (K lines from N), N- (from N onward), or raw.`);
-}
-
-/** Convert a line-range selector to the offset/limit pair used by internal pagination. */
-function selToOffsetLimit(parsed: ParsedSelector): { offset?: number; limit?: number } {
-	if (parsed.kind !== "lines") return {};
-	const [range, ...extra] = parsed.ranges;
-	if (extra.length > 0) {
-		const shown = parsed.ranges.map(r =>
-			r.endLine === undefined ? `${r.startLine}-` : `${r.startLine}-${r.endLine}`,
-		);
-		throw new ToolError(`Multi-range selectors are not supported: ${shown.join(", ")}. Read one range per call.`);
-	}
-	const limit = range.endLine !== undefined ? range.endLine - range.startLine + 1 : undefined;
-	return { offset: range.startLine, limit };
-}
 
 interface ResolvedArchiveReadPath {
 	absolutePath: string;
@@ -569,6 +645,58 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			unfoldLimit: num("read.summarize.unfoldLimit"),
 			unfoldUntil: num("read.summarize.unfoldUntil"),
 		};
+	}
+
+	/**
+	 * Resolve a plain filesystem read target: the absolute path, its byte size and
+	 * whether it is a directory. A missing path gets one chance at unique suffix
+	 * resolution before it becomes the tool's not-found error, so every reader
+	 * that targets a plain path resolves (and fails) the same way.
+	 */
+	async #resolvePlainFileTarget(
+		localReadPath: string,
+		signal?: AbortSignal,
+	): Promise<{
+		absolutePath: string;
+		fileSize: number;
+		isDirectory: boolean;
+		suffixResolution?: { from: string; to: string };
+	}> {
+		let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
+		let suffixResolution: { from: string; to: string } | undefined;
+		let isDirectory = false;
+		let fileSize = 0;
+		try {
+			const stat = await Bun.file(absolutePath).stat();
+			fileSize = stat.size;
+			isDirectory = stat.isDirectory();
+		} catch (error) {
+			if (!isNotFoundError(error)) throw error;
+
+			// Attempt unique suffix resolution before falling back to fuzzy suggestions
+			if (!isRemoteMountPath(absolutePath)) {
+				const suffixMatch = await findUniqueSuffixMatch(localReadPath, this.session.cwd, signal);
+				if (suffixMatch) {
+					try {
+						const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
+						absolutePath = suffixMatch.absolutePath;
+						fileSize = retryStat.size;
+						isDirectory = retryStat.isDirectory();
+						suffixResolution = { from: localReadPath, to: suffixMatch.displayPath };
+					} catch {
+						// Suffix match candidate no longer stats — fall through to error path
+					}
+				}
+			}
+
+			if (!suffixResolution) {
+				throw new ToolError(
+					`Path '${localReadPath}' not found. Use \`glob\` or \`grep\` to discover the correct path.`,
+				);
+			}
+		}
+
+		return { absolutePath, fileSize, isDirectory, suffixResolution };
 	}
 
 	async #readFileText(absolutePath: string, signal?: AbortSignal): Promise<string | null> {
@@ -785,6 +913,193 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		return resultBuilder.done();
 	}
 
+	/**
+	 * Render a selector against in-memory text: pin a `-N` tail to the text's own
+	 * line count, then dispatch a multi-range selector to
+	 * {@link #buildMultiRangeResult} and everything else to
+	 * {@link #buildInMemoryTextResult}.
+	 */
+	async #buildInMemorySelectorResult(
+		text: string,
+		parsed: ParsedSelector,
+		options: {
+			details?: ReadToolDetails;
+			sourcePath?: string;
+			sourceUrl?: string;
+			sourceInternal?: string;
+			entityLabel: string;
+			ignoreResultLimits?: boolean;
+			immutable?: boolean;
+			raw?: boolean;
+		},
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const allLines = text.split("\n");
+		const resolved = resolveTailSelector(parsed, allLines.length);
+		if (isMultiRange(resolved)) {
+			const source: RangeLineSource = (startLine, maxLines, maxBytes) => {
+				const lines: string[] = [];
+				let bytes = 0;
+				for (let i = startLine - 1; i < allLines.length && lines.length < maxLines; i++) {
+					const line = allLines[i]!;
+					const cost = (lines.length > 0 ? 1 : 0) + Buffer.byteLength(line, "utf-8");
+					if (bytes + cost > maxBytes) break;
+					bytes += cost;
+					lines.push(line);
+				}
+				return Promise.resolve({ lines, totalLines: allLines.length });
+			};
+			return this.#buildMultiRangeResult(source, resolved.ranges, options);
+		}
+		const { offset, limit } = selToOffsetLimit(resolved);
+		return this.#buildInMemoryTextResult(text, offset, limit, options);
+	}
+
+	/**
+	 * Render several disjoint line windows as one result. Each window keeps the
+	 * source's own line numbers and windows are separated by the elision marker,
+	 * so the reader can tell the output is not contiguous. The windows share one
+	 * line and byte budget: a multi-range selector is still one call, and the
+	 * output ceiling is per call, not per range. A range past the end is reported
+	 * instead of dropped, and exhausting the budget stops the read with a notice
+	 * naming the line to resume from — a short answer with no notice reads as
+	 * "the source ends there".
+	 */
+	async #buildMultiRangeResult(
+		source: RangeLineSource,
+		ranges: readonly LineRange[],
+		options: {
+			details?: ReadToolDetails;
+			sourcePath?: string;
+			sourceUrl?: string;
+			sourceInternal?: string;
+			entityLabel: string;
+			/** Callers that own their own output ceiling (skill resources) still get the
+			 * line budget — only the byte budget is theirs to lift. */
+			ignoreResultLimits?: boolean;
+			immutable?: boolean;
+			raw?: boolean;
+		},
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const displayMode = resolveFileDisplayMode(this.session, { raw: options.raw, immutable: options.immutable });
+		const shouldAddHashLines = displayMode.hashLines;
+		const shouldAddLineNumbers = shouldAddHashLines ? false : displayMode.lineNumbers;
+
+		let remainingLines = DEFAULT_MAX_LINES;
+		let remainingBytes = options.ignoreResultLimits
+			? Number.POSITIVE_INFINITY
+			: Math.max(DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES * 512);
+		let totalLines = 0;
+		const blocks: string[] = [];
+		const displayBlocks: string[] = [];
+		const notices: string[] = [];
+		let firstBlockStart: number | undefined;
+		let resumeFrom: number | undefined;
+
+		for (const range of ranges) {
+			const requested = range.endLine !== undefined ? range.endLine - range.startLine + 1 : Number.POSITIVE_INFINITY;
+			const maxLines = Math.min(requested, remainingLines);
+			if (maxLines < 1 || remainingBytes < 1) {
+				resumeFrom = range.startLine;
+				break;
+			}
+
+			const collected = await source(range.startLine, maxLines, remainingBytes);
+			totalLines = collected.totalLines;
+
+			if (range.startLine > totalLines) {
+				notices.push(
+					`[Range ${formatRangeLabel(range)} is beyond end of ${options.entityLabel} (${totalLines} lines total); skipped]`,
+				);
+				continue;
+			}
+
+			const blockText = collected.lines.join("\n");
+			if (collected.lines.length > 0) {
+				blocks.push(formatTextWithMode(blockText, range.startLine, shouldAddHashLines, shouldAddLineNumbers));
+				displayBlocks.push(blockText);
+				firstBlockStart ??= range.startLine;
+				remainingLines -= collected.lines.length;
+				remainingBytes -= Buffer.byteLength(blockText, "utf-8") + 1;
+			}
+
+			const windowEnd = Math.min(range.endLine ?? totalLines, totalLines);
+			if (collected.lines.length < windowEnd - range.startLine + 1) {
+				resumeFrom = range.startLine + collected.lines.length;
+				break;
+			}
+		}
+
+		if (resumeFrom !== undefined) {
+			notices.push(
+				`[Result limit reached; lines from ${resumeFrom} were not read. Use sel=${resumeFrom} to continue]`,
+			);
+		}
+
+		const body = blocks.join(`\n${RANGE_ELISION}\n`);
+		const text = notices.length > 0 ? (body ? `${body}\n\n${notices.join("\n")}` : notices.join("\n")) : body;
+
+		const details: ReadToolDetails = { ...options.details };
+		if (firstBlockStart !== undefined) {
+			details.displayContent = {
+				text: displayBlocks.join(`\n${RANGE_ELISION}\n`),
+				startLine: firstBlockStart,
+			};
+		}
+
+		const resultBuilder = toolResult<ReadToolDetails>(details).text(text);
+		if (options.sourcePath) resultBuilder.sourcePath(options.sourcePath);
+		if (options.sourceUrl) resultBuilder.sourceUrl(options.sourceUrl);
+		if (options.sourceInternal) resultBuilder.sourceInternal(options.sourceInternal);
+		return resultBuilder.done();
+	}
+
+	/**
+	 * Attach a suffix-resolution notice to a finished read result: the detail
+	 * carries the mapping and the model sees it inline, above the content it
+	 * corrects. Every reader that can resolve a suffix by unique match funnels
+	 * through here so the notice has one wording and one position.
+	 */
+	#withSuffixResolution(
+		result: AgentToolResult<ReadToolDetails>,
+		suffixResolution: { from: string; to: string } | undefined,
+	): AgentToolResult<ReadToolDetails> {
+		if (!suffixResolution) return result;
+		result.details = { ...result.details, suffixResolution };
+		const notice = `[Path '${suffixResolution.from}' not found; resolved to '${suffixResolution.to}' via suffix match]`;
+		const firstText = result.content.find((part): part is TextContent => part.type === "text");
+		if (firstText) {
+			firstText.text = `${notice}\n${firstText.text}`;
+		} else {
+			result.content = [{ type: "text", text: notice }, ...result.content];
+		}
+		return result;
+	}
+
+	/**
+	 * Directory listings are not line-addressed, so only the pagination limit
+	 * applies. A tail or multi-range selector here names lines that do not exist;
+	 * rejecting it keeps the tool's promise that `sel` is never silently ignored.
+	 */
+	#directoryLimit(parsed: ParsedSelector, entityLabel: string): number | undefined {
+		switch (parsed.kind) {
+			case "lines":
+				if (parsed.ranges.length > 1) {
+					throw new ToolError(
+						`A multi-range selector cannot be applied to ${entityLabel}; pass one limit instead (e.g. sel=50).`,
+					);
+				}
+				return selToOffsetLimit(parsed).limit;
+			case "tail":
+				throw new ToolError(
+					`A tail selector (-${parsed.count}) cannot be applied to ${entityLabel}; listings are not line-addressed. Page with sel=N instead.`,
+				);
+			case "conflicts":
+				throw new ToolError(`A conflict index cannot be read from ${entityLabel}; 'conflicts' applies to files.`);
+			default:
+				return undefined;
+		}
+	}
+
 	async #readArchiveDirectory(
 		archive: ArchiveReader,
 		archivePath: string,
@@ -828,11 +1143,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 	async #readArchive(
 		readPath: string,
-		offset: number | undefined,
-		limit: number | undefined,
+		parsed: ParsedSelector,
 		resolvedArchivePath: ResolvedArchiveReadPath,
 		signal?: AbortSignal,
-		options?: { raw?: boolean },
 	): Promise<AgentToolResult<ReadToolDetails>> {
 		throwIfAborted(signal);
 		const archive = await openArchive(resolvedArchivePath.absolutePath);
@@ -853,7 +1166,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				archive,
 				resolvedArchivePath.absolutePath,
 				resolvedArchivePath.archiveSubPath,
-				limit,
+				this.#directoryLimit(parsed, "an archive directory"),
 				details,
 				signal,
 			);
@@ -873,17 +1186,13 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				.done();
 		}
 
-		const result = this.#buildInMemoryTextResult(text, offset, limit, {
+		const result = await this.#buildInMemorySelectorResult(text, parsed, {
 			details,
 			sourcePath: resolvedArchivePath.absolutePath,
 			entityLabel: "archive entry",
-			raw: options?.raw,
+			raw: parsed.kind === "raw",
 		});
-		const firstText = result.content.find((content): content is TextContent => content.type === "text");
-		if (firstText) {
-			firstText.text = prependSuffixResolutionNotice(firstText.text, resolvedArchivePath.suffixResolution);
-		}
-		return result;
+		return this.#withSuffixResolution(result, resolvedArchivePath.suffixResolution);
 	}
 
 	async #readSqlite(
@@ -1017,6 +1326,133 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		}
 	}
 
+	/**
+	 * Resolve a `…:conflicts` (or `sel=conflicts`) request: scan the whole file
+	 * once, register every block in the session's conflict history, and return a
+	 * compact `#N L_a-L_b` index instead of file content. Heavily conflicted
+	 * files are the case this exists for — dumping every body would be wasteful.
+	 */
+	async #readConflictsFor(readPath: string, signal?: AbortSignal): Promise<AgentToolResult<ReadToolDetails>> {
+		const target = await this.#resolvePlainFileTarget(readPath, signal);
+		if (target.isDirectory) {
+			throw new ToolError(
+				`A conflict index cannot be read from a directory ('${readPath}'); 'conflicts' applies to files.`,
+			);
+		}
+		return this.#readFileConflicts(
+			target.absolutePath,
+			formatPathRelativeToCwd(target.absolutePath, this.session.cwd),
+			target.suffixResolution,
+			signal,
+		);
+	}
+
+	async #readFileConflicts(
+		absolutePath: string,
+		displayPath: string,
+		suffixResolution: { from: string; to: string } | undefined,
+		signal?: AbortSignal,
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		throwIfAborted(signal);
+		const scan = await scanFileForConflicts(absolutePath);
+		const history = getConflictHistory(this.session);
+		const entries = scan.blocks.map(block => history.register({ absolutePath, displayPath, ...block }));
+
+		const summary =
+			entries.length === 0
+				? `No unresolved git merge conflicts in ${displayPath}.`
+				: formatConflictSummary(entries, { displayPath, scanTruncated: scan.scanTruncated });
+
+		const details: ReadToolDetails = {
+			resolvedPath: absolutePath,
+			suffixResolution,
+			conflictCount: entries.length,
+		};
+		return toolResult<ReadToolDetails>(details).text(summary).sourcePath(absolutePath).done();
+	}
+
+	/**
+	 * Render a `conflict://<N>` (or `conflict://<N>/<scope>`) region as regular
+	 * file content. The lines keep their original file line numbers so hashline
+	 * anchors line up with the source file, and no truncation footer is appended.
+	 */
+	async #readConflictRegion(id: number, scope: ConflictScope | undefined): Promise<AgentToolResult<ReadToolDetails>> {
+		const entry = getConflictHistory(this.session).get(id);
+		if (!entry) {
+			throw new ToolError(
+				`Conflict #${id} not found. Conflict ids are registered when \`read\` surfaces a marker block; re-read the file to get a current id.`,
+			);
+		}
+
+		const region = renderConflictRegion(entry, scope);
+		const displayMode = resolveFileDisplayMode(this.session);
+		const shouldAddHashLines = displayMode.hashLines;
+		const shouldAddLineNumbers = shouldAddHashLines ? false : displayMode.lineNumbers;
+		const rawText = region.lines.join("\n");
+
+		const details: ReadToolDetails = {
+			resolvedPath: entry.absolutePath,
+			displayContent: { text: rawText, startLine: region.startLine },
+		};
+		return toolResult<ReadToolDetails>(details)
+			.text(formatTextWithMode(rawText, region.startLine, shouldAddHashLines, shouldAddLineNumbers))
+			.sourcePath(entry.absolutePath)
+			.done();
+	}
+
+	/**
+	 * `read <file.pdf>:pN` — render one page through Chromium's PDF viewer and
+	 * return it as an image attachment. The renderer reports its own failures
+	 * (out-of-range page, unloadable PDF, no browser) rather than degrading to
+	 * the extracted-text path, which answers a different question.
+	 */
+	async #readPdfPage(
+		readPath: string,
+		absolutePath: string,
+		pageNumber: number,
+		suffixResolution: { from: string; to: string } | undefined,
+		signal?: AbortSignal,
+	): Promise<AgentToolResult<ReadToolDetails>> {
+		const rendered = await renderPdfPageToFile(absolutePath, readPath, pageNumber, signal);
+		let imageInput: Awaited<ReturnType<typeof loadImageInput>> = null;
+		try {
+			imageInput = await loadImageInput({
+				path: readPath,
+				cwd: this.session.cwd,
+				autoResize: this.#autoResizeImages,
+				maxBytes: MAX_IMAGE_SIZE,
+				resolvedPath: rendered.filePath,
+			});
+		} catch (error) {
+			if (error instanceof ImageInputTooLargeError) throw new ToolError(error.message);
+			throw error;
+		} finally {
+			// The rendered page is a scratch artifact; its bytes are already in memory.
+			await fs.rm(rendered.filePath, { force: true }).catch(() => {});
+		}
+		if (!imageInput) {
+			throw new ToolError(
+				`Rendered page ${rendered.page} of '${readPath}', but the image could not be loaded as an attachment.`,
+			);
+		}
+
+		const note = `Rendered page ${rendered.page} of ${rendered.pageCount} of ${readPath} with Chromium.`;
+		const details: ReadToolDetails = {
+			resolvedPath: absolutePath,
+			contentType: imageInput.mimeType,
+		};
+		return this.#withSuffixResolution(
+			toolResult<ReadToolDetails>(details)
+				.content([
+					{ type: "text", text: `${note}\n${imageInput.textNote}` },
+					{ type: "image", data: imageInput.data, mimeType: imageInput.mimeType },
+				])
+				.sourcePath(absolutePath)
+				.done(),
+			suffixResolution,
+		);
+	}
+
 	async execute(
 		_toolCallId: string,
 		params: ReadParams,
@@ -1042,9 +1478,21 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			// Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://)
 			const internalRouter = this.session.internalRouter;
 			if (internalRouter?.canHandle(readPath)) {
-				const parsed = parseSel(sel);
-				const { offset, limit } = selToOffsetLimit(parsed);
-				return this.#handleInternalUrl(readPath, offset, limit);
+				return this.#handleInternalUrl(readPath, parseSel(sel));
+			}
+
+			// `conflict://<N>` is deliberately not an internal-URL protocol: it
+			// addresses a region a previous `read` registered in this session, not a
+			// resource a router can resolve on its own. Read side only — the write
+			// side is a branch of the write tool's virtual-path dispatch.
+			const conflictUri = parseConflictUri(readPath);
+			if (conflictUri) {
+				if (conflictUri.id === "*") {
+					throw new ToolError(
+						"Reading `conflict://*` is not supported — wildcards are write-only. Use the `<path>:conflicts` read selector for the full list of conflicts in a file, or read `conflict://<N>` to inspect a single block.",
+					);
+				}
+				return this.#readConflictRegion(conflictUri.id, conflictUri.scope);
 			}
 
 			const parsedUrlTarget = parseReadUrlTarget(readPath, sel);
@@ -1077,6 +1525,32 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 			const localReadPath = readPath;
 
+			// `:conflicts` — the same colon-suffixed sub-target family as
+			// `archive.zip:entry` and `db.sqlite:table`, except it applies to any
+			// file. Resolved before those two so a `:conflicts` suffix is never read
+			// as a SQLite table or an archive member.
+			const conflictsPath = await splitConflictPathSuffix(readPath, this.session.cwd);
+			if (conflictsPath !== null) {
+				return this.#readConflictsFor(conflictsPath, signal);
+			}
+
+			// `file.pdf:pN` — page N of a PDF, rendered by the browser instead of
+			// converted to text. A `.pdf` read without the page suffix keeps its
+			// existing markit conversion.
+			const pdfTarget = parsePdfPageReadPath(readPath);
+			if (pdfTarget) {
+				if (sel) {
+					throw new ToolError(
+						`Cannot combine ':p${pdfTarget.page}' with a selector ('sel=${sel}'): a rendered PDF page takes no line range.`,
+					);
+				}
+				const target = await this.#resolvePlainFileTarget(pdfTarget.pdfPath, signal);
+				if (target.isDirectory) {
+					throw new ToolError(`'${pdfTarget.pdfPath}' is a directory, not a PDF.`);
+				}
+				return this.#readPdfPage(readPath, target.absolutePath, pdfTarget.page, target.suffixResolution, signal);
+			}
+
 			// SQLite reads consume `sel` as table/query syntax (e.g. `users?limit=5`),
 			// so they must be dispatched before the line-selector parse rejects it.
 			const sqlitePath = await this.#resolveSqliteReadPath(readPath, signal);
@@ -1085,52 +1559,26 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			}
 
 			const parsed = parseSel(sel);
+			if (parsed.kind === "conflicts") {
+				return this.#readConflictsFor(localReadPath, signal);
+			}
 
 			const archivePath = await this.#resolveArchiveReadPath(localReadPath, signal);
 			if (archivePath) {
-				const { offset, limit } = selToOffsetLimit(parsed);
-				return this.#readArchive(readPath, offset, limit, archivePath, signal, { raw: parsed.kind === "raw" });
+				return this.#readArchive(readPath, parsed, archivePath, signal);
 			}
 
-			let absolutePath = resolveReadPath(localReadPath, this.session.cwd);
-			let suffixResolution: { from: string; to: string } | undefined;
-
-			let isDirectory = false;
-			let fileSize = 0;
-			try {
-				const stat = await Bun.file(absolutePath).stat();
-				fileSize = stat.size;
-				isDirectory = stat.isDirectory();
-			} catch (error) {
-				if (isNotFoundError(error)) {
-					// Attempt unique suffix resolution before falling back to fuzzy suggestions
-					if (!isRemoteMountPath(absolutePath)) {
-						const suffixMatch = await findUniqueSuffixMatch(localReadPath, this.session.cwd, signal);
-						if (suffixMatch) {
-							try {
-								const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
-								absolutePath = suffixMatch.absolutePath;
-								fileSize = retryStat.size;
-								isDirectory = retryStat.isDirectory();
-								suffixResolution = { from: localReadPath, to: suffixMatch.displayPath };
-							} catch {
-								// Suffix match candidate no longer stats — fall through to error path
-							}
-						}
-					}
-
-					if (!suffixResolution) {
-						throw new ToolError(
-							`Path '${localReadPath}' not found. Use \`glob\` or \`grep\` to discover the correct path.`,
-						);
-					}
-				} else {
-					throw error;
-				}
-			}
+			const { absolutePath, fileSize, isDirectory, suffixResolution } = await this.#resolvePlainFileTarget(
+				localReadPath,
+				signal,
+			);
 
 			if (isDirectory) {
-				const dirResult = await this.#readDirectory(absolutePath, selToOffsetLimit(parsed).limit, signal);
+				const dirResult = await this.#readDirectory(
+					absolutePath,
+					this.#directoryLimit(parsed, "a directory"),
+					signal,
+				);
 				if (suffixResolution) {
 					dirResult.details ??= {};
 					dirResult.details.suffixResolution = suffixResolution;
@@ -1245,8 +1693,35 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					await fs.rm(imageDir, { recursive: true, force: true }).catch(() => {});
 				}
 			} else {
-				// Raw text or line-range mode
-				const { offset, limit } = selToOffsetLimit(parsed);
+				// Raw text or line-range mode. A `-N` tail needs the file's line count
+				// before it names a window; every other kind is already absolute.
+				const resolved =
+					parsed.kind === "tail"
+						? resolveTailSelector(parsed, await countFileLines(absolutePath, signal))
+						: parsed;
+
+				if (isMultiRange(resolved)) {
+					const fileSource: RangeLineSource = async (startLine, maxLines, maxBytes) => {
+						const streamed = await streamLinesFromFile(
+							absolutePath,
+							startLine - 1,
+							maxLines,
+							maxBytes,
+							maxLines,
+							signal,
+						);
+						return { lines: streamed.lines, totalLines: streamed.totalFileLines };
+					};
+					return this.#withSuffixResolution(
+						await this.#buildMultiRangeResult(fileSource, resolved.ranges, {
+							sourcePath: absolutePath,
+							entityLabel: "file",
+						}),
+						suffixResolution,
+					);
+				}
+
+				const { offset, limit } = selToOffsetLimit(resolved);
 				const startLine = offset ? Math.max(0, offset - 1) : 0;
 				const startLineDisplay = startLine + 1;
 
@@ -1395,20 +1870,40 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					details.displayContent = capturedDisplayContent;
 				}
 
+				// Unresolved merge conflicts are surfaced only when the window
+				// actually contains them: a clean file renders byte-identically to
+				// what it rendered before this scan existed.
+				if (!truncation.firstLineExceedsLimit && collectedLines.length > 0) {
+					const blocks = scanConflictLines(collectedLines, startLineDisplay);
+					if (blocks.length > 0) {
+						const history = getConflictHistory(this.session);
+						const displayPathForWarning = formatPathRelativeToCwd(absolutePath, this.session.cwd);
+						const entries = blocks.map(block =>
+							history.register({ absolutePath, displayPath: displayPathForWarning, ...block }),
+						);
+						// The whole-file scan only enriches the "N of M visible" count, so
+						// it is paid for only once the window has shown a conflict.
+						let totalInFile = entries.length;
+						let scanTruncated = false;
+						try {
+							const fileScan = await scanFileForConflicts(absolutePath);
+							totalInFile = Math.max(entries.length, fileScan.blocks.length);
+							scanTruncated = fileScan.scanTruncated;
+						} catch {
+							// Best-effort enrichment; fall back to the window-only count.
+						}
+						outputText += formatConflictWarning(entries, {
+							totalInFile,
+							displayPath: displayPathForWarning,
+							scanTruncated,
+						});
+						details.conflictCount = entries.length;
+					}
+				}
+
 				content = [{ type: "text", text: outputText }];
 			}
 
-			if (suffixResolution) {
-				details.suffixResolution = suffixResolution;
-				// Inline resolution notice into first text block so the model sees the actual path
-				const notice = `[Path '${suffixResolution.from}' not found; resolved to '${suffixResolution.to}' via suffix match]`;
-				const firstText = content.find((c): c is TextContent => c.type === "text");
-				if (firstText) {
-					firstText.text = `${notice}\n${firstText.text}`;
-				} else {
-					content = [{ type: "text", text: notice }, ...content];
-				}
-			}
 			const resultBuilder = toolResult(details).content(content);
 			if (sourcePath) {
 				resultBuilder.sourcePath(sourcePath);
@@ -1416,7 +1911,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			if (truncationInfo) {
 				resultBuilder.truncation(truncationInfo.result, truncationInfo.options);
 			}
-			return resultBuilder.done();
+			return this.#withSuffixResolution(resultBuilder.done(), suffixResolution);
 		})();
 		this.#pendingReads.set(cacheKey, promise);
 		// Must return the finally-chain: discarding it leaves an orphan promise that
@@ -1426,31 +1921,32 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 	/**
 	 * Handle internal URLs (agent://, artifact://, memory://, skill://, rule://, local://, mcp://).
-	 * Supports pagination via offset/limit but rejects them when query extraction is used.
+	 * Paginates by line selector, except when query extraction already names the lines.
 	 */
-	async #handleInternalUrl(url: string, offset?: number, limit?: number): Promise<AgentToolResult<ReadToolDetails>> {
+	async #handleInternalUrl(url: string, parsed: ParsedSelector): Promise<AgentToolResult<ReadToolDetails>> {
 		const internalRouter = this.session.internalRouter!;
 
 		// Check if URL has query extraction (agent:// only).
 		// Use parseInternalUrl which handles colons in host (namespaced skills).
-		let parsed: InternalUrl;
+		let urlParts: InternalUrl;
 		try {
-			parsed = parseInternalUrl(url);
+			urlParts = parseInternalUrl(url);
 		} catch (e) {
 			throw new ToolError(e instanceof Error ? e.message : String(e));
 		}
-		const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+		const scheme = urlParts.protocol.replace(/:$/, "").toLowerCase();
 		let hasExtraction = false;
 		if (scheme === "agent") {
-			const hasPathExtraction = parsed.pathname && parsed.pathname !== "/" && parsed.pathname !== "";
-			const queryParam = parsed.searchParams.get("q");
+			const hasPathExtraction = urlParts.pathname && urlParts.pathname !== "/" && urlParts.pathname !== "";
+			const queryParam = urlParts.searchParams.get("q");
 			const hasQueryExtraction = queryParam !== null && queryParam !== "";
 			hasExtraction = hasPathExtraction || hasQueryExtraction;
 		}
 
-		// Reject offset/limit with query extraction
-		if (hasExtraction && (offset !== undefined || limit !== undefined)) {
-			throw new ToolError("Cannot combine query extraction with offset/limit");
+		// Reject a line selector with query extraction: the extraction has already
+		// named the lines the caller wants, and there is no text to slice by.
+		if (hasExtraction && (parsed.kind === "lines" || parsed.kind === "tail")) {
+			throw new ToolError("Cannot combine query extraction with a line selector");
 		}
 
 		// Resolve the internal URL
@@ -1460,7 +1956,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		// A directory resource has no text body of its own: render it with the same
 		// dirent listing used for filesystem directories so there is one format.
 		if (resource.isDirectory && resource.sourcePath) {
-			return this.#readDirectory(resource.sourcePath, limit);
+			return this.#readDirectory(resource.sourcePath, this.#directoryLimit(parsed, "a directory resource"));
 		}
 
 		// If extraction was used, return directly (no pagination)
@@ -1468,7 +1964,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			return toolResult(details).text(resource.content).sourceInternal(url).done();
 		}
 
-		return this.#buildInMemoryTextResult(resource.content, offset, limit, {
+		return this.#buildInMemorySelectorResult(resource.content, parsed, {
 			details,
 			sourcePath: resource.sourcePath,
 			sourceInternal: url,
@@ -1668,6 +2164,13 @@ export const readToolRenderer = {
 			const startLine = args.offset ?? 1;
 			const endLine = args.limit !== undefined ? startLine + args.limit - 1 : "";
 			title += `:${startLine}${endLine ? `-${endLine}` : ""}`;
+		}
+		// A read that surfaced conflicts says so in its title: the warning footer is
+		// inside the text the model reads, and the user needs to see the same thing
+		// without expanding the block.
+		const conflictCount = details?.conflictCount ?? 0;
+		if (conflictCount > 0) {
+			title += ` ${uiTheme.fg("warning", `(⚠ ${conflictCount} conflict${conflictCount === 1 ? "" : "s"})`)}`;
 		}
 		let cachedWidth: number | undefined;
 		let cachedLines: string[] | undefined;

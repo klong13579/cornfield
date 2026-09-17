@@ -1,14 +1,75 @@
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
-import { StringEnum } from "@cornfield/ai";
-import { abortableSleep, getWorktreesDir, isEnoent, prompt, untilAborted } from "@cornfield/utils";
-import { type Static, Type } from "@sinclair/typebox";
+import type { ImageContent } from "@cornfield/ai";
+import {
+	abortableSleep,
+	formatBytes,
+	getWorktreesDir,
+	isEnoent,
+	logger,
+	parseImageMetadata,
+	prompt,
+	untilAborted,
+} from "@cornfield/utils";
 import githubDescription from "../prompts/tools/github.md" with { type: "text" };
 import * as git from "../utils/git";
+import { resizeImage } from "../utils/image-resize";
 import type { ToolSession } from ".";
+import {
+	appendRepoFlag,
+	buildTextResult,
+	formatAuthor,
+	formatLabels,
+	normalizeBlock,
+	normalizeOptionalString,
+	normalizePrIdentifierList,
+	normalizeText,
+	parsePullRequestUrl,
+	pushLine,
+	requireNonEmpty,
+	resolveGitHubRepo,
+	saveArtifactText,
+} from "./gh-common";
 import { formatShortSha } from "./gh-format";
-import type { OutputMeta } from "./output-meta";
+import {
+	executeSearchCode,
+	executeSearchCommits,
+	executeSearchIssues,
+	executeSearchPrs,
+	executeSearchRepos,
+} from "./gh-search";
+import {
+	type GhActionsJobApi,
+	type GhActionsJobsResponse,
+	type GhActionsRunApi,
+	type GhActionsRunListResponse,
+	type GhBranchApiResponse,
+	type GhComment,
+	type GhFailedJobLog,
+	type GhIssueViewData,
+	type GhPrCheckoutSummary,
+	type GhPrFile,
+	type GhPrReview,
+	type GhPrReviewComment,
+	type GhPrReviewCommentApi,
+	type GhPrViewData,
+	type GhRepoViewData,
+	type GhRunJobSnapshot,
+	type GhRunReference,
+	type GhRunSnapshot,
+	type GhRunWatchFailedLogDetails,
+	type GhRunWatchJobDetails,
+	type GhRunWatchRunDetails,
+	type GhRunWatchViewDetails,
+	type GhToolDetails,
+	type GitHubContentsFile,
+	type GitHubContentsResponse,
+	type GithubInput,
+	githubSchema,
+} from "./gh-types";
+import { type CacheStatus, formatCacheNotice, getOrFetchView } from "./github-cache";
 import { ToolError, throwIfAborted } from "./tool-errors";
 import { toolResult } from "./tool-result";
 
@@ -102,433 +163,44 @@ const GH_PR_CHECKOUT_FIELDS = [
 	"title",
 	"url",
 ];
-const GH_SEARCH_FIELDS = [
-	"author",
-	"createdAt",
-	"labels",
-	"number",
-	"repository",
-	"state",
-	"title",
-	"updatedAt",
-	"url",
-];
-const SEARCH_LIMIT_DEFAULT = 10;
-const SEARCH_LIMIT_MAX = 50;
 const FILE_PREVIEW_LIMIT = 50;
+/** Poll cadence for the first {@link RUN_WATCH_FAST_WINDOW_MS} of a watch — snappy feedback while runs start. */
 const RUN_WATCH_INTERVAL_DEFAULT = 3;
+/**
+ * Cadence after the fast window. Every commit-watch poll is one runs-list call
+ * plus one jobs call per non-completed run, so a long build must not keep
+ * burning the shared authenticated REST quota at the fast rate.
+ */
+const RUN_WATCH_INTERVAL_SLOW = 15;
+const RUN_WATCH_FAST_WINDOW_MS = 60_000;
+/**
+ * Give up when a commit never produced a single run: a repository with no
+ * Actions workflows (or Actions disabled) never will, and polling forever
+ * teaches the caller nothing.
+ */
+const RUN_WATCH_NO_RUNS_GIVE_UP_MS = 90_000;
+/** Rate-limited polls a watch tolerates before it fails outright. */
+const RUN_WATCH_MAX_POLL_FAILURES = 5;
 const RUN_WATCH_GRACE_DEFAULT = 5;
 const RUN_WATCH_TAIL_DEFAULT = 15;
 const RUN_WATCH_TAIL_MAX = 200;
+/** Maximum disambiguation suffixes tried before a worktree path is declared unusable. */
+const WORKTREE_PATH_MAX_SUFFIX = 100;
 const REVIEW_COMMENTS_PAGE_SIZE = 100;
 const RUN_JOBS_PAGE_SIZE = 100;
-const PR_URL_PATTERN = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/.*)?$/;
 const RUN_URL_PATTERN = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)(?:\/.*)?$/;
 const RUN_SUCCESS_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const RUN_FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
 const JOB_FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action_required"]);
+const GH_RATE_LIMIT_ERROR_PATTERN = /rate limit|HTTP 429|abuse detection/i;
 
-const githubSchema = Type.Object({
-	op: StringEnum(
-		[
-			"repo_view",
-			"issue_view",
-			"pr_view",
-			"pr_diff",
-			"pr_checkout",
-			"pr_push",
-			"search_issues",
-			"search_prs",
-			"run_watch",
-		],
-		{ description: "github operation" },
-	),
-	repo: Type.Optional(
-		Type.String({
-			description: "owner/repo (any op)",
-			examples: ["facebook/react"],
-		}),
-	),
-	branch: Type.Optional(
-		Type.String({
-			description: "branch (repo_view, pr_push local branch, run_watch)",
-			examples: ["main", "develop"],
-		}),
-	),
-	issue: Type.Optional(
-		Type.String({
-			description: "issue number or url (issue_view)",
-			examples: ["123", "https://github.com/owner/repo/issues/123"],
-		}),
-	),
-	pr: Type.Optional(
-		Type.Union(
-			[
-				Type.String({ examples: ["123", "feature-branch"] }),
-				Type.Array(Type.String(), {
-					examples: [["123", "456"]],
-				}),
-			],
-			{
-				description:
-					"pr number, url, or branch (pr_view, pr_diff, pr_checkout); pass an array to batch-process multiple pull requests in one call",
-			},
-		),
-	),
-	comments: Type.Optional(Type.Boolean({ description: "include comments (issue_view, pr_view)", default: true })),
-	nameOnly: Type.Optional(Type.Boolean({ description: "return file names only (pr_diff)" })),
-	exclude: Type.Optional(
-		Type.Array(Type.String({ description: "glob to exclude" }), {
-			description: "file globs to exclude (pr_diff)",
-		}),
-	),
-	force: Type.Optional(Type.Boolean({ description: "reset existing local branch (pr_checkout)" })),
-	forceWithLease: Type.Optional(Type.Boolean({ description: "force-with-lease push (pr_push)" })),
-	query: Type.Optional(
-		Type.String({
-			description: "search query (search_issues, search_prs)",
-			examples: ["is:open label:bug"],
-		}),
-	),
-	limit: Type.Optional(Type.Number({ description: "max results (search_issues, search_prs)", default: 10 })),
-	run: Type.Optional(Type.String({ description: "actions run id or url (run_watch)", examples: ["123456"] })),
-	tail: Type.Optional(Type.Number({ description: "log lines per failed job (run_watch)", default: 15 })),
-});
-
-type GithubInput = Static<typeof githubSchema>;
-
-export interface GhToolDetails {
-	meta?: OutputMeta;
-	artifactId?: string;
-	repo?: string;
-	branch?: string;
-	worktreePath?: string;
-	remote?: string;
-	remoteBranch?: string;
-	headSha?: string;
-	runId?: number;
-	runIds?: number[];
-	status?: string;
-	conclusion?: string;
-	failedJobs?: string[];
-	watch?: GhRunWatchViewDetails;
-	checkouts?: GhPrCheckoutSummary[];
-}
-
-export interface GhPrCheckoutSummary {
-	prNumber?: number;
-	url?: string;
-	branch: string;
-	worktreePath: string;
-	remote: string;
-	remoteBranch: string;
-	reused: boolean;
-}
-
-export interface GhRunWatchJobDetails {
-	id: number;
-	name: string;
-	status?: string;
-	conclusion?: string;
-	durationSeconds?: number;
-	url?: string;
-}
-
-export interface GhRunWatchRunDetails {
-	id: number;
-	workflowName?: string;
-	displayTitle?: string;
-	status?: string;
-	conclusion?: string;
-	branch?: string;
-	headSha?: string;
-	url?: string;
-	jobs: GhRunWatchJobDetails[];
-}
-
-export interface GhRunWatchFailedLogDetails {
-	runId: number;
-	workflowName?: string;
-	jobName: string;
-	conclusion?: string;
-	tail?: string;
-	available: boolean;
-}
-
-export interface GhRunWatchViewDetails {
-	mode: "run" | "commit";
-	state: "watching" | "completed";
-	repo: string;
-	branch?: string;
-	headSha?: string;
-	pollCount?: number;
-	note?: string;
-	run?: GhRunWatchRunDetails;
-	runs?: GhRunWatchRunDetails[];
-	failedLogs?: GhRunWatchFailedLogDetails[];
-}
-
-interface GhUser {
-	login?: string;
-	name?: string | null;
-}
-
-interface GhLabel {
-	name?: string;
-}
-
-interface GhComment {
-	author?: GhUser | null;
-	body?: string;
-	createdAt?: string;
-	url?: string;
-	isMinimized?: boolean;
-	minimizedReason?: string | null;
-}
-
-interface GhRepoTopic {
-	name?: string;
-	topic?: { name?: string };
-}
-
-interface GhRepoLanguage {
-	name?: string;
-}
-
-interface GhRepoBranch {
-	name?: string;
-}
-
-interface GhRepoViewData {
-	nameWithOwner?: string;
-	description?: string | null;
-	url?: string;
-	sshUrl?: string;
-	defaultBranchRef?: GhRepoBranch | null;
-	homepageUrl?: string | null;
-	forkCount?: number;
-	isArchived?: boolean;
-	isFork?: boolean;
-	primaryLanguage?: GhRepoLanguage | null;
-	repositoryTopics?: GhRepoTopic[];
-	stargazerCount?: number;
-	updatedAt?: string;
-	viewerPermission?: string | null;
-	visibility?: string | null;
-}
-
-interface GhIssueViewData {
-	author?: GhUser | null;
-	body?: string | null;
-	comments?: GhComment[];
-	createdAt?: string;
-	labels?: GhLabel[];
-	number?: number;
-	state?: string;
-	stateReason?: string | null;
-	title?: string;
-	updatedAt?: string;
-	url?: string;
-}
-
-interface GhPrFile {
-	path?: string;
-	additions?: number;
-	deletions?: number;
-	changeType?: string;
-}
-
-interface GhPrViewData extends GhIssueViewData {
-	baseRefName?: string;
-	files?: GhPrFile[];
-	headRefName?: string;
-	headRefOid?: string;
-	headRepository?: GhRepoViewData | null;
-	headRepositoryOwner?: GhUser | null;
-	isCrossRepository?: boolean;
-	isDraft?: boolean;
-	maintainerCanModify?: boolean;
-	mergeStateStatus?: string;
-	reviewComments?: GhPrReviewComment[];
-	reviews?: GhPrReview[];
-	reviewDecision?: string;
-}
-
-interface GhPrReviewCommit {
-	oid?: string | null;
-}
-
-interface GhPrReview {
-	author?: GhUser | null;
-	body?: string | null;
-	commit?: GhPrReviewCommit | null;
-	state?: string | null;
-	submittedAt?: string | null;
-}
-
-interface GhPrReviewCommentApi {
-	body?: string | null;
-	created_at?: string | null;
-	html_url?: string | null;
-	id?: number;
-	in_reply_to_id?: number | null;
-	line?: number | null;
-	original_line?: number | null;
-	path?: string | null;
-	side?: string | null;
-	user?: GhUser | null;
-}
-
-interface GhPrReviewComment {
-	author?: GhUser | null;
-	body?: string | null;
-	createdAt?: string;
-	id: number;
-	inReplyToId?: number;
-	line?: number;
-	originalLine?: number;
-	path?: string;
-	side?: string;
-	url?: string;
-}
-
-interface GhBranchApiResponse {
-	commit?: {
-		sha?: string | null;
-	} | null;
-}
-
-interface GhSearchRepository {
-	nameWithOwner?: string;
-}
-
-interface GhSearchResult {
-	author?: GhUser | null;
-	createdAt?: string;
-	labels?: GhLabel[];
-	number?: number;
-	repository?: GhSearchRepository | null;
-	state?: string;
-	title?: string;
-	updatedAt?: string;
-	url?: string;
-}
-
-interface GhRunReference {
-	repo?: string;
-	runId?: number;
-}
-
-interface GhActionsRunListResponse {
-	workflow_runs?: GhActionsRunApi[];
-}
-
-interface GhActionsRunApi {
-	id?: number;
-	name?: string | null;
-	display_title?: string | null;
-	status?: string | null;
-	conclusion?: string | null;
-	head_branch?: string | null;
-	head_sha?: string | null;
-	created_at?: string | null;
-	updated_at?: string | null;
-	html_url?: string | null;
-}
-
-interface GhActionsJobsResponse {
-	total_count?: number;
-	jobs?: GhActionsJobApi[];
-}
-
-interface GhActionsJobApi {
-	id?: number;
-	name?: string | null;
-	status?: string | null;
-	conclusion?: string | null;
-	started_at?: string | null;
-	completed_at?: string | null;
-	html_url?: string | null;
-}
-
-interface GhRunJobSnapshot {
-	id: number;
-	name: string;
-	status?: string;
-	conclusion?: string;
-	startedAt?: string;
-	completedAt?: string;
-	url?: string;
-}
-
-interface GhRunSnapshot {
-	id: number;
-	workflowName?: string;
-	displayTitle?: string;
-	status?: string;
-	conclusion?: string;
-	branch?: string;
-	headSha?: string;
-	createdAt?: string;
-	updatedAt?: string;
-	url?: string;
-	jobs: GhRunJobSnapshot[];
-}
-
-interface GhFailedJobLog {
-	run: GhRunSnapshot;
-	job: GhRunJobSnapshot;
-	full?: string;
-	tail?: string;
-	available: boolean;
-}
-
-function normalizeText(value: string | null | undefined): string {
-	return (value ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").replaceAll("\t", "    ").trim();
-}
-
-function normalizeBlock(value: string | null | undefined): string {
-	return (value ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").replaceAll("\t", "    ").trimEnd();
-}
-
-function looksLikeGitHubUrl(value: string | undefined): boolean {
-	return value?.startsWith("https://github.com/") ?? false;
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | undefined {
-	const normalized = value?.trim();
-	return normalized ? normalized : undefined;
-}
-
-function normalizePrIdentifierList(value: string | string[] | undefined): string[] {
-	if (value === undefined) return [];
-	const raw = typeof value === "string" ? [value] : value;
-	const cleaned: string[] = [];
-	for (const entry of raw) {
-		const trimmed = entry?.trim();
-		if (trimmed) cleaned.push(trimmed);
-	}
-	return cleaned;
-}
-
-function requireNonEmpty(value: string | null | undefined, label: string): string {
-	const normalized = normalizeOptionalString(value);
-	if (!normalized) {
-		throw new ToolError(`${label} must not be empty`);
-	}
-	return normalized;
-}
-
-function resolveSearchLimit(value: number | undefined): number {
-	if (value === undefined) {
-		return SEARCH_LIMIT_DEFAULT;
-	}
-
-	if (!Number.isFinite(value) || value <= 0) {
-		throw new ToolError("limit must be a positive number");
-	}
-
-	return Math.min(Math.floor(value), SEARCH_LIMIT_MAX);
+/**
+ * Rate-limit and secondary-limit failures are transient. The run_watch poll
+ * loops back off and retry them instead of discarding the watch and every
+ * observation it has accumulated.
+ */
+function isRateLimitedGhError(error: unknown): boolean {
+	return error instanceof ToolError && GH_RATE_LIMIT_ERROR_PATTERN.test(error.message);
 }
 
 function resolveTailLimit(value: number | undefined): number {
@@ -541,26 +213,6 @@ function resolveTailLimit(value: number | undefined): number {
 	}
 
 	return Math.min(Math.floor(value), RUN_WATCH_TAIL_MAX);
-}
-
-function appendRepoFlag(args: string[], repo: string | undefined, identifier?: string): void {
-	if (!repo || looksLikeGitHubUrl(identifier)) {
-		return;
-	}
-
-	args.push("--repo", repo);
-}
-
-function buildGhSearchArgs(
-	command: "issues" | "prs",
-	query: string,
-	limit: number,
-	repo: string | undefined,
-): string[] {
-	const args = ["search", command, "--limit", String(limit), "--json", GH_SEARCH_FIELDS.join(",")];
-	appendRepoFlag(args, repo);
-	args.push("--", query);
-	return args;
 }
 
 function sanitizeRemoteName(value: string): string {
@@ -625,25 +277,71 @@ async function requireCurrentGitHead(cwd: string, signal?: AbortSignal): Promise
 	return headSha;
 }
 
-async function ensureGitWorktreePathAvailable(
+/**
+ * Canonicalize a path so two spellings of the same location compare equal,
+ * tolerating paths that do not exist yet.
+ *
+ * `git worktree list` reports symlink-resolved paths (`/var/…` becomes
+ * `/private/var/…` on macOS) while the candidate we build from
+ * `getWorktreesDir()` is not resolved. Comparing them as literal strings
+ * therefore misses a genuinely occupied path — including a worktree git still
+ * registers after its directory was pruned, which `git worktree add` then
+ * refuses. Resolving the deepest existing ancestor and re-appending the missing
+ * tail gives both sides the same form without requiring the path to exist.
+ */
+async function canonicalizePathForComparison(target: string): Promise<string> {
+	const resolved = path.resolve(target);
+	const missing: string[] = [];
+	let current = resolved;
+	while (true) {
+		try {
+			const canonical = await fs.realpath(current);
+			return missing.length === 0 ? canonical : path.join(canonical, ...[...missing].reverse());
+		} catch {
+			const parent = path.dirname(current);
+			if (parent === current) {
+				return resolved;
+			}
+			missing.push(path.basename(current));
+			current = parent;
+		}
+	}
+}
+
+/**
+ * Pick a worktree path free of conflicts: `basePath` itself, or the first
+ * `${basePath}-N` (N from 2 up to {@link WORKTREE_PATH_MAX_SUFFIX}) that is
+ * neither registered with git as another worktree nor present on disk. The
+ * numeric tail salvages two cases that would otherwise abort a checkout: a
+ * stale directory left behind by an interrupted `git worktree add`, and a path
+ * collision between two repositories that encode to the same directory name.
+ */
+async function resolveAvailableWorktreePath(
 	worktreePath: string,
 	existingWorktrees: git.GitWorktreeEntry[],
-): Promise<void> {
-	const normalizedTarget = path.resolve(worktreePath);
-	const conflictingWorktree = existingWorktrees.find(entry => path.resolve(entry.path) === normalizedTarget);
-	if (conflictingWorktree) {
-		throw new ToolError(`worktree path is already registered: ${conflictingWorktree.path}`);
+): Promise<string> {
+	const registered = new Set(
+		await Promise.all(existingWorktrees.map(entry => canonicalizePathForComparison(entry.path))),
+	);
+	for (let attempt = 0; attempt < WORKTREE_PATH_MAX_SUFFIX; attempt += 1) {
+		const candidate = attempt === 0 ? worktreePath : `${worktreePath}-${attempt + 1}`;
+		if (registered.has(await canonicalizePathForComparison(candidate))) {
+			continue;
+		}
+
+		try {
+			await fs.stat(candidate);
+		} catch (error) {
+			if (isEnoent(error)) {
+				return candidate;
+			}
+			throw error;
+		}
 	}
 
-	try {
-		await fs.stat(normalizedTarget);
-		throw new ToolError(`worktree path already exists: ${normalizedTarget}`);
-	} catch (error) {
-		if (isEnoent(error)) {
-			return;
-		}
-		throw error;
-	}
+	throw new ToolError(
+		`could not find an unused worktree path under ${worktreePath} (tried ${WORKTREE_PATH_MAX_SUFFIX} suffixes)`,
+	);
 }
 
 function selectPrCloneUrl(originUrl: string | undefined, repo: Pick<GhRepoViewData, "url" | "sshUrl">): string {
@@ -767,24 +465,6 @@ async function resolvePrBranchPushTarget(
 	};
 }
 
-function formatAuthor(author: GhUser | null | undefined): string | undefined {
-	if (!author) return undefined;
-	if (author.login) return `@${author.login}`;
-	if (author.name) return author.name;
-	return undefined;
-}
-
-function formatLabels(labels: GhLabel[] | undefined): string | undefined {
-	const names = labels?.map(label => label.name).filter((value): value is string => Boolean(value)) ?? [];
-	if (names.length === 0) return undefined;
-	return names.join(", ");
-}
-
-function pushLine(lines: string[], label: string, value: string | number | boolean | undefined): void {
-	if (value === undefined || value === "") return;
-	lines.push(`${label}: ${value}`);
-}
-
 function parseRunReference(value: string | undefined): GhRunReference {
 	const run = normalizeOptionalString(value);
 	if (!run) {
@@ -803,23 +483,6 @@ function parseRunReference(value: string | undefined): GhRunReference {
 	return {
 		repo: match[1],
 		runId: Number(match[2]),
-	};
-}
-
-function parsePullRequestUrl(value: string | undefined): { repo?: string; prNumber?: number } {
-	const normalized = normalizeOptionalString(value);
-	if (!normalized) {
-		return {};
-	}
-
-	const match = normalized.match(PR_URL_PATTERN);
-	if (!match) {
-		return {};
-	}
-
-	return {
-		repo: match[1],
-		prNumber: Number(match[2]),
 	};
 }
 
@@ -1311,32 +974,6 @@ function buildCommitRunWatchDetails(
 	};
 }
 
-async function resolveGitHubRepo(
-	cwd: string,
-	repo: string | undefined,
-	runRepo: string | undefined,
-	signal?: AbortSignal,
-): Promise<string> {
-	if (repo && runRepo && repo !== runRepo) {
-		throw new ToolError("run URL repository does not match the provided repo");
-	}
-
-	if (repo) {
-		return repo;
-	}
-
-	if (runRepo) {
-		return runRepo;
-	}
-
-	const resolved = await git.github.text(
-		cwd,
-		["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-		signal,
-	);
-	return requireNonEmpty(resolved, "repo");
-}
-
 async function resolveGitHubBranchHead(
 	cwd: string,
 	repo: string,
@@ -1358,6 +995,7 @@ async function fetchRunsForCommit(
 	headSha: string,
 	branch: string | undefined,
 	signal?: AbortSignal,
+	completedRunJobsCache?: Map<number, GhRunJobSnapshot[]>,
 ): Promise<GhRunSnapshot[]> {
 	const response = await git.github.json<GhActionsRunListResponse>(
 		cwd,
@@ -1380,7 +1018,25 @@ async function fetchRunsForCommit(
 		(response.workflow_runs ?? [])
 			.filter((run): run is GhActionsRunApi & { id: number } => typeof run.id === "number")
 			.map(async run => {
-				const jobs = await fetchRunJobs(cwd, repo, run.id, signal);
+				// A completed run's job list is stable until a re-run flips `status`
+				// off "completed", so reuse it across polls instead of refetching
+				// every finished run on every tick. A run observed non-completed
+				// evicts its entry: when the re-run finishes, `status` flips back to
+				// "completed" and a stale entry would serve the first attempt's jobs
+				// — and its verdict — for the rest of the watch.
+				const completed = run.status === "completed";
+				if (!completed) {
+					completedRunJobsCache?.delete(run.id);
+				}
+
+				let jobs = completed ? completedRunJobsCache?.get(run.id) : undefined;
+				if (!jobs) {
+					jobs = await fetchRunJobs(cwd, repo, run.id, signal);
+					if (completed) {
+						completedRunJobsCache?.set(run.id, jobs);
+					}
+				}
+
 				return normalizeRunSnapshot(run, jobs);
 			}),
 	);
@@ -1795,70 +1451,6 @@ function formatPrPushResult(options: {
 	return lines.join("\n").trim();
 }
 
-function formatSearchResults(
-	kind: "issues" | "pull requests",
-	query: string,
-	repo: string | undefined,
-	items: GhSearchResult[],
-): string {
-	const lines: string[] = [`# GitHub ${kind} search`, "", `Query: ${query}`];
-	pushLine(lines, "Repository", repo);
-	pushLine(lines, "Results", items.length);
-
-	if (items.length === 0) {
-		lines.push("");
-		lines.push(`No ${kind} found.`);
-		return lines.join("\n").trim();
-	}
-
-	for (const item of items) {
-		lines.push("");
-		lines.push(`- #${item.number ?? "?"} ${item.title ?? "Untitled"}`);
-		pushLine(lines, "  Repo", item.repository?.nameWithOwner);
-		pushLine(lines, "  State", item.state);
-		pushLine(lines, "  Author", formatAuthor(item.author));
-		pushLine(lines, "  Labels", formatLabels(item.labels));
-		pushLine(lines, "  Created", item.createdAt);
-		pushLine(lines, "  Updated", item.updatedAt);
-		pushLine(lines, "  URL", item.url);
-	}
-
-	return lines.join("\n").trim();
-}
-
-async function saveArtifactText(session: ToolSession, toolType: string, text: string): Promise<string | undefined> {
-	const { path: artifactPath, id: artifactId } = (await session.allocateOutputArtifact?.(toolType)) ?? {};
-	if (!artifactPath || !artifactId) {
-		return undefined;
-	}
-
-	await Bun.write(artifactPath, text);
-	return artifactId;
-}
-
-function appendArtifactReference(text: string, artifactId: string | undefined, label: string): string {
-	if (!artifactId) {
-		return text;
-	}
-
-	return `${text}\n\n${label}: artifact://${artifactId}`;
-}
-
-function buildTextResult(
-	text: string,
-	sourceUrl?: string,
-	details?: GhToolDetails,
-	options?: { artifactId?: string; artifactLabel?: string },
-): AgentToolResult<GhToolDetails> {
-	const builder = toolResult<GhToolDetails>(details).text(
-		appendArtifactReference(text, options?.artifactId, options?.artifactLabel ?? "Saved artifact"),
-	);
-	if (sourceUrl) {
-		builder.sourceUrl(sourceUrl);
-	}
-	return builder.done();
-}
-
 export class GithubTool implements AgentTool<typeof githubSchema, GhToolDetails> {
 	readonly name = "github";
 	readonly label = "GitHub";
@@ -1886,12 +1478,16 @@ export class GithubTool implements AgentTool<typeof githubSchema, GhToolDetails>
 			switch (params.op) {
 				case "repo_view":
 					return executeRepoView(this.session, params, signal);
+				case "file_read":
+					return executeFileRead(this.session, params, signal);
 				case "issue_view":
 					return executeIssueView(this.session, params, signal);
 				case "pr_view":
 					return executePrView(this.session, params, signal);
 				case "pr_diff":
 					return executePrDiff(this.session, params, signal);
+				case "pr_create":
+					return executePrCreate(this.session, params, signal);
 				case "pr_checkout":
 					return executePrCheckout(this.session, params, signal);
 				case "pr_push":
@@ -1900,6 +1496,12 @@ export class GithubTool implements AgentTool<typeof githubSchema, GhToolDetails>
 					return executeSearchIssues(this.session, params, signal);
 				case "search_prs":
 					return executeSearchPrs(this.session, params, signal);
+				case "search_code":
+					return executeSearchCode(this.session, params, signal);
+				case "search_commits":
+					return executeSearchCommits(this.session, params, signal);
+				case "search_repos":
+					return executeSearchRepos(this.session, params, signal);
 				case "run_watch":
 					return executeRunWatch(this.session, this.name, params, signal, onUpdate);
 			}
@@ -1929,6 +1531,277 @@ async function executeRepoView(
 	return buildTextResult(formatRepoView(data, { repo, branch }), data.url);
 }
 
+async function executeFileRead(
+	session: ToolSession,
+	params: GithubInput,
+	signal: AbortSignal | undefined,
+): Promise<AgentToolResult<GhToolDetails>> {
+	const repo = await resolveGitHubRepo(session.cwd, normalizeOptionalString(params.repo), undefined, signal);
+	const filePath = requireNonEmpty(params.path, "path");
+	if (filePath.startsWith("/")) {
+		throw new ToolError("path must be repository-relative");
+	}
+	const branch = normalizeOptionalString(params.branch);
+	const endpointPath = filePath
+		.split("/")
+		.map(segment => encodeURIComponent(segment))
+		.join("/");
+	const args = [
+		"api",
+		"--method",
+		"GET",
+		`/repos/${repo}/contents/${endpointPath}`,
+		"-H",
+		"Accept: application/vnd.github+json",
+		// Without this, gh negotiates gzip and hands back bytes we cannot base64-decode.
+		"-H",
+		"Accept-Encoding: identity",
+	];
+	if (branch) {
+		args.push("-f", `ref=${branch}`);
+	}
+
+	let response: GitHubContentsResponse;
+	try {
+		response = await git.github.json<GitHubContentsResponse>(session.cwd, args, signal, {
+			repoProvided: true,
+			trimOutput: false,
+		});
+	} catch (error) {
+		if (!(error instanceof ToolError)) throw error;
+		// The Contents API collapses missing repository, revision, path, and
+		// permission failures into one 404, so name the request we made instead of
+		// guessing which of them it was.
+		throw new ToolError(
+			`GitHub file read failed for '${repo}@${branch ?? "HEAD"}:${filePath}': ${error.message}`,
+			error.context,
+		);
+	}
+
+	if (!isGitHubContentsFile(response)) {
+		throw new ToolError(`GitHub path '${filePath}' is not a file.`);
+	}
+
+	const sourceUrl =
+		response.html_url ?? `https://github.com/${repo}/blob/${encodeURIComponent(branch ?? "HEAD")}/${endpointPath}`;
+
+	if (response.encoding !== "base64" || typeof response.content !== "string") {
+		// Above 1 MiB the Contents API answers with `encoding: "none"` and no body.
+		const size =
+			typeof response.size === "number" && response.size >= 0 ? formatBytes(response.size) : "unknown size";
+		return buildTextResult(
+			`[GitHub did not return file bytes for '${filePath}' (${size}). Open ${sourceUrl} to view it.]`,
+			sourceUrl,
+			{ repo, branch },
+		);
+	}
+
+	const encoded = response.content.replaceAll(/\s/g, "");
+	const bytes = Buffer.from(encoded, "base64");
+	const metadata = parseImageMetadata(bytes);
+	if (metadata) {
+		const image = await buildImageAttachment(session, encoded, metadata.mimeType);
+		const dimensions =
+			metadata.width !== undefined && metadata.height !== undefined
+				? `\nDimensions: ${metadata.width}x${metadata.height}`
+				: "";
+		return toolResult<GhToolDetails>({ repo, branch })
+			.content([
+				{
+					type: "text",
+					text: `Image file: ${filePath}\nMIME: ${image.mimeType}\nSize: ${formatBytes(bytes.byteLength)}${dimensions}`,
+				},
+				{ type: "image", data: image.data, mimeType: image.mimeType },
+			])
+			.sourceUrl(sourceUrl)
+			.done();
+	}
+
+	const size = bytes.byteLength;
+	try {
+		const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+		// A strict UTF-8 decode still accepts NUL bytes, but text with embedded NULs
+		// is a binary payload (e.g. UTF-16) and must not be passed off as text.
+		if (!text.includes("\u0000")) {
+			return buildTextResult(text, sourceUrl, { repo, branch });
+		}
+	} catch {
+		// Not valid UTF-8 — fall through to the binary report.
+	}
+	return buildTextResult(
+		`[Cannot read binary file '${filePath}' (${formatBytes(size)}); not valid UTF-8 text. Open ${sourceUrl} to view it.]`,
+		sourceUrl,
+		{ repo, branch },
+	);
+}
+
+function isGitHubContentsFile(response: GitHubContentsResponse): response is GitHubContentsFile {
+	return !Array.isArray(response) && response.type === "file";
+}
+
+/**
+ * Turn fetched image bytes into the attachment the model receives. Resizing is
+ * opt-in through the same `images.autoResize` setting the `read` tool honors; a
+ * resize that cannot decode the bytes returns them unchanged rather than
+ * dropping the attachment.
+ */
+async function buildImageAttachment(session: ToolSession, base64: string, mimeType: string): Promise<ImageContent> {
+	const image: ImageContent = { type: "image", data: base64, mimeType };
+	if (!session.settings.get("images.autoResize")) {
+		return image;
+	}
+
+	const resized = await resizeImage(image);
+	return { type: "image", data: resized.data, mimeType: resized.mimeType };
+}
+
+const GH_ISSUE_STATE_REASON_FIELD = "stateReason";
+
+/** True when `gh` rejected a `--json` field its release does not know. */
+function isUnknownJsonFieldError(error: unknown, field: string): boolean {
+	if (!(error instanceof Error) || !/unknown json field/i.test(error.message)) {
+		return false;
+	}
+
+	return error.message.includes(field);
+}
+
+/** Drop `field` from a `--json a,b,c` argument list; undefined when it is not listed. */
+function dropJsonField(args: readonly string[], field: string): string[] | undefined {
+	const next = [...args];
+	const jsonIndex = next.indexOf("--json");
+	if (jsonIndex < 0) {
+		return undefined;
+	}
+
+	const fields = next[jsonIndex + 1];
+	if (!fields) {
+		return undefined;
+	}
+
+	const splitFields = fields.split(",");
+	const kept = splitFields.filter(candidate => candidate !== field);
+	if (kept.length === splitFields.length) {
+		return undefined;
+	}
+
+	next[jsonIndex + 1] = kept.join(",");
+	return next;
+}
+
+/**
+ * Run `gh issue view --json` and retry without `stateReason` when this `gh`
+ * release does not know the field: it rejects the whole call with "Unknown JSON
+ * field", and a missing state reason is a line we can simply not render.
+ */
+async function githubIssueJsonWithStateReasonFallback<T>(
+	cwd: string,
+	args: readonly string[],
+	signal: AbortSignal | undefined,
+	options: { repoProvided: boolean },
+): Promise<T> {
+	try {
+		return await git.github.json<T>(cwd, [...args], signal, options);
+	} catch (error) {
+		if (!isUnknownJsonFieldError(error, GH_ISSUE_STATE_REASON_FIELD)) {
+			throw error;
+		}
+
+		const retryArgs = dropJsonField(args, GH_ISSUE_STATE_REASON_FIELD);
+		if (!retryArgs) {
+			throw error;
+		}
+
+		return await git.github.json<T>(cwd, retryArgs, signal, options);
+	}
+}
+
+const ISSUE_URL_PATTERN = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/.*)?$/;
+
+/**
+ * The identity a view row is keyed on. Both parts must be knowable *before*
+ * the fetch: a branch name (or no `pr` at all) names nothing `gh` would resolve
+ * the same way twice, and a bare number only becomes an identity once the
+ * repository is known. Requests without an identity go straight to `gh`.
+ */
+interface ViewTarget {
+	repo: string | undefined;
+	number: number | undefined;
+}
+
+/** A bare decimal identifier; undefined for URLs, branch names, and anything else. */
+function parseNumericIdentifier(value: string | undefined): number | undefined {
+	const trimmed = normalizeOptionalString(value);
+	if (!trimmed || !/^\d+$/.test(trimmed)) return undefined;
+	const parsed = Number(trimmed);
+	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/** Issue number and repo, from a bare number or a full issue URL. */
+function parseIssueTarget(identifier: string, repo: string | undefined): ViewTarget {
+	const fromUrl = identifier.match(ISSUE_URL_PATTERN);
+	if (fromUrl) return { repo: fromUrl[1], number: Number(fromUrl[2]) };
+	return { repo, number: parseNumericIdentifier(identifier) };
+}
+
+/** Pull request number and repo, from a bare number or a full pull request URL. */
+function parsePrTarget(identifier: string | undefined, repo: string | undefined): ViewTarget {
+	const fromUrl = parsePullRequestUrl(identifier);
+	if (fromUrl.prNumber !== undefined) return { repo: fromUrl.repo ?? repo, number: fromUrl.prNumber };
+	return { repo, number: parseNumericIdentifier(identifier) };
+}
+
+/**
+ * Resolve the repository `gh` would pick for this checkout — at most once per
+ * call, and only to key the cache. The fetch itself keeps invoking `gh` exactly
+ * as before, so remote selection and error messages are unchanged. A resolution
+ * failure means "no identity": the call's own fetch then reports gh's error
+ * rather than a friendlier one invented here.
+ */
+function createDefaultRepoResolver(cwd: string, signal: AbortSignal | undefined): () => Promise<string | undefined> {
+	let pending: Promise<string | undefined> | undefined;
+	return () => {
+		pending ??= resolveGitHubRepo(cwd, undefined, undefined, signal).catch(() => undefined);
+		return pending;
+	};
+}
+
+/**
+ * Give a numeric target that named no repository one, so the row has an
+ * identity to key on. A request that named a branch, or whose repository cannot
+ * be resolved, stays identity-less and is therefore never cached.
+ */
+async function withResolvedRepo(
+	target: ViewTarget,
+	resolveRepo: () => Promise<string | undefined>,
+): Promise<ViewTarget> {
+	if (target.repo !== undefined || target.number === undefined) return target;
+	return { repo: await resolveRepo(), number: target.number };
+}
+
+/**
+ * The parts of a `pr_diff` request that change the fetched bytes without
+ * changing the pull request they describe. The cache key carries them so a
+ * `--name-only` or narrowed `--exclude` call is never answered by a differently
+ * shaped row.
+ */
+function prDiffVariant(params: GithubInput): string {
+	const parts = [params.nameOnly ? "name-only" : "full"];
+	for (const pattern of (params.exclude ?? [])
+		.map(entry => entry.trim())
+		.filter(Boolean)
+		.sort()) {
+		parts.push(`exclude=${pattern}`);
+	}
+	return parts.join("|");
+}
+
+/** Append the cache provenance marker so a cached view never reads as live data. */
+function withCacheNotice(text: string, status: CacheStatus, fetchedAt: number): string {
+	const notice = formatCacheNotice(status, fetchedAt);
+	return notice ? `${text}\n\n${notice}` : text;
+}
+
 async function executeIssueView(
 	session: ToolSession,
 	params: GithubInput,
@@ -1941,10 +1814,30 @@ async function executeIssueView(
 	appendRepoFlag(args, repo, issue);
 	args.push("--json", (includeComments ? GH_ISSUE_FIELDS : GH_ISSUE_FIELDS_NO_COMMENTS).join(","));
 
-	const data = await git.github.json<GhIssueViewData>(session.cwd, args, signal, {
-		repoProvided: Boolean(repo),
+	const fetchFresh = () =>
+		githubIssueJsonWithStateReasonFallback<GhIssueViewData>(session.cwd, args, signal, {
+			repoProvided: Boolean(repo),
+		});
+
+	const parsed = parseIssueTarget(issue, repo);
+	const target = await withResolvedRepo(parsed, createDefaultRepoResolver(session.cwd, signal));
+
+	const view = await getOrFetchView<GhIssueViewData>({
+		repo: target.repo,
+		kind: "issue",
+		number: target.number,
+		includeComments,
+		settings: session.settings,
+		fetchFresh,
 	});
-	return buildTextResult(formatIssueView(data, { issue, repo, comments: includeComments }), data.url);
+	return buildTextResult(
+		withCacheNotice(
+			formatIssueView(view.payload, { issue, repo, comments: includeComments }),
+			view.status,
+			view.fetchedAt,
+		),
+		view.payload.url,
+	);
 }
 
 async function executePrView(
@@ -1956,35 +1849,54 @@ async function executePrView(
 	const includeComments = params.comments ?? true;
 	const prList = normalizePrIdentifierList(params.pr);
 	const prRefs: (string | undefined)[] = prList.length > 0 ? prList : [undefined];
+	const resolveDefaultRepo = createDefaultRepoResolver(session.cwd, signal);
 
 	const views = await Promise.all(
 		prRefs.map(async prRef => {
-			const args = ["pr", "view"];
-			if (prRef) args.push(prRef);
-			appendRepoFlag(args, repo, prRef);
-			args.push("--json", (includeComments ? GH_PR_FIELDS : GH_PR_FIELDS_NO_COMMENTS).join(","));
+			const fetchFresh = async (): Promise<GhPrViewData> => {
+				const args = ["pr", "view"];
+				if (prRef) args.push(prRef);
+				appendRepoFlag(args, repo, prRef);
+				args.push("--json", (includeComments ? GH_PR_FIELDS : GH_PR_FIELDS_NO_COMMENTS).join(","));
 
-			const data = await git.github.json<GhPrViewData>(session.cwd, args, signal, {
-				repoProvided: Boolean(repo),
+				const data = await git.github.json<GhPrViewData>(session.cwd, args, signal, {
+					repoProvided: Boolean(repo),
+				});
+				const resolvedRepo = repo ?? parsePullRequestUrl(data.url).repo;
+				if (includeComments && resolvedRepo && typeof data.number === "number") {
+					data.reviewComments = await fetchPrReviewComments(session.cwd, resolvedRepo, data.number, signal);
+				}
+				return data;
+			};
+
+			const parsed = parsePrTarget(prRef, repo);
+			const target = await withResolvedRepo(parsed, resolveDefaultRepo);
+
+			const view = await getOrFetchView<GhPrViewData>({
+				repo: target.repo,
+				kind: "pr",
+				number: target.number,
+				includeComments,
+				settings: session.settings,
+				fetchFresh,
 			});
-			const resolvedRepo = repo ?? parsePullRequestUrl(data.url).repo;
-			if (includeComments && resolvedRepo && typeof data.number === "number") {
-				data.reviewComments = await fetchPrReviewComments(session.cwd, resolvedRepo, data.number, signal);
-			}
-			return { prRef, data };
+			return { prRef, data: view.payload, status: view.status, fetchedAt: view.fetchedAt };
 		}),
 	);
 
+	const render = (view: (typeof views)[number]): string =>
+		withCacheNotice(
+			formatPrView(view.data, { pr: view.prRef, repo, comments: includeComments }),
+			view.status,
+			view.fetchedAt,
+		);
+
 	if (views.length === 1) {
 		const [view] = views;
-		return buildTextResult(
-			formatPrView(view.data, { pr: view.prRef, repo, comments: includeComments }),
-			view.data.url,
-		);
+		return buildTextResult(render(view), view.data.url);
 	}
 
-	const sections = views.map(view => formatPrView(view.data, { pr: view.prRef, repo, comments: includeComments }));
-	const text = [`# ${views.length} Pull Requests`, "", ...joinSections(sections)].join("\n").trim();
+	const text = [`# ${views.length} Pull Requests`, "", ...joinSections(views.map(render))].join("\n").trim();
 	return buildTextResult(text);
 }
 
@@ -1996,22 +1908,39 @@ async function executePrDiff(
 	const repo = normalizeOptionalString(params.repo);
 	const prList = normalizePrIdentifierList(params.pr);
 	const prRefs: (string | undefined)[] = prList.length > 0 ? prList : [undefined];
+	const variant = prDiffVariant(params);
+	const resolveDefaultRepo = createDefaultRepoResolver(session.cwd, signal);
 
 	const diffs = await Promise.all(
 		prRefs.map(async prRef => {
-			const args = ["pr", "diff"];
-			if (prRef) args.push(prRef);
-			appendRepoFlag(args, repo, prRef);
-			args.push("--color", "never");
-			if (params.nameOnly) args.push("--name-only");
-			for (const pattern of params.exclude ?? []) {
-				args.push("--exclude", requireNonEmpty(pattern, "exclude pattern"));
-			}
-			const output = await git.github.text(session.cwd, args, signal, {
-				repoProvided: Boolean(repo),
-				trimOutput: false,
+			const fetchFresh = async (): Promise<string> => {
+				const args = ["pr", "diff"];
+				if (prRef) args.push(prRef);
+				appendRepoFlag(args, repo, prRef);
+				args.push("--color", "never");
+				if (params.nameOnly) args.push("--name-only");
+				for (const pattern of params.exclude ?? []) {
+					args.push("--exclude", requireNonEmpty(pattern, "exclude pattern"));
+				}
+				return await git.github.text(session.cwd, args, signal, {
+					repoProvided: Boolean(repo),
+					trimOutput: false,
+				});
+			};
+
+			const parsed = parsePrTarget(prRef, repo);
+			const target = await withResolvedRepo(parsed, resolveDefaultRepo);
+
+			const view = await getOrFetchView<string>({
+				repo: target.repo,
+				kind: "pr-diff",
+				number: target.number,
+				variant,
+				includeComments: false,
+				settings: session.settings,
+				fetchFresh,
 			});
-			return { prRef, output };
+			return { prRef, output: view.payload, status: view.status, fetchedAt: view.fetchedAt };
 		}),
 	);
 
@@ -2021,7 +1950,7 @@ async function executePrDiff(
 	if (diffs.length === 1) {
 		const [diff] = diffs;
 		const body = diff.output.length > 0 ? diff.output : emptyBody;
-		return buildTextResult(`${singleTitle}\n\n${body}`);
+		return buildTextResult(withCacheNotice(`${singleTitle}\n\n${body}`, diff.status, diff.fetchedAt));
 	}
 
 	const header = params.nameOnly
@@ -2030,7 +1959,7 @@ async function executePrDiff(
 	const sections = diffs.map(diff => {
 		const label = diff.prRef ? `PR ${diff.prRef}` : "PR (current branch)";
 		const body = diff.output.length > 0 ? diff.output : emptyBody;
-		return `## ${label}\n\n${body}`;
+		return withCacheNotice(`## ${label}\n\n${body}`, diff.status, diff.fetchedAt);
 	});
 	const text = [header, "", ...joinSections(sections)].join("\n").trim();
 	return buildTextResult(text);
@@ -2038,6 +1967,143 @@ async function executePrDiff(
 
 function joinSections(sections: string[]): string[] {
 	return sections.flatMap((section, idx) => (idx === 0 ? [section] : ["", "---", "", section]));
+}
+
+async function executePrCreate(
+	session: ToolSession,
+	params: GithubInput,
+	signal: AbortSignal | undefined,
+): Promise<AgentToolResult<GhToolDetails>> {
+	const repo = normalizeOptionalString(params.repo);
+	const title = normalizeOptionalString(params.title);
+	const body = params.body;
+	const base = normalizeOptionalString(params.base);
+	const head = normalizeOptionalString(params.head);
+	const draft = params.draft ?? false;
+	const fill = params.fill ?? false;
+	const reviewers = normalizePrIdentifierList(params.reviewer);
+	const assignees = normalizePrIdentifierList(params.assignee);
+	const labels = normalizePrIdentifierList(params.label);
+
+	if (!fill && !title) {
+		throw new ToolError("title is required unless fill is true");
+	}
+	if (fill && (title !== undefined || body !== undefined)) {
+		throw new ToolError("fill is mutually exclusive with title and body");
+	}
+
+	const args = ["pr", "create"];
+	appendRepoFlag(args, repo);
+	if (title) args.push("--title", title);
+	if (base) args.push("--base", base);
+	if (head) args.push("--head", head);
+	if (draft) args.push("--draft");
+	if (fill) args.push("--fill");
+	for (const reviewer of reviewers) args.push("--reviewer", reviewer);
+	for (const assignee of assignees) args.push("--assignee", assignee);
+	for (const label of labels) args.push("--label", label);
+
+	let bodyDir: string | undefined;
+	try {
+		if (!fill) {
+			if (body !== undefined && body.length > 0) {
+				// Route the body through a temp file: multi-KB bodies stay clear of argv
+				// limits, and `--body-file` keeps the markdown out of any shell quoting.
+				bodyDir = await fs.mkdtemp(path.join(os.tmpdir(), "gh-pr-body-"));
+				const bodyFile = path.join(bodyDir, "body.md");
+				await Bun.write(bodyFile, body);
+				args.push("--body-file", bodyFile);
+			} else {
+				// Without an explicit empty body, `gh` opens an editor we cannot drive.
+				args.push("--body", "");
+			}
+		}
+
+		const output = await git.github.text(session.cwd, args, signal, { repoProvided: Boolean(repo) });
+		const url =
+			output
+				.split("\n")
+				.map(line => line.trim())
+				.find(line => line.startsWith("https://")) ?? output.trim();
+		const parsed = parsePullRequestUrl(url);
+		const resolvedRepo = repo ?? parsed.repo;
+
+		let created: GhPrViewData | undefined;
+		if (resolvedRepo && parsed.prNumber !== undefined) {
+			try {
+				created = await git.github.json<GhPrViewData>(
+					session.cwd,
+					[
+						"pr",
+						"view",
+						String(parsed.prNumber),
+						"--repo",
+						resolvedRepo,
+						"--json",
+						GH_PR_FIELDS_NO_COMMENTS.join(","),
+					],
+					signal,
+					{ repoProvided: true },
+				);
+			} catch (error) {
+				// Best-effort summary: the pull request already exists, so losing the
+				// extra detail must not surface as a failure.
+				logger.debug("Failed to read back the created pull request", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+
+		return buildTextResult(
+			formatPrCreateResult({ url, prNumber: parsed.prNumber, data: created, title, base, head, draft }),
+			url || created?.url,
+		);
+	} finally {
+		if (bodyDir) {
+			await fs.rm(bodyDir, { recursive: true, force: true }).catch(error => {
+				logger.debug("Failed to remove the gh pr body temp dir", {
+					bodyDir,
+					error: String(error),
+				});
+			});
+		}
+	}
+}
+
+function formatPrCreateResult(options: {
+	url: string;
+	prNumber?: number;
+	data?: GhPrViewData;
+	title?: string;
+	base?: string;
+	head?: string;
+	draft?: boolean;
+}): string {
+	const number = options.prNumber ?? options.data?.number;
+	const headerTitle = options.data?.title ?? options.title ?? "Untitled";
+	const header =
+		number !== undefined
+			? `# Created Pull Request #${number}: ${headerTitle}`
+			: `# Created Pull Request: ${headerTitle}`;
+	const lines: string[] = [header, ""];
+	pushLine(lines, "URL", options.url || options.data?.url);
+	pushLine(lines, "State", options.data?.state);
+	pushLine(lines, "Draft", options.data?.isDraft ?? options.draft);
+	pushLine(lines, "Base", options.data?.baseRefName ?? options.base);
+	pushLine(lines, "Head", options.data?.headRefName ?? options.head);
+	pushLine(lines, "Author", formatAuthor(options.data?.author));
+	pushLine(lines, "Created", options.data?.createdAt);
+	pushLine(lines, "Labels", formatLabels(options.data?.labels));
+
+	const bodyText = normalizeText(options.data?.body);
+	if (bodyText) {
+		lines.push("");
+		lines.push("## Body");
+		lines.push("");
+		lines.push(bodyText);
+	}
+
+	return lines.join("\n").trim();
 }
 
 async function executePrCheckout(
@@ -2186,9 +2252,9 @@ async function checkoutPullRequest(
 				signal,
 			);
 
-			const finalWorktreePath = existingWorktree?.path ?? worktreePath;
-			if (!existingWorktree) {
-				await ensureGitWorktreePathAvailable(finalWorktreePath, existingWorktrees);
+			let finalWorktreePath = existingWorktree?.path;
+			if (!finalWorktreePath) {
+				finalWorktreePath = await resolveAvailableWorktreePath(worktreePath, existingWorktrees);
 				await fs.mkdir(path.dirname(finalWorktreePath), { recursive: true });
 				await git.worktree.add(repoRoot, finalWorktreePath, localBranch, { signal });
 			}
@@ -2261,38 +2327,6 @@ async function executePrPush(
 	);
 }
 
-async function executeSearchIssues(
-	session: ToolSession,
-	params: GithubInput,
-	signal: AbortSignal | undefined,
-): Promise<AgentToolResult<GhToolDetails>> {
-	const query = requireNonEmpty(params.query, "query");
-	const repo = normalizeOptionalString(params.repo);
-	const limit = resolveSearchLimit(params.limit);
-	const args = buildGhSearchArgs("issues", query, limit, repo);
-
-	const items = await git.github.json<GhSearchResult[]>(session.cwd, args, signal, {
-		repoProvided: Boolean(repo),
-	});
-	return buildTextResult(formatSearchResults("issues", query, repo, items));
-}
-
-async function executeSearchPrs(
-	session: ToolSession,
-	params: GithubInput,
-	signal: AbortSignal | undefined,
-): Promise<AgentToolResult<GhToolDetails>> {
-	const query = requireNonEmpty(params.query, "query");
-	const repo = normalizeOptionalString(params.repo);
-	const limit = resolveSearchLimit(params.limit);
-	const args = buildGhSearchArgs("prs", query, limit, repo);
-
-	const items = await git.github.json<GhSearchResult[]>(session.cwd, args, signal, {
-		repoProvided: Boolean(repo),
-	});
-	return buildTextResult(formatSearchResults("pull requests", query, repo, items));
-}
-
 async function executeRunWatch(
 	session: ToolSession,
 	toolName: string,
@@ -2303,9 +2337,30 @@ async function executeRunWatch(
 	const branchInput = normalizeOptionalString(params.branch);
 	const runReference = parseRunReference(params.run);
 	const repo = await resolveGitHubRepo(session.cwd, undefined, runReference.repo, signal);
-	const intervalSeconds = RUN_WATCH_INTERVAL_DEFAULT;
 	const graceSeconds = RUN_WATCH_GRACE_DEFAULT;
 	const tail = resolveTailLimit(params.tail);
+	const watchStartMs = Date.now();
+	// Two cadences, not one: short polls give snappy feedback while a run is
+	// starting, and the slow cadence keeps a long build from burning the shared
+	// authenticated REST quota for as long as it runs.
+	const currentIntervalSeconds = (): number =>
+		Date.now() - watchStartMs < RUN_WATCH_FAST_WINDOW_MS ? RUN_WATCH_INTERVAL_DEFAULT : RUN_WATCH_INTERVAL_SLOW;
+	let consecutivePollFailures = 0;
+	const handlePollError = async (error: unknown): Promise<void> => {
+		if (signal?.aborted) {
+			throw error;
+		}
+
+		consecutivePollFailures += 1;
+		if (!isRateLimitedGhError(error) || consecutivePollFailures > RUN_WATCH_MAX_POLL_FAILURES) {
+			throw error;
+		}
+
+		// Rate limited: back off on the slow cadence and retry, rather than
+		// discarding the watch and every observation made so far.
+		await abortableSleep(RUN_WATCH_INTERVAL_SLOW * 1000, signal);
+	};
+
 	if (runReference.runId !== undefined) {
 		const runId = runReference.runId;
 		let pollCount = 0;
@@ -2314,7 +2369,15 @@ async function executeRunWatch(
 			throwIfAborted(signal);
 			pollCount += 1;
 
-			let run = await fetchRunSnapshot(session.cwd, repo, runId, signal);
+			let run: GhRunSnapshot;
+			try {
+				run = await fetchRunSnapshot(session.cwd, repo, runId, signal);
+			} catch (error) {
+				await handlePollError(error);
+				continue;
+			}
+			consecutivePollFailures = 0;
+
 			const details = buildRunWatchDetails(repo, run, {
 				state: "watching",
 				pollCount,
@@ -2344,7 +2407,14 @@ async function executeRunWatch(
 						}),
 					});
 					await abortableSleep(graceSeconds * 1000, signal);
-					run = await fetchRunSnapshot(session.cwd, repo, runId, signal);
+					try {
+						run = await fetchRunSnapshot(session.cwd, repo, runId, signal);
+					} catch (error) {
+						if (signal?.aborted) {
+							throw error;
+						}
+						// Refetch failure: report the failures the original snapshot already showed.
+					}
 				}
 
 				const failedJobLogs = await fetchFailedJobLogs(
@@ -2378,7 +2448,7 @@ async function executeRunWatch(
 				return buildTextResult(formatRunWatchResult(repo, run, [], tail), run.url, finalDetails);
 			}
 
-			await abortableSleep(intervalSeconds * 1000, signal);
+			await abortableSleep(currentIntervalSeconds() * 1000, signal);
 		}
 	}
 
@@ -2388,12 +2458,22 @@ async function executeRunWatch(
 		: await requireCurrentGitHead(session.cwd, signal);
 	let pollCount = 0;
 	let settledSuccessSignature: string | undefined;
+	let everSawRuns = false;
+	const completedRunJobsCache = new Map<number, GhRunJobSnapshot[]>();
 
 	while (true) {
 		throwIfAborted(signal);
 		pollCount += 1;
 
-		let runs = await fetchRunsForCommit(session.cwd, repo, headSha, branch, signal);
+		let runs: GhRunSnapshot[];
+		try {
+			runs = await fetchRunsForCommit(session.cwd, repo, headSha, branch, signal, completedRunJobsCache);
+		} catch (error) {
+			await handlePollError(error);
+			continue;
+		}
+		consecutivePollFailures = 0;
+		everSawRuns = everSawRuns || runs.length > 0;
 		const details = buildCommitRunWatchDetails(repo, headSha, branch, runs, {
 			state: "watching",
 			pollCount,
@@ -2405,6 +2485,7 @@ async function executeRunWatch(
 
 		const outcome = getRunCollectionOutcome(runs);
 		if (outcome === "failure") {
+			let failedJobs = runs.flatMap(run => run.jobs.filter(isFailedJob).map(job => ({ run, job })));
 			if (graceSeconds > 0) {
 				const note = `Failure detected. Waiting ${graceSeconds}s to capture concurrent failures before fetching logs.`;
 				onUpdate?.({
@@ -2421,16 +2502,35 @@ async function executeRunWatch(
 					}),
 				});
 				await abortableSleep(graceSeconds * 1000, signal);
-				runs = await fetchRunsForCommit(session.cwd, repo, headSha, branch, signal);
+				try {
+					const refetched = await fetchRunsForCommit(
+						session.cwd,
+						repo,
+						headSha,
+						branch,
+						signal,
+						completedRunJobsCache,
+					);
+					const refetchedFailed = refetched.flatMap(run =>
+						run.jobs.filter(isFailedJob).map(job => ({ run, job })),
+					);
+					// An auto-retry can reset conclusions between detection and
+					// refetch. Keep the originally-detected failures when the refetch
+					// no longer shows any, so the watch never ends reporting a failure
+					// it cannot show logs for.
+					if (refetchedFailed.length > 0) {
+						runs = refetched;
+						failedJobs = refetchedFailed;
+					}
+				} catch (error) {
+					if (signal?.aborted) {
+						throw error;
+					}
+					// Refetch failure: report from the original snapshots.
+				}
 			}
 
-			const failedJobLogs = await fetchFailedJobLogs(
-				session.cwd,
-				repo,
-				runs.flatMap(run => run.jobs.filter(isFailedJob).map(job => ({ run, job }))),
-				tail,
-				signal,
-			);
+			const failedJobLogs = await fetchFailedJobLogs(session.cwd, repo, failedJobs, tail, signal);
 			const finalDetails = buildCommitRunWatchDetails(repo, headSha, branch, runs, {
 				state: "completed",
 				failedJobLogs,
@@ -2462,7 +2562,8 @@ async function executeRunWatch(
 			}
 
 			settledSuccessSignature = signature;
-			const note = `All known workflow runs completed successfully. Waiting ${intervalSeconds}s to ensure no additional runs appear for this commit.`;
+			const confirmWaitSeconds = currentIntervalSeconds();
+			const note = `All known workflow runs completed successfully. Waiting ${confirmWaitSeconds}s to ensure no additional runs appear for this commit.`;
 			onUpdate?.({
 				content: [
 					{
@@ -2476,11 +2577,29 @@ async function executeRunWatch(
 					note,
 				}),
 			});
-			await abortableSleep(intervalSeconds * 1000, signal);
+			await abortableSleep(confirmWaitSeconds * 1000, signal);
 			continue;
 		}
 
 		settledSuccessSignature = undefined;
-		await abortableSleep(intervalSeconds * 1000, signal);
+		if (!everSawRuns && Date.now() - watchStartMs >= RUN_WATCH_NO_RUNS_GIVE_UP_MS) {
+			// A repository with no Actions workflows (or Actions disabled) never
+			// produces a run for this commit. Give up with the reason instead of
+			// polling forever; the note carries the same reason to the renderer, so
+			// the TUI does not read as "still waiting" for a watch that has ended.
+			const elapsedSeconds = Math.round((Date.now() - watchStartMs) / 1000);
+			const reason = `No workflow runs found for ${repo}@${formatShortSha(headSha) ?? headSha} after ${elapsedSeconds}s (${pollCount} polls). The commit may not trigger any GitHub Actions workflows, or Actions may be disabled for this repository. Pass \`run\` to watch a specific run.`;
+			return buildTextResult(
+				reason,
+				undefined,
+				buildCommitRunWatchDetails(repo, headSha, branch, runs, {
+					state: "completed",
+					pollCount,
+					note: reason,
+				}),
+			);
+		}
+
+		await abortableSleep(currentIntervalSeconds() * 1000, signal);
 	}
 }

@@ -119,7 +119,7 @@ Resource exhaustion recovery:
 
 Kernel startup receives the optional session file path from executor:
 
-- `CORNFIELD_SESSION_FILE` (session state file path)
+- `PI_SESSION_FILE` (session state file path)
 
 `PythonKernel.#initializeKernelEnvironment(...)` then runs init script inside kernel to:
 

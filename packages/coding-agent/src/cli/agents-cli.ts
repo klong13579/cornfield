@@ -1,11 +1,12 @@
 /**
  * Agents CLI command handlers.
  *
- * Handles `omp agents unpack` for writing bundled agent definitions to disk.
+ * Handles `cornfield agents unpack` for writing bundled agent definitions to disk.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { CONFIG_DIR_NAME, getClientDir, getProjectDir, isEnoent } from "@cornfield/utils";
+import { writeStdout } from "@cornfield/utils/cli";
 import { YAML } from "bun";
 import chalk from "chalk";
 import { theme } from "../modes/theme/theme";
@@ -30,10 +31,6 @@ interface UnpackResult {
 	total: number;
 	written: string[];
 	skipped: string[];
-}
-
-function writeStdout(line: string): void {
-	process.stdout.write(`${line}\n`);
 }
 
 function resolveTargetDir(flags: AgentsCommandArgs["flags"]): string {

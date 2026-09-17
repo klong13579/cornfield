@@ -77,9 +77,16 @@ describe("component escape bindings", () => {
 		});
 		const modelRegistry = {
 			getAll: () => [model],
+			getAvailable: () => [model],
+			getError: () => undefined,
 			getDiscoverableProviders: () => [],
 			getCanonicalModels: () => [],
 			resolveCanonicalModel: () => undefined,
+			// The selector reads discovery state on open; a fake without it throws at
+			// construction (2026-09-16: this file's fake fell behind the component).
+			getProviderDiscoveryState: () => ({ status: "ok", fetchedAt: Date.now() }),
+			refresh: async () => {},
+			refreshProvider: async () => {},
 		} as unknown as ModelRegistry;
 		const ui = {
 			requestRender: vi.fn(),

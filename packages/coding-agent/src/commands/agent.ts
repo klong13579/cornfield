@@ -16,7 +16,7 @@
  */
 
 import * as path from "node:path";
-import { Args, Command, Flags, renderCommandHelp } from "@cornfield/utils/cli";
+import { Args, Command, Flags, renderCommandHelp, writeStdout } from "@cornfield/utils/cli";
 import {
 	renderList,
 	renderMigrateDefaultHome,
@@ -97,35 +97,31 @@ export default class Agent extends Command {
 	static examples = [
 		"",
 		"  ======== 创建 ========",
-		"  cornfield agent init hr-bot                          Create ~/.cornfield/agents/hr-bot/ with default template",
-		"  cornfield agent init hr-bot --dir /opt/agents         Custom parent directory",
-		"  cornfield agent init hr-bot --mission ./mission.md    Seed from existing mission.md",
-		"  cornfield agent init hr-bot --root /srv/shared          Declare an extra read/write root (repeatable)",
-		"  cornfield agent init hr-bot --template default        Explicit template (default only, for now)",
+		"  cornfield agent init hr-bot                         Create ~/.cornfield/agents/hr-bot/ with default template",
+		"  cornfield agent init hr-bot --dir /opt/agents       Custom parent directory",
+		"  cornfield agent init hr-bot --mission ./mission.md  Seed from existing mission.md",
+		"  cornfield agent init hr-bot --root /srv/shared        Declare an extra read/write root (repeatable)",
+		"  cornfield agent init hr-bot --template default      Explicit template (default only, for now)",
 		"",
 		"  ======== 查看 ========",
-		"  cornfield agent list                                  List all agentDirs under ~/.cornfield/agents/",
-		"  cornfield agent list --json                           List as JSON",
-		"  cornfield agent show hr-bot                           Show identity, tools, skills, cron, sessions",
-		"  cornfield agent show hr-bot --json                    Show as JSON",
+		"  cornfield agent list                                List all agentDirs under ~/.cornfield/agents/",
+		"  cornfield agent list --json                         List as JSON",
+		"  cornfield agent show hr-bot                         Show identity, tools, skills, cron, sessions",
+		"  cornfield agent show hr-bot --json                  Show as JSON",
 		"",
 		"  ======== 校验 ========",
-		"  cornfield agent validate --dir ~/.cornfield/agents/hr-bot        Check always-on + runtime hard deps",
-		"  cornfield agent validate --dir .                            Check current directory",
+		"  cornfield agent validate --dir ~/.cornfield/agents/hr-bot  Check always-on + runtime hard deps",
+		"  cornfield agent validate --dir .                    Check current directory",
 		"  cornfield agent validate --dir ~/.cornfield/agents/hr-bot --json  Output as JSON",
-		"  cornfield agent validate --dir . --fix                         Auto-repair MECE violations + skeleton gaps",
-		"  cornfield agent validate --dir . --semantic                   Run LLM semantic audit (needs model+key)",
+		"  cornfield agent validate --dir . --fix              Auto-repair MECE violations + skeleton gaps",
+		"  cornfield agent validate --dir . --semantic         Run LLM semantic audit (needs model+key)",
 		"",
 		"  ======== 注册表 ========",
-		"  cornfield agent register hr3 --dir /path/to/hr3       Add an existing agentDir to ~/.cornfield/agent/registry.json",
-		"  cornfield agent register hr3 /path/to/hr3              Positional shortcut for --dir",
-		"  cornfield agent unregister hr3                          Remove hr3 from the registry (does not delete files)",
-		"  cornfield agent unregister hr3 --delete-files           Also rm -rf the agentDir on disk",
-		"  cornfield agent reconcile                               Prune stale entries; re-register any in default location",
-		"",
-		"  ======== default agent 的家 ========",
-		"  cornfield agent migrate-default-home --dry-run          Show what would move out of ~/.cornfield/agent",
-		"  cornfield agent migrate-default-home                    Move the default Agent's own state into ~/.cornfield/agents/default",
+		"  cornfield agent register hr3 --dir /path/to/hr3     Add an existing agentDir to ~/.cornfield/agent/registry.json",
+		"  cornfield agent register hr3 /path/to/hr3           Positional shortcut for --dir",
+		"  cornfield agent unregister hr3                      Remove hr3 from the registry (does not delete files)",
+		"  cornfield agent unregister hr3 --delete-files       Also rm -rf the agentDir on disk",
+		"  cornfield agent reconcile                           Prune stale entries; re-register any in default location",
 		"",
 	];
 
@@ -175,24 +171,24 @@ export default class Agent extends Command {
 					roots: flags.root as string[] | undefined,
 				});
 				if (flags.json) {
-					console.log(JSON.stringify(result, null, 2));
+					writeStdout(JSON.stringify(result, null, 2));
 					return;
 				}
-				console.log(
+				writeStdout(
 					result.created
 						? `✓ Created agentDir at ${result.agentDir}`
 						: `✓ AgentDir exists at ${result.agentDir} (additive update — existing files preserved)`,
 				);
-				if (result.created) console.log(`  ${result.filesWritten} content files written`);
-				if (result.attachedRoots?.length) console.log(`  Extra roots: ${result.attachedRoots.join(", ")}`);
-				console.log(
+				if (result.created) writeStdout(`  ${result.filesWritten} content files written`);
+				if (result.attachedRoots?.length) writeStdout(`  Extra roots: ${result.attachedRoots.join(", ")}`);
+				writeStdout(
 					`  Next: edit ${path.join(result.agentDir, "mission.md")} and run \`cornfield agent show ${name}\``,
 				);
 				return;
 			}
 			case "list": {
 				const summaries = await runAgentList({ dir: dirResolved, json: flags.json as boolean | undefined });
-				console.log(renderList(summaries, Boolean(flags.json)));
+				writeStdout(renderList(summaries, Boolean(flags.json)));
 				return;
 			}
 			case "show": {
@@ -206,7 +202,7 @@ export default class Agent extends Command {
 					dir: dirResolved,
 					json: flags.json as boolean | undefined,
 				});
-				console.log(renderShow(detail, Boolean(flags.json)));
+				writeStdout(renderShow(detail, Boolean(flags.json)));
 				return;
 			}
 			case "validate": {
@@ -221,7 +217,7 @@ export default class Agent extends Command {
 					fix: flags.fix as boolean | undefined,
 					semantic: flags.semantic as boolean | undefined,
 				});
-				console.log(renderValidate(result, Boolean(flags.json)));
+				writeStdout(renderValidate(result, Boolean(flags.json)));
 				process.exitCode = result.valid ? 0 : 1;
 				return;
 			}
@@ -234,7 +230,7 @@ export default class Agent extends Command {
 					return;
 				}
 				const result = await runAgentRegister({ name, dir: dirResolved, json: flags.json as boolean | undefined });
-				console.log(renderRegister(result, Boolean(flags.json)));
+				writeStdout(renderRegister(result, Boolean(flags.json)));
 				process.exitCode = result.registered ? 0 : 1;
 				return;
 			}
@@ -249,12 +245,12 @@ export default class Agent extends Command {
 					deleteFiles: flags.deleteFiles as boolean | undefined,
 					json: flags.json as boolean | undefined,
 				});
-				console.log(renderUnregister(result, Boolean(flags.json)));
+				writeStdout(renderUnregister(result, Boolean(flags.json)));
 				return;
 			}
 			case "reconcile": {
 				const result = await runAgentReconcile({ json: flags.json as boolean | undefined });
-				console.log(renderReconcile(result, Boolean(flags.json)));
+				writeStdout(renderReconcile(result, Boolean(flags.json)));
 				return;
 			}
 			case "migrate-default-home": {

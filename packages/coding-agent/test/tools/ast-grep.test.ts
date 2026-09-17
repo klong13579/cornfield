@@ -39,9 +39,11 @@ describe("ast_grep parse errors", () => {
 			expect(text).toContain("No matches found");
 			expect(text).toContain("Parse issues mean the query may be mis-scoped");
 			expect(details?.parseErrors).toHaveLength(1);
-			expect(details?.parseErrors?.[0]).toContain("broken.ts: parse error (syntax tree contains error nodes)");
+			expect(details?.parseErrors?.[0]).toContain(
+				"broken.ts: parse error (syntax tree contains error or missing nodes)",
+			);
 			expect(details?.parseErrors?.[0]).not.toContain("someUnlikelyCall($A):");
-			expect(text.match(/parse error \(syntax tree contains error nodes\)/g)?.length ?? 0).toBe(1);
+			expect(text.match(/parse error \(syntax tree contains error or missing nodes\)/g)?.length ?? 0).toBe(1);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

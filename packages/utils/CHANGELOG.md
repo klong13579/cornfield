@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- `writeStdout()` in `cli.ts` (`@cornfield/utils/cli`): the single stdout exit for command output.
+  It appends a newline when the text does not already end with one. Deliberately not `console.log`:
+  with winston loaded, a single `console.log` payload larger than the pipe buffer is written only up
+  to a buffer boundary when stdout is a pipe, the tail is dropped before the process exits, and the
+  exit code still reads 0 (measured: 236086 bytes to a file, 65536 to a pipe). Callers pass the whole
+  document; the newline contract is "terminated", not "one appended".
+
 ## [1.1.4] - 2026-09-12
 
 ### Fixed

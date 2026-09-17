@@ -60,4 +60,20 @@ describe("resolveEditMode", () => {
 			resolveEditMode(createSession({ activeModel: "openai-codex/gpt-5.3-codex-spark", settingsMode: "hashline" })),
 		).toBe("hashline");
 	});
+
+	test("selects sloppy from the edit.mode setting", () => {
+		delete Bun.env.PI_EDIT_VARIANT;
+		delete Bun.env.PI_STRICT_EDIT_MODE;
+
+		expect(resolveEditMode(createSession({ settingsMode: "sloppy" }))).toBe("sloppy");
+	});
+
+	test("PI_EDIT_VARIANT=sloppy wins over the model fallback", () => {
+		Bun.env.PI_EDIT_VARIANT = "sloppy";
+		delete Bun.env.PI_STRICT_EDIT_MODE;
+
+		expect(resolveEditMode(createSession({ activeModel: "openai/gpt-5-mini", settingsMode: "hashline" }))).toBe(
+			"sloppy",
+		);
+	});
 });

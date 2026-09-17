@@ -1,0 +1,61 @@
+# Vendored copy of tree-sitter-typescript 0.23.2 (MIT,
+# https://github.com/tree-sitter/tree-sitter-typescript) with a single grammar
+# fix: `common/define-grammar.js` gains
+#   seq('export', 'type', '*', $._from_clause, $._semicolon)
+#   seq('export', 'type', $.namespace_export, $._from_clause, $._semicolon)
+# so that `export type * from "mod"` and `export type * as ns from "mod"`
+# (TypeScript 5.0) parse. Upstream — 0.23.2, the newest published version, and
+# master as of 2026-09-16 — only accepts a braced `export type { … }` clause, so
+# the star form parses as an ERROR node. That made every edit to a file using it
+# fail: `edit` runs a post-write parse gate (`src/edit/post-write.ts`) through
+# `@cornfield/natives`' `summarizeCode`, and 14 files in this repo use the form.
+#
+# The parsers under `typescript/src` and `tsx/src` are regenerated, never
+# hand-edited. Sync by re-copying the crate from crates.io and re-applying the
+# grammar fix:
+#   cp -R <registry>/tree-sitter-typescript-0.23.2/. crates/tree-sitter-typescript-vendored/
+#   cd crates/tree-sitter-typescript-vendored && bun add tree-sitter-javascript@0.23.1
+#   patch common/define-grammar.js (the two alternatives above)
+#   (cd typescript && bunx tree-sitter-cli@0.24.4 generate)
+#   (cd tsx && bunx tree-sitter-cli@0.24.4 generate)
+# With that CLI + JS-grammar pair the *unpatched* grammar regenerates
+# byte-identically to the published crate, so the delta stays auditable.
+[package]
+name = "tree-sitter-typescript"
+description = "TypeScript and TSX grammars for tree-sitter"
+version = "0.23.2"
+authors = [
+  "Max Brunsfeld <maxbrunsfeld@gmail.com>",
+  "Amaan Qureshi <amaanq12@gmail.com>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["incremental", "parsing", "tree-sitter", "typescript", "tsx"]
+categories = ["parsing", "text-editors"]
+repository = "https://github.com/tree-sitter/tree-sitter-typescript"
+edition = "2021"
+autoexamples = false
+
+build = "bindings/rust/build.rs"
+include = [
+  "common",
+  "bindings/rust",
+  "typescript/grammar.js",
+  "typescript/src",
+  "tsx/grammar.js",
+  "tsx/src",
+  "queries/*",
+  "./tree-sitter.json",
+]
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[dependencies]
+tree-sitter-language = "0.1"
+
+[build-dependencies]
+cc = "1.1"
+
+[dev-dependencies]
+tree-sitter = "0.24"

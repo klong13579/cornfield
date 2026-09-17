@@ -9,7 +9,7 @@
  *   - Legacy `.agent/SYSTEM.md` (deprecated path) is detected and removed.
  *   - `.cornfield/SYSTEM.md` is force-created from the skeleton template if missing.
  *
- * I/O failures bubble to the caller (gateway install / omp agent init) which decides
+ * I/O failures bubble to the caller (gateway install / cornfield agent init) which decides
  * whether to abort or retry.
  */
 

@@ -150,6 +150,9 @@
 |文档|说明|状态|
 |---|---|---|
 |self-evolution.md|Evolution 功能方案（v4，当前默认实现）|真值|
+|upstream-tool-port-evaluation.md|上游缺失工具移植评估（整工具维度：eval/learn/memory 四件套/security_scan/goal/think…）|设计|
+|upstream-tool-capability-port.md|上游工具能力差移植方案（同工具维度：拦截器/gh op/read 选择器/edit 修复…）|设计（分批实施中）|
+|upstream-eval-js-port-plan.md|上游 eval 工具 js 后端移植计划|设计|
 |zomp-zed-agent-settings.json.example|Zed 集成示例配置|资产|
 
 ## 生命周期迁移记录（2026-08-30）

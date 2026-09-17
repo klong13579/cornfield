@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type SettingPath, Settings } from "@cornfield/coding-agent/config/settings";
 import { createTools, HIDDEN_TOOLS, type ToolSession } from "@cornfield/coding-agent/tools";
+import { logger } from "@cornfield/utils";
 
 Bun.env.PI_PYTHON_SKIP_CHECK = "1";
 
@@ -96,13 +97,45 @@ describe("createTools", () => {
 		vi.spyOn(await import("@cornfield/coding-agent/ipy/kernel"), "checkPythonKernelAvailability").mockResolvedValue({
 			ok: false,
 			reason: "missing python",
+			pythonPath: "/tmp/venv/bin/python",
 		});
+		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 		const tools = await createTools(session, ["python"]);
 		const names = tools.map(t => t.name);
 
 		expect(names).toContain("bash");
 		expect(names).toContain("exit_plan_mode");
 		expect(names).not.toContain("python");
+
+		// 告警必须带上被选中的解释器：项目里的 .venv 会盖过托管环境，不记下来就没人知道
+		// 该往哪个 python 装包（2026-09-16 实测：日志只有 reason 时定位花了四轮）。
+		expect(warnSpy).toHaveBeenCalledWith(
+			"Python kernel unavailable, falling back to bash",
+			expect.objectContaining({ reason: "missing python", pythonPath: "/tmp/venv/bin/python" }),
+		);
+		// The reason must reach the session too, not just the log: on non-interactive
+		// runs the session prompt is the only surface the agent sees.
+		expect(session.pythonUnavailable).toEqual({ pythonPath: "/tmp/venv/bin/python", reason: "missing python" });
+	});
+
+	it("logs pythonPath as null when no interpreter could be resolved", async () => {
+		const session = createTestSession();
+		vi.spyOn(await import("@cornfield/coding-agent/ipy/kernel"), "checkPythonKernelAvailability").mockResolvedValue({
+			ok: false,
+			reason: "Python executable not found on PATH",
+		});
+		const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+		await createTools(session, ["python"]);
+
+		// 解析就失败（无解释器可选）与「选了但缺包」必须可区分：前者 null，后者是具体路径。
+		expect(warnSpy).toHaveBeenCalledWith(
+			"Python kernel unavailable, falling back to bash",
+			expect.objectContaining({ pythonPath: null }),
+		);
+		expect(session.pythonUnavailable).toEqual({
+			pythonPath: null,
+			reason: "Python executable not found on PATH",
+		});
 	});
 
 	it("excludes lsp tool when session disables LSP", async () => {

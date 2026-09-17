@@ -142,8 +142,8 @@
 | Tool | 文件 | name | 形态 | 前端直调？ |
 |---|---|---|---|---|
 | read | `tools/read.ts` | `ReadTool` | TSchema `path/sel/timeout`；流式读 + 行号/hashline + archive/sqlite 透明 + URL 抓取 + 图像识别；LSP writethrough | ⚠ 不直接；通过 `session` + `dispatch`（前端的 `get_snapshot` 拿了 agent tool register 表），wire 没暴露「调用 read tool」 |
-| write | `tools/write.ts` | `WriteTool` | TSchema `path/content`；Bun.write；archive/sqlite 适配；LSP writethrough；plan-mode guard；hashline strip | ⚠ 不直接；wire 已能 `fs_read`/`fs_read_image`，**`fs_write` 还没有 wire 命令** |
-| edit | `edit/index.ts` | `EditTool` | 多模：replace/patch/apply_patch/hashline/atom/vim；LSP writethrough + 模糊匹配；并发 exclusive + nonAbortable | ⚠ 不直接；同上 `fs_write` 缺 |
+| write | `tools/write.ts` | `WriteTool` | TSchema `path/content`；Bun.write；archive/sqlite 适配；LSP writethrough；plan-mode guard；hashline strip | ✅ wire `fs_write`（票 01 落地；路径约束与 read 侧同一份 sandbox） |
+| edit | `edit/index.ts` | `EditTool` | 多模：replace/patch/apply_patch/hashline/atom/vim/sloppy；LSP writethrough + 模糊匹配；并发 exclusive + nonAbortable | ✅ wire `fs_edit`（支持 replace/patch/hashline/atom；其余模式包括 `sloppy` 显式报 `not supported over wire`，不是静默降级）；diff 由 `fs_diff` 出 |
 | find | `tools/find.ts` | `FindTool` | TSchema + 后端走 `natives.glob/fs_cache` | ⚠ 不直接；`fs_list` wire 提供更通用的 workspace 树，不绑定 cwd |
 | search | `tools/search.ts` | `SearchTool` | ripgrep 包装（`grep.rs`） | ⚠ 不直接 |
 | ast-grep | `tools/ast-grep.ts` | `AstGrepTool` | `natives.astGrep(options)` | ⚠ 不直接 |
@@ -155,11 +155,13 @@
 | git | `commit/agentic/tools/*` + `autoresearch/git.ts` + `modes/components/status-line/git-utils.ts` | 多个内部 helper | status/diff/overview/file-diff/hunk — 全部给 TUI/agent 用 | ⚠ 不直接 |
 | 其它 | ask/calculator/checkpoint/debug/identity/inspect_image/job/list_models/notebook/python/recipe/render_mermaid/report_tool_issue/resolve/review/search-tool-bm25/ssh/switch_model/task/todo/vim/web_search/yield/image-gen/... | 见 `tools/index.ts:84-115` | 28 个 tool + 5 个 hidden | ⚠ 不直接 |
 
-> ⚠ 工具层覆盖度的关键结论：**所有工具都是「给 Agent 调」，不是「给前端调」**。前端能「读」+「读图」（wire `fs_read`/`fs_read_image`），但**写/编辑/diff/git/IDE bash 调用都没有 wire 命令面**——这是编辑器扩展第一道缺口。
+> ⚠ 工具层覆盖度的关键结论：**工具层仍以「给 Agent 调」为主，但命令面已在逐步前移到前端**。前端已拿到：读/读图（`fs_read`/`fs_read_image`）、写/编辑/diff（`fs_write`/`fs_edit`/`fs_diff`）、git 最小集（`git_status`/`git_diff`/`git_log`/`git_show`/`git_branches`）与 `bash`/`execute_python`；仍缺的是「把任意 tool 当命令面暴露」（`read`/`grep`/`lsp` 等仍为 Agent 专用，见上表）与 IDE 侧深集成（切面见 1.4）。
 
 ### 1.4 编辑器扩展需要补的（✗ / ⚠ 项）
 
-#### ✗ 必须新建的（前端 → wire / Agent 均要）
+#### ✓ 原列为必须新建，自 2026-09 起均已落地（票 01/02）
+
+> 以下四项现均已有 wire 命令面（实现见 `packages/coding-agent/src/server/wire-server.ts` 的 `fs_write`/`fs_edit`/`fs_diff` 与 git 最小集）：`fs_write`/`fs_edit`/`fs_diff`/`git_status`/`git_diff`/`git_log`/`git_show`/`git_branches`。原文保留作历史记录（“现在没有”的说法指当时）；仍未覆盖的部分见下一节。
 
 1. **`fs_write` wire 命令**：现在 wire 有 `fs_list/fs_read/fs_read_image` 三个文件读取，没有写。
    需要：`{ type: "fs_write", sessionId?, path, content }` + 路径越界检查与 write/read 一致（agentDir sandbox）。
@@ -472,11 +474,11 @@
 | **协议耦合度** | 低：纯走现有 wire，extension 走 webview iframe | 中：ACP（已上线） + MCP（已上线） + 自定义 fs-edit-protocol（⚠ 新增） + wire port（⚠ Rust port 成本） | OpenSumi | 新增协议面越少越好；内核 0 改动才是金句本意 |
 | **编辑器内核选择** | Monaco (Battle-tested) 或 CodeMirror 6 (小、轻)；都纯 JS、MIT | Zed 原生（GPUI、Rust、Apache/GPL-3.0） | OpenSumi | 编辑光标/buffer 不是差异化，不值得为它背 fork 维护账 |
 | **扩展性** | webview + 自定义 contribution，纯 web 生态（vscode extension API 风格） | Zed extension API（Rust + WASM）；扩展机制成熟但需要 Rust 写扩展 | OpenSumi | 50 人团队主导 web，扩展成本 CornField 团队可消化；Rust 扩展团队门槛高 |
-| **跟 cornfield 现状契合度** | 极高：现有 `desktop` + `web-app` 资产直接复用；`CORNFIELD_DESKTOP_DEV_URL` 已支持多窗口入口（✓ 已确认 `desktop/main.ts:50`） | 中：需新建 `repos/zomp`（类比 brush-vendored），双 Cargo workspace 双 release pipeline | OpenSumi | 一致性：避免在尚未拍板的位置再次深入 |
+| **跟 cornfield 现状契合度** | 极高：现有 `desktop` + `web-app` 资产直接复用；`OMP_DESKTOP_DEV_URL` 已支持多窗口入口（✓ 已确认 `desktop/main.ts:50`） | 中：需新建 `repos/zomp`（类比 brush-vendored），双 Cargo workspace 双 release pipeline | OpenSumi | 一致性：避免在尚未拍板的位置再次深入 |
 | **MVP 人力成本** | 1 名资深 Web 工程师 | 1-2 名资深 Rust + 部分 Web；且需先做 P0 spike 验证 GPUIView 嵌入可行性 | OpenSumi | 时间/人力账差 2 倍；web-app 已有 agent 卡片、MCP、agent UI 资产 |
 | **长期演化** | 路径平滑：从 web-app 内 iframe → 抽出独立 extension → 演进为完整 IDE 形态（OpenSumi/Code-OSS 都走过这条路） | 起点即重 fork：`gpui` 上游主分支日更，季度 rebase 账 +1，GPL-3.0 合规复审账 +1 | OpenSumi | 风险账更小，**演化路径是"渐进"，不是"先冲一把"** |
 
-**推荐：OpenSumi 风格作为主推。** 理由：(1) 跟现有 `desktop` + `web-app` 资产契合度最高，`CORNFIELD_DESKTOP_DEV_URL` 这个口子已经留好了；(2) 编辑器内核（Monaco/CM6）不背 fork 维护账——光标/buffer/LSP 是红海，不是 CornField 差异化位面；(3) 内核 0 改动严格满足用户"改内核大家跟着变"原则；(4) MVP 时间/人力账短一倍以上。
+**推荐：OpenSumi 风格作为主推。** 理由：(1) 跟现有 `desktop` + `web-app` 资产契合度最高，`OMP_DESKTOP_DEV_URL` 这个口子已经留好了；(2) 编辑器内核（Monaco/CM6）不背 fork 维护账——光标/buffer/LSP 是红海，不是 CornField 差异化位面；(3) 内核 0 改动严格满足用户"改内核大家跟着变"原则；(4) MVP 时间/人力账短一倍以上。
 
 **可混搭点**（保留 Zed 优势的子项）：
 
@@ -558,7 +560,7 @@
 | 改动对象 | 内容 | 理由 |
 |---|---|---|
 | **新建** `packages/editor-extension` | OpenSumi-style workbench 框架、extension slot、布局引擎 | 不污染 `web-app`，编辑器是独立前端 |
-| **扩展** `packages/desktop` | 加 "IDE 模式" 菜单项 / 多窗口 / dev URL 指向 editor-extension dev server | `desktop/main.ts:50` 已支持 `CORNFIELD_DESKTOP_DEV_URL`（✓ 已确认） |
+| **扩展** `packages/desktop` | 加 "IDE 模式" 菜单项 / 多窗口 / dev URL 指向 editor-extension dev server | `desktop/main.ts:50` 已支持 `OMP_DESKTOP_DEV_URL`（✓ 已确认） |
 | **不扩** `packages/web-app` | 渲染层复用 web-app 资产，但不在 web-app 包内编辑器化 | 避免 web-app 变成编辑器壳 |
 | **只读** `packages/coding-agent` | ACP mode + 现有 tools 不动；新增可选 `fileEditStream` 走 `wire` 扩展位 | 内核稳定 |
 | **复用** `packages/wire` / `packages/client` | 加 wire 命令 / 客户端订阅类型；web-app 升级时同步受益 | 与金句一致 |

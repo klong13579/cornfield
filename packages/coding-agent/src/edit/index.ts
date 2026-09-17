@@ -72,6 +72,13 @@ function getEditToolContract(mode: EditMode): string {
 				'✅ CORRECT: {"path": "src/foo.ts", "edits": [{"loc": {...}, "content": [...]}]} or vim-style steps\n' +
 				'❌ WRONG: {"edits": [...]} (missing top-level `path`)\n\n'
 			);
+		case "sloppy":
+			return (
+				requiredPreamble +
+				'✅ CORRECT: {"input": "<SM:EDIT path=\\"src/foo.ts\\">\\n<SM:FIND>\\nold\\n</SM:FIND>\\n<SM:PUT>\\nnew\\n</SM:PUT>\\n</SM:EDIT>"}\n' +
+				'❌ WRONG: {"edits": [{"old_text": "...", "new_text": "..."}]} (sloppy takes one `input` text block, not an edits array)\n' +
+				'❌ WRONG: {"input": ""} (input must carry at least one <SM:EDIT> block)\n\n'
+			);
 		case "vim":
 			return (
 				requiredPreamble +
@@ -90,18 +97,30 @@ import {
 } from "./modes/hashline";
 import { executePatchSingle, type PatchEditEntry, type PatchParams, patchEditSchema } from "./modes/patch";
 import { executeReplaceSingle, type ReplaceEditEntry, type ReplaceParams, replaceEditSchema } from "./modes/replace";
+import { executeSloppySingle, type SloppyParams, sloppyEditSchema } from "./modes/sloppy";
 import { validateEditedFile } from "./post-write";
-import { type EditToolDetails, type EditToolPerFileResult, getLspBatchRequest, type LspBatchRequest } from "./renderer";
+import {
+	type EditToolDetails,
+	type EditToolPerFileResult,
+	getLspBatchRequest,
+	type LspBatchRequest,
+	withValidationNote,
+} from "./renderer";
+import sloppyDescription from "./sloppy.md" with { type: "text" };
 
 export { DEFAULT_EDIT_MODE, type EditMode, normalizeEditMode } from "../utils/edit-mode";
 export * from "./apply-patch";
+export * from "./auto-repair";
+export * from "./blackbox";
 export * from "./diff";
+export * from "./inline-recovery";
 export * from "./line-hash";
 export * from "./modes/apply-patch";
 export * from "./modes/atom";
 export * from "./modes/hashline";
 export * from "./modes/patch";
 export * from "./modes/replace";
+export * from "./modes/sloppy";
 export * from "./normalize";
 export * from "./post-write";
 export * from "./renderer";
@@ -113,10 +132,18 @@ type TInput =
 	| typeof hashlineEditParamsSchema
 	| typeof atomEditParamsSchema
 	| typeof vimSchema
-	| typeof applyPatchSchema;
+	| typeof applyPatchSchema
+	| typeof sloppyEditSchema;
 
 type VimParams = Static<typeof vimSchema>;
-type EditParams = ReplaceParams | PatchParams | HashlineParams | AtomParams | VimParams | ApplyPatchParams;
+type EditParams =
+	| ReplaceParams
+	| PatchParams
+	| HashlineParams
+	| AtomParams
+	| VimParams
+	| ApplyPatchParams
+	| SloppyParams;
 type EditToolResultDetails = EditToolDetails | VimToolDetails;
 
 type EditModeDefinition = {
@@ -185,17 +212,6 @@ async function readOriginalContent(file: BunFile | undefined, dst: string): Prom
 	} catch {
 		return "";
 	}
-}
-
-function withValidationNote(diagnostics: FileDiagnosticsResult | undefined, note: string): FileDiagnosticsResult {
-	if (!diagnostics) {
-		return { server: "edit-validation", messages: [note], summary: note, errored: false };
-	}
-	return {
-		...diagnostics,
-		messages: [note, ...diagnostics.messages],
-		summary: diagnostics.summary ? `${note} ${diagnostics.summary}` : note,
-	};
 }
 
 function createEditWritethrough(session: ToolSession): WritethroughCallback {
@@ -532,6 +548,29 @@ export class EditTool implements AgentTool<TInput> {
 						path,
 						signal,
 						batchRequest,
+						writethrough: tool.#writethrough,
+						beginDeferredDiagnosticsForPath: p => tool.#beginDeferredDiagnosticsForPath(p),
+					});
+				},
+			},
+			sloppy: {
+				description: () => prompt.render(sloppyDescription),
+				parameters: sloppyEditSchema,
+				execute: (
+					tool: EditTool,
+					params: EditParams,
+					signal: AbortSignal | undefined,
+					batchRequest: LspBatchRequest | undefined,
+					_onUpdate?: (partialResult: AgentToolResult<EditToolDetails, TInput>) => void,
+				) => {
+					const { input } = params as SloppyParams;
+					return executeSloppySingle({
+						session: tool.session,
+						input,
+						signal,
+						batchRequest,
+						allowFuzzy: tool.#allowFuzzy,
+						fuzzyThreshold: tool.#fuzzyThreshold,
 						writethrough: tool.#writethrough,
 						beginDeferredDiagnosticsForPath: p => tool.#beginDeferredDiagnosticsForPath(p),
 					});

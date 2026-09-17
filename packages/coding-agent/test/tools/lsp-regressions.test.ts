@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RenderResultOptions } from "@cornfield/agent";
+import { Settings } from "@cornfield/coding-agent/config/settings";
 import { LspTool } from "@cornfield/coding-agent/lsp";
 import * as lspClient from "@cornfield/coding-agent/lsp/client";
 import * as lspConfig from "@cornfield/coding-agent/lsp/config";
@@ -33,6 +34,15 @@ import * as piUtils from "@cornfield/utils";
 import { TempDir } from "@cornfield/utils";
 
 describe("lsp regressions", () => {
+	// The tlaplus test below replaces process-wide globals (`@cornfield/utils`' $which
+	// and `node:fs`'s existsSync) that every module in the process shares, and bun runs
+	// test files in a single process. Un-restored, they leak into every later file —
+	// a stubbed existsSync makes unrelated tests see a filesystem where nothing exists
+	// (observed 2026-09-16: it silently dropped every Python runtime candidate in
+	// test/core/python-runtime-selection.test.ts when this file ran first).
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
 	it("detects bracket-style glob patterns", () => {
 		expect(hasGlobPattern("src/[ab].ts")).toBe(true);
 		expect(hasGlobPattern("src/**/*.ts")).toBe(true);
@@ -352,7 +362,7 @@ describe("lsp regressions", () => {
 				client.diagnosticsVersion += 1;
 			}, 80);
 
-			const tool = new LspTool({ cwd: tempDir.path() } as ToolSession);
+			const tool = new LspTool({ cwd: tempDir.path(), settings: Settings.isolated() } as ToolSession);
 			const result = await tool.execute("diag-stale", {
 				action: "diagnostics",
 				file: targetFile,

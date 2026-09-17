@@ -2,20 +2,21 @@ import { type Component, padding, Text, truncateToWidth, visibleWidth } from "@c
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme, ThemeColor } from "../modes/theme/theme";
 import { renderStatusLine } from "../tui";
+import { formatShortSha } from "./gh-format";
 import type {
 	GhRunWatchFailedLogDetails,
 	GhRunWatchJobDetails,
 	GhRunWatchRunDetails,
 	GhRunWatchViewDetails,
 	GhToolDetails,
-} from "./gh";
-import { formatShortSha } from "./gh-format";
+} from "./gh-types";
 import {
 	formatExpandHint,
 	formatStatusIcon,
 	PREVIEW_LIMITS,
 	replaceTabs,
 	type ToolUIColor,
+	TRUNCATE_LENGTHS,
 	truncateToWidth as truncateVisualWidth,
 } from "./render-utils";
 
@@ -23,7 +24,103 @@ type GithubToolRenderArgs = {
 	op?: string;
 	run?: string;
 	branch?: string;
+	repo?: string;
+	path?: string;
+	pr?: string | string[];
+	query?: string;
 };
+
+/**
+ * Display names for every op. A new op without an entry here renders as a bare
+ * "GitHub", which tells the reader nothing about what ran — the titles are part
+ * of the op's contract, not decoration.
+ */
+const OP_TITLES: Record<string, string> = {
+	repo_view: "GitHub Repo",
+	file_read: "GitHub File",
+	issue_view: "GitHub Issue",
+	pr_view: "GitHub PR",
+	pr_diff: "GitHub PR Diff",
+	pr_create: "GitHub PR Create",
+	pr_checkout: "GitHub PR Checkout",
+	pr_push: "GitHub PR Push",
+	search_issues: "GitHub Search Issues",
+	search_prs: "GitHub Search PRs",
+	search_code: "GitHub Search Code",
+	search_commits: "GitHub Search Commits",
+	search_repos: "GitHub Search Repos",
+	run_watch: "GitHub Run Watch",
+};
+
+function formatOpTitle(op: string | undefined): string {
+	if (op && OP_TITLES[op]) return OP_TITLES[op];
+	return "GitHub";
+}
+
+function extractIssueId(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed) return undefined;
+	if (/^\d+$/.test(trimmed)) return `#${trimmed}`;
+	const match = trimmed.match(/\/(?:issues|pull)\/(\d+)/);
+	if (match) return `#${match[1]}`;
+	return truncateVisualWidth(trimmed, TRUNCATE_LENGTHS.SHORT);
+}
+
+function formatPrIdentifier(pr: string | string[] | undefined): string | undefined {
+	if (pr === undefined) return undefined;
+	if (Array.isArray(pr)) {
+		const parts = pr.map(extractIssueId).filter((part): part is string => part !== undefined);
+		if (parts.length === 0) return undefined;
+		if (parts.length > 3) {
+			return `${parts.slice(0, 3).join(", ")}, +${parts.length - 3} more`;
+		}
+		return parts.join(", ");
+	}
+	return extractIssueId(pr);
+}
+
+/** Target metadata shown next to the op title, so a call names what it acted on. */
+function buildOpMeta(args: GithubToolRenderArgs): string[] {
+	const meta: string[] = [];
+	switch (args.op) {
+		case "pr_view":
+		case "pr_diff":
+		case "pr_checkout":
+		case "pr_push": {
+			const id = formatPrIdentifier(args.pr);
+			if (id) meta.push(id);
+			else if (args.branch) meta.push(args.branch);
+			if (args.repo) meta.push(args.repo);
+			break;
+		}
+		case "search_issues":
+		case "search_prs":
+		case "search_code":
+		case "search_commits":
+		case "search_repos": {
+			if (args.query) meta.push(truncateVisualWidth(args.query, TRUNCATE_LENGTHS.CONTENT));
+			if (args.repo) meta.push(args.repo);
+			break;
+		}
+		case "file_read": {
+			if (args.repo) meta.push(args.repo);
+			if (args.path) meta.push(truncateVisualWidth(args.path, TRUNCATE_LENGTHS.CONTENT));
+			break;
+		}
+		case "repo_view": {
+			if (args.repo) meta.push(args.repo);
+			if (args.branch) meta.push(args.branch);
+			break;
+		}
+		case "run_watch":
+			break;
+		default: {
+			if (args.repo) meta.push(args.repo);
+			break;
+		}
+	}
+	return meta;
+}
 
 const SUCCESS_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
@@ -200,7 +297,12 @@ function buildRenderedLines(
 	} else if (watch.mode === "commit") {
 		const runs = watch.runs ?? [];
 		if (runs.length === 0) {
-			lines.push(theme.fg("dim", "waiting for workflow runs..."));
+			// A completed commit watch with no runs is the give-up result: the note
+			// above carries its reason, and "waiting" would contradict a watch that
+			// has already ended.
+			if (watch.state !== "completed") {
+				lines.push(theme.fg("dim", "waiting for workflow runs..."));
+			}
 		} else {
 			runs.forEach((run, index) => {
 				if (index > 0) {
@@ -217,26 +319,27 @@ function buildRenderedLines(
 
 function renderFallbackText(
 	result: { content: Array<{ type: string; text?: string }>; isError?: boolean },
-	theme: Theme,
+	uiTheme: Theme,
+	args: GithubToolRenderArgs,
 ): Component {
 	const text = result.content
 		.filter(part => part.type === "text")
 		.map(part => part.text)
 		.filter((value): value is string => typeof value === "string" && value.length > 0)
 		.join("\n");
+	const title = formatOpTitle(args.op);
+	const meta = buildOpMeta(args);
+	const header = renderStatusLine(
+		result.isError ? { icon: "error", title, titleColor: "error", meta } : { icon: "success", title, meta },
+		uiTheme,
+	);
+
 	if (text) {
-		return new Text(replaceTabs(text), 0, 0);
+		return new Text(`${header}\n${replaceTabs(text)}`, 0, 0);
 	}
 
-	const header = renderStatusLine(
-		{
-			icon: result.isError ? "error" : "warning",
-			title: "GitHub Run Watch",
-			description: result.isError ? "failed" : "no output",
-		},
-		theme,
-	);
-	return new Text(header, 0, 0);
+	const empty = result.isError ? "request failed" : "no output";
+	return new Text(`${header}\n${uiTheme.fg("dim", empty)}`, 0, 0);
 }
 
 export const githubToolRenderer = {
@@ -255,9 +358,16 @@ export const githubToolRenderer = {
 
 		const op = typeof args.op === "string" && args.op.trim().length > 0 ? args.op.trim() : undefined;
 		if (op && op !== "run_watch") {
-			const title = uiTheme.fg("accent", `GitHub ${op}`);
-			lines.push(`${icon} ${title}`);
-			return new Text(lines.join("\n"), 0, 0);
+			const header = renderStatusLine(
+				{
+					icon: options.spinnerFrame !== undefined ? "running" : "pending",
+					spinnerFrame: options.spinnerFrame,
+					title: formatOpTitle(op),
+					meta: buildOpMeta({ ...args, op }),
+				},
+				uiTheme,
+			);
+			return new Text(header, 0, 0);
 		}
 
 		if (runId) {
@@ -286,10 +396,11 @@ export const githubToolRenderer = {
 		result: { content: Array<{ type: string; text?: string }>; details?: GhToolDetails; isError?: boolean },
 		options: RenderResultOptions,
 		uiTheme: Theme,
+		args?: GithubToolRenderArgs,
 	): Component {
 		const watch = result.details?.watch;
 		if (!watch) {
-			return renderFallbackText(result, uiTheme);
+			return renderFallbackText(result, uiTheme, args ?? {});
 		}
 
 		return {

@@ -28,16 +28,39 @@ afterEach(async () => {
 	await fs.rm(testAgentDir, { recursive: true, force: true });
 });
 
+/**
+ * Capture everything the command writes to stdout.
+ *
+ * `config` writes through `@cornfield/utils/cli`'s `writeStdout`, not
+ * `console.log`: a single `console.log` payload larger than the pipe buffer is
+ * cut when stdout is a pipe, so the command has no other exit. The logger's
+ * console transport writes to the same stream, which is why the documents are
+ * picked by shape rather than counted as raw chunks.
+ */
+function captureStdout(): string[] {
+	const chunks: string[] = [];
+	const decoder = new TextDecoder();
+	vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+		chunks.push(typeof chunk === "string" ? chunk : decoder.decode(chunk));
+		return true;
+	}) as typeof process.stdout.write);
+	return chunks;
+}
+
+/** The JSON documents written to stdout, in order. */
+function jsonDocuments(chunks: string[]): string[] {
+	return chunks.map(chunk => chunk.trim()).filter(chunk => chunk.startsWith("{") && chunk.endsWith("}"));
+}
+
 describe("config CLI schema coverage", () => {
 	it("lists non-UI schema settings in JSON output", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const stdout = captureStdout();
 
 		await runConfigCommand({ action: "list", flags: { json: true } });
 
-		expect(logSpy).toHaveBeenCalledTimes(1);
-		const payload = logSpy.mock.calls[0]?.[0];
-		expect(typeof payload).toBe("string");
-		const parsed = JSON.parse(String(payload)) as Record<string, { type: string; description: string }>;
+		const documents = jsonDocuments(stdout);
+		expect(documents.length).toBe(1);
+		const parsed = JSON.parse(documents[0]) as Record<string, { type: string; description: string }>;
 
 		expect(parsed.enabledModels).toBeDefined();
 		expect(parsed.enabledModels.type).toBe("array");
@@ -45,14 +68,13 @@ describe("config CLI schema coverage", () => {
 	});
 
 	it("gets non-UI schema settings by key", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const stdout = captureStdout();
 
 		await runConfigCommand({ action: "get", key: "enabledModels", flags: { json: true } });
 
-		expect(logSpy).toHaveBeenCalledTimes(1);
-		const payload = logSpy.mock.calls[0]?.[0];
-		expect(typeof payload).toBe("string");
-		const parsed = JSON.parse(String(payload)) as {
+		const documents = jsonDocuments(stdout);
+		expect(documents.length).toBe(1);
+		const parsed = JSON.parse(documents[0]) as {
 			key: string;
 			type: string;
 			description: string;
@@ -64,11 +86,11 @@ describe("config CLI schema coverage", () => {
 	});
 
 	it("renders record settings as JSON and with record type in text output", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const stdout = captureStdout();
 
 		await runConfigCommand({ action: "list", flags: {} });
 
-		const lines = logSpy.mock.calls.map(call => String(call[0] ?? ""));
+		const lines = stdout.join("").split("\n");
 		const plainLines = lines.map(line => Bun.stripANSI(line));
 		const modelRoutesLine = plainLines.find(line => line.includes("modelRoutes ="));
 		expect(modelRoutesLine).toBeDefined();
@@ -81,13 +103,13 @@ describe("config CLI schema coverage", () => {
 	});
 
 	it("sets and gets record settings as JSON objects", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const stdout = captureStdout();
 		const recordValue = '{"default":{"primary":"claude-opus-4-6","fallbacks":[]}}';
 
 		await runConfigCommand({ action: "set", key: "modelRoutes", value: recordValue, flags: { json: true } });
 		await runConfigCommand({ action: "get", key: "modelRoutes", flags: { json: true } });
 
-		const payload = logSpy.mock.calls.at(-1)?.[0];
+		const payload = jsonDocuments(stdout).at(-1);
 		expect(typeof payload).toBe("string");
 		const parsed = JSON.parse(String(payload)) as { key: string; value: unknown; type: string };
 		expect(parsed.key).toBe("modelRoutes");
@@ -96,13 +118,13 @@ describe("config CLI schema coverage", () => {
 	});
 
 	it("sets and gets array settings as JSON arrays", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const stdout = captureStdout();
 		const arrayValue = '["claude-opus-4-6","gpt-5.3-codex"]';
 
 		await runConfigCommand({ action: "set", key: "enabledModels", value: arrayValue, flags: { json: true } });
 		await runConfigCommand({ action: "get", key: "enabledModels", flags: { json: true } });
 
-		const payload = logSpy.mock.calls.at(-1)?.[0];
+		const payload = jsonDocuments(stdout).at(-1);
 		expect(typeof payload).toBe("string");
 		const parsed = JSON.parse(String(payload)) as { key: string; value: unknown; type: string };
 		expect(parsed.key).toBe("enabledModels");
@@ -110,7 +132,7 @@ describe("config CLI schema coverage", () => {
 		expect(parsed.value).toEqual(["claude-opus-4-6", "gpt-5.3-codex"]);
 	});
 	it("sets numeric idle compaction settings from CLI values", async () => {
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const stdout = captureStdout();
 		await runConfigCommand({
 			action: "set",
 			key: "compaction.idleThresholdTokens",
@@ -126,8 +148,9 @@ describe("config CLI schema coverage", () => {
 		await runConfigCommand({ action: "get", key: "compaction.idleThresholdTokens", flags: { json: true } });
 		await runConfigCommand({ action: "get", key: "compaction.idleTimeoutSeconds", flags: { json: true } });
 
-		const thresholdPayload = logSpy.mock.calls.at(-2)?.[0];
-		const timeoutPayload = logSpy.mock.calls.at(-1)?.[0];
+		const documents = jsonDocuments(stdout);
+		const thresholdPayload = documents.at(-2);
+		const timeoutPayload = documents.at(-1);
 		expect(typeof thresholdPayload).toBe("string");
 		expect(typeof timeoutPayload).toBe("string");
 		expect(JSON.parse(String(thresholdPayload))).toMatchObject({

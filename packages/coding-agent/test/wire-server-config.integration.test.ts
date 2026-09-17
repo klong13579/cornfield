@@ -1,69 +1,40 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as net from "node:net";
-import * as os from "node:os";
 import * as path from "node:path";
 import { PiClient } from "@cornfield/client";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 /**
  * 票 03 e2e — serve 配置命令（get_config / set_config）。
- * 隔离 HOME：config.yml 落在 isolatedHome/.omp/agent/config.yml，不污染真实配置。
+ * 隔离 HOME：config.yml 落在 <fixture.home>/.cornfield/agent/config.yml，不污染真实配置。
  * 验证：set→get 往返一致、嵌套 key 往返、与 set_model_disabled 同文件共存不冲突。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
+ * serve 的 cwd 取 <fixture.home>/project（空目录）：三条用例只读写全局 agent 配置，
+ * 落仓库里会让 serve 的启动上下文带上仓库自己的项目级 .cornfield。
  */
-let isolatedHome: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let info = { url: "", token: "" };
+let fixture: ServeFixture | undefined;
+
+/** serve 的 cwd：隔离 HOME 下的空项目目录（与迁移前的 <isolatedHome>/project 同义）。 */
+const projectDir = (home: string): string => path.join(home, "project");
 
 beforeAll(async () => {
-	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-config-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
-	const projectCwd = path.join(isolatedHome, "project");
-	await fs.mkdir(projectCwd, { recursive: true });
-
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = await new Promise<number>(resolve => {
-		const srv = net.createServer();
-		srv.listen(0, "127.0.0.1", () => {
-			const p = (srv.address() as net.AddressInfo).port;
-			srv.close(() => resolve(p));
-		});
-	});
-	proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		{
-			cwd: projectCwd,
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
+	fixture = await spawnServeFixture({
+		homePrefix: "omp-serve-config-",
+		cwd: projectDir,
+		seed: async home => {
+			await fs.mkdir(projectDir(home), { recursive: true });
 		},
-	);
-	info = await waitForServe(proc, port);
-}, 70_000);
+	});
+}, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	await fs.rm(isolatedHome, { recursive: true, force: true });
+	await fixture?.dispose();
 });
 
 describe("配置命令（get_config / set_config）", () => {
 	test("set_config → get_config 往返一致（标量）", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			await client.request({ type: "set_config", key: "custom.scalar", value: 123 });
@@ -75,7 +46,7 @@ describe("配置命令（get_config / set_config）", () => {
 	});
 
 	test("set_config → get_config 往返一致（嵌套 key）", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			await client.request({ type: "set_config", key: "custom.nested.deep", value: "hello" });
@@ -87,7 +58,7 @@ describe("配置命令（get_config / set_config）", () => {
 	});
 
 	test("与 set_model_disabled 同文件共存不冲突", async () => {
-		const client = new PiClient({ url: info.url, token: info.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 		try {
 			// set_config 直接写 config.yml；set_model_disabled 走 Settings（debounced 保存）。

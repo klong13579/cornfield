@@ -24,6 +24,7 @@ import type {
 import { SearchProviderError } from "../../../web/search/types";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
+import { MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
 const DEFAULT_MAX_TOKENS = 4096;
@@ -40,6 +41,7 @@ export interface AnthropicSearchParams {
 	temperature?: number;
 	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 /**
@@ -89,6 +91,7 @@ async function callSearch(
 	maxTokens?: number,
 	temperature?: number,
 	signal?: AbortSignal,
+	timeoutMs?: number,
 ): Promise<AnthropicApiResponse> {
 	const url = buildAnthropicUrl(auth);
 	const headers = buildAnthropicSearchHeaders(auth);
@@ -119,11 +122,11 @@ async function callSearch(
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
-		signal,
+		signal: withHardTimeout(signal, timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "anthropic", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError(
 			"anthropic",
 			`Anthropic API error (${response.status}): ${errorText}`,
@@ -258,6 +261,7 @@ export async function searchAnthropic(params: AnthropicSearchParams): Promise<Se
 		params.max_tokens,
 		params.temperature,
 		params.signal,
+		params.timeoutMs,
 	);
 
 	const result = parseResponse(response);
@@ -287,6 +291,7 @@ export class AnthropicProvider extends SearchProvider {
 			max_tokens: params.maxOutputTokens,
 			temperature: params.temperature,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

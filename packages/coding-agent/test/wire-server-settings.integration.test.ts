@@ -11,23 +11,26 @@
  *   6. default agent 的 set_config 落 ~/.cornfield/agent/config.yml（全局 agent 目录）
  *
  * 不发 prompt（不触发计费）。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）：
+ * registry.json 与 workspace.json 必须抢在 serve boot 之前落到 HOME 里（serve 启动即注册
+ * agent 元数据），所以走夹具的 `seed` 钩子而不是 spawn 之后再写。
  */
 
 import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
 import { YAML } from "bun";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, spawnServeFixture } from "./wire-serve-fixture";
 
 const TOKEN_RE = /ws:\/\/127\.0\.0\.1:(\d+)\/ws(\?token=([a-zA-Z0-9]+))?/;
 
 type Frame = { type: string; [k: string]: unknown };
 
-async function setupAgents(isolatedHome: string): Promise<void> {
+async function setupAgents(home: string): Promise<void> {
 	for (const name of ["hr", "ops"]) {
-		const agentDir = path.join(isolatedHome, "agents", name);
+		const agentDir = path.join(home, "agents", name);
 		await fs.mkdir(path.join(agentDir, ".cornfield"), { recursive: true });
 		await fs.mkdir(path.join(agentDir, "sessions"), { recursive: true });
 		await Bun.write(
@@ -44,7 +47,7 @@ async function setupAgents(isolatedHome: string): Promise<void> {
 			}),
 		);
 	}
-	const registryDir = path.join(isolatedHome, ".cornfield", "agent");
+	const registryDir = path.join(home, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
 	await Bun.write(
 		path.join(registryDir, "registry.json"),
@@ -52,12 +55,12 @@ async function setupAgents(isolatedHome: string): Promise<void> {
 			version: 2,
 			agents: {
 				hr: {
-					path: path.join(isolatedHome, "agents", "hr"),
+					path: path.join(home, "agents", "hr"),
 					registeredAt: new Date().toISOString(),
 					template: "default",
 				},
 				ops: {
-					path: path.join(isolatedHome, "agents", "ops"),
+					path: path.join(home, "agents", "ops"),
 					registeredAt: new Date().toISOString(),
 					template: "default",
 				},
@@ -66,107 +69,94 @@ async function setupAgents(isolatedHome: string): Promise<void> {
 	);
 }
 
-test("serve per-agent 配置：get_tool_switches + set_config 定向写各自 config.yml", async () => {
-	const isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-settings-"));
-	const savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
-	await setupAgents(isolatedHome);
-
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
-	const port = 56000 + Math.floor(Math.random() * 8000);
-	const proc = Bun.spawn(["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
-		stdout: "pipe",
-		stderr: "pipe",
-		env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
-	});
-
-	const hrConfigPath = path.join(isolatedHome, "agents", "hr", "config.yml");
-	const opsConfigPath = path.join(isolatedHome, "agents", "ops", "config.yml");
-
-	try {
-		const url = (await waitForServe(proc, port)).url;
-		const token = url.match(TOKEN_RE)?.[2] ?? "";
-		const conn = await WireConn.connect(url, token);
-		// hello 自动推送先消费掉（server_snapshot + session_snapshot）
-		await conn.nextPush("server_snapshot");
-		await conn.nextPush("session_snapshot");
-		// serve 的预挂载是后台的（listening 之后才跑）：定向命令前显式 attach（幂等），
-		// 不赌预挂载的时序 —— 否则这条测试会随机器负载随机报「agent not attached」。
-		await conn.request({ type: "attach", sessionId: "hr" });
-		await conn.request({ type: "attach", sessionId: "ops" });
-
-		// ── 1. get_tool_switches：hr 的默认开关视图（未配置 → 内核默认）──
-		const swResp = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
-		expect(swResp.ok).toBe(true);
-		const sw = swResp.result as {
-			tools: Array<{ tool: string; label: string; path: string; enabled: boolean }>;
-			pythonToolMode: string;
-		};
-		expect(Array.isArray(sw.tools)).toBe(true);
-		expect(sw.tools.length).toBeGreaterThan(10);
-		const searchSwitch = sw.tools.find(t => t.tool === "grep");
-		expect(searchSwitch).toBeDefined();
-		expect(searchSwitch?.path).toBe("grep.enabled");
-		expect(searchSwitch?.enabled).toBe(true); // 默认开启
-		expect(sw.pythonToolMode).toBe("both");
-		// 每项都带可写回路径
-		for (const t of sw.tools) expect(t.path.length).toBeGreaterThan(0);
-
-		// ── 2. set_config(sessionId) 定向写 hr 的 config.yml（文件级验证）──
-		const setResp = await conn.request({ type: "set_config", sessionId: "hr", key: "grep.enabled", value: false });
-		expect(setResp.ok).toBe(true);
-		const hrFile = YAML.parse(await Bun.file(hrConfigPath).text()) as Record<string, unknown>;
-		expect(hrFile.grep).toEqual({ enabled: false });
-
-		// ── 3. get_config / get_tool_switches 反映文件值（显示 = 文件）──
-		const getResp = await conn.request({ type: "get_config", sessionId: "hr", key: "grep.enabled" });
-		expect(getResp.ok).toBe(true);
-		expect((getResp.result as { config: unknown }).config).toBe(false);
-		const swAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
-		const searchAfter = ((swAfter.result as { tools: Array<{ tool: string; enabled: boolean }> }).tools ?? []).find(
-			t => t.tool === "grep",
-		);
-		expect(searchAfter?.enabled).toBe(false);
-
-		// ── 4. 隔离：ops 的开关不受 hr 影响，且文件不被污染 ──
-		const opsSw = await conn.request({ type: "get_tool_switches", sessionId: "ops" });
-		const opsSearch = ((opsSw.result as { tools: Array<{ tool: string; enabled: boolean }> }).tools ?? []).find(
-			t => t.tool === "grep",
-		);
-		expect(opsSearch?.enabled).toBe(true);
-		await expect(Bun.file(opsConfigPath).exists()).resolves.toBe(false); // ops 的 config.yml 未被创建
-
-		// ── 5. python.toolMode 枚举读写 ──
-		const pyResp = await conn.request({
-			type: "set_config",
-			sessionId: "hr",
-			key: "python.toolMode",
-			value: "bash-only",
+test(
+	"serve per-agent 配置：get_tool_switches + set_config 定向写各自 config.yml",
+	async () => {
+		const fixture = await spawnServeFixture({
+			homePrefix: "omp-serve-settings-",
+			seed: setupAgents,
 		});
-		expect(pyResp.ok).toBe(true);
-		const pyAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
-		expect((pyAfter.result as { pythonToolMode: string }).pythonToolMode).toBe("bash-only");
+		const isolatedHome = fixture.home;
 
-		// ── 6. default agent：set_config 落它的 global 层 = 客户端目录那份（用户一直编辑的那份）──
-		const defSet = await conn.request({ type: "set_config", key: "custom.perAgentProbe", value: 7 });
-		expect(defSet.ok).toBe(true);
-		const defGet = await conn.request({ type: "get_config", key: "custom.perAgentProbe" });
-		expect((defGet.result as { config: unknown }).config).toBe(7);
-		// default Agent 的 global 层是客户端目录那份（票 24 的层定案：用户改什么就生效什么）；
-		// `<home>/config.yml` 不是任何一层，serve 的 cwd 也不是。
-		const globalConfigPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
-		const globalConfig = YAML.parse(await Bun.file(globalConfigPath).text()) as Record<string, unknown>;
-		expect(globalConfig.custom).toEqual({ perAgentProbe: 7 });
+		const hrConfigPath = path.join(isolatedHome, "agents", "hr", "config.yml");
+		const opsConfigPath = path.join(isolatedHome, "agents", "ops", "config.yml");
 
-		conn.close();
-	} finally {
-		proc.kill();
-		await proc.exited;
-		process.env.HOME = savedHome;
-		await fs.rm(isolatedHome, { recursive: true, force: true });
-	}
-}, 60_000);
+		try {
+			const url = fixture.url;
+			const token = url.match(TOKEN_RE)?.[2] ?? "";
+			const conn = await WireConn.connect(url, token);
+			// hello 自动推送先消费掉（server_snapshot + session_snapshot）
+			await conn.nextPush("server_snapshot");
+			await conn.nextPush("session_snapshot");
+
+			// ── 1. get_tool_switches：hr 的默认开关视图（未配置 → 内核默认）──
+			const swResp = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
+			expect(swResp.ok).toBe(true);
+			const sw = swResp.result as {
+				tools: Array<{ tool: string; label: string; path: string; enabled: boolean }>;
+				pythonToolMode: string;
+			};
+			expect(Array.isArray(sw.tools)).toBe(true);
+			expect(sw.tools.length).toBeGreaterThan(10);
+			const searchSwitch = sw.tools.find(t => t.tool === "grep");
+			expect(searchSwitch).toBeDefined();
+			expect(searchSwitch?.path).toBe("grep.enabled");
+			expect(searchSwitch?.enabled).toBe(true); // 默认开启
+			expect(sw.pythonToolMode).toBe("both");
+			// 每项都带可写回路径
+			for (const t of sw.tools) expect(t.path.length).toBeGreaterThan(0);
+
+			// ── 2. set_config(sessionId) 定向写 hr 的 config.yml（文件级验证）──
+			const setResp = await conn.request({ type: "set_config", sessionId: "hr", key: "grep.enabled", value: false });
+			expect(setResp.ok).toBe(true);
+			const hrFile = YAML.parse(await Bun.file(hrConfigPath).text()) as Record<string, unknown>;
+			expect(hrFile.grep).toEqual({ enabled: false });
+
+			// ── 3. get_config / get_tool_switches 反映文件值（显示 = 文件）──
+			const getResp = await conn.request({ type: "get_config", sessionId: "hr", key: "grep.enabled" });
+			expect(getResp.ok).toBe(true);
+			expect((getResp.result as { config: unknown }).config).toBe(false);
+			const swAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
+			const searchAfter = (
+				(swAfter.result as { tools: Array<{ tool: string; enabled: boolean }> }).tools ?? []
+			).find(t => t.tool === "grep");
+			expect(searchAfter?.enabled).toBe(false);
+
+			// ── 4. 隔离：ops 的开关不受 hr 影响，且文件不被污染 ──
+			const opsSw = await conn.request({ type: "get_tool_switches", sessionId: "ops" });
+			const opsSearch = ((opsSw.result as { tools: Array<{ tool: string; enabled: boolean }> }).tools ?? []).find(
+				t => t.tool === "grep",
+			);
+			expect(opsSearch?.enabled).toBe(true);
+			await expect(Bun.file(opsConfigPath).exists()).resolves.toBe(false); // ops 的 config.yml 未被创建
+
+			// ── 5. python.toolMode 枚举读写 ──
+			const pyResp = await conn.request({
+				type: "set_config",
+				sessionId: "hr",
+				key: "python.toolMode",
+				value: "bash-only",
+			});
+			expect(pyResp.ok).toBe(true);
+			const pyAfter = await conn.request({ type: "get_tool_switches", sessionId: "hr" });
+			expect((pyAfter.result as { pythonToolMode: string }).pythonToolMode).toBe("bash-only");
+
+			// ── 6. default agent：set_config 落 ~/.cornfield/agent/config.yml（非 cwd）──
+			const defSet = await conn.request({ type: "set_config", key: "custom.perAgentProbe", value: 7 });
+			expect(defSet.ok).toBe(true);
+			const defGet = await conn.request({ type: "get_config", key: "custom.perAgentProbe" });
+			expect((defGet.result as { config: unknown }).config).toBe(7);
+			const globalConfigPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
+			const globalConfig = YAML.parse(await Bun.file(globalConfigPath).text()) as Record<string, unknown>;
+			expect(globalConfig.custom).toEqual({ perAgentProbe: 7 });
+
+			conn.close();
+		} finally {
+			await fixture.dispose();
+		}
+	},
+	SERVE_BOOT_BUDGET_MS,
+);
 
 class WireConn {
 	static async connect(url: string, token: string): Promise<WireConn> {

@@ -1,15 +1,15 @@
 /**
- * OMP extension-package sub-discovery provider.
+ * CornField extension-package sub-discovery provider.
  *
  * When a user configures an extension via `extensions:` (in settings) or
  * `--extension`/`-e` (on the CLI), the docs promise that the package's
  * sibling directories — `skills/`, `hooks/pre|post/`, `tools/`, `commands/`,
- * `rules/`, `prompts/`, and `.mcp.json` — are picked up by omp's standard
- * discovery surfaces. The native `omp` provider in `builtin.ts` only walks
+ * `rules/`, `prompts/`, and `.mcp.json` — are picked up by CornField's standard
+ * discovery surfaces. The native provider in `builtin.ts` only walks
  * `.omp/` and `~/.cornfield/agent/`, so without this provider those sub-trees are
  * silently ignored.
  *
- * Provider priority is set below the native `omp` provider (100) so an
+ * Provider priority is set below the native provider (100) so an
  * extension package never shadows the user's own `.omp/` configuration on
  * dedup.
  *
@@ -39,7 +39,7 @@ import { type CornfieldExtensionRoot, listCornfieldExtensionRoots } from "./corn
 import { buildRuleFromMarkdown, createSourceMeta, loadFilesFromDir, scanSkillsFromDir } from "./helpers";
 
 const PROVIDER_ID = "cornfield-plugins";
-const DISPLAY_NAME = "OMP Extension Packages";
+const DISPLAY_NAME = "CornField Extension Packages";
 const DESCRIPTION =
 	"Sub-discovery (skills, hooks, tools, commands, rules, prompts, .mcp.json) inside extension packages";
 const PRIORITY = 90;

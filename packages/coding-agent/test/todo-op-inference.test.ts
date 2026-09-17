@@ -67,7 +67,7 @@ describe("todo op inference", () => {
 		await tool.execute("init", { ops: [{ op: "init", list: [{ phase: "Work", items: ["First"] }] }] });
 		const message = await captureError(tool.execute("bad", { ops: [{ task: "does-not-exist" }] }));
 		expect(message).toContain("ops/1");
-		expect(message).toContain("init, start, done, rm, drop, append, note");
+		expect(message).toContain("init, start, done, rm, drop, block, unblock, append, note, view");
 		expect(message).toContain('{"op": "done", "task": "Run tests"}');
 	});
 

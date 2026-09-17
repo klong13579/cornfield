@@ -99,4 +99,7 @@ cornfield grievances clean --id 486      # 删单条
 - **没有「已修复」状态**：`exported` 只表示被取走过。判断某条是否已修，靠人（或靠 CHANGELOG / 代码）。
 - **越界问题不进库**：MCP、扩展工具、`xd://` 设备的问题会被枚举与运行时白名单挡在外面，不会落行（设计如此，但也意味着这类问题没有本地出口）。
 - **未接 push / consent**：上游 `0bb385f8ab` 实现了「用户同意后批量 POST 到 `dev.autoqaPush.endpoint`」+ `omp grievances push`，本仓 2026-04-30 分叉后未同步；本仓目前只有「导出到文件/标准输出」这一种出口。
-- **旧行没有时间**：2026-09-15 之前写入的行 `createdAt` 为 NULL，任何时间窗口查询都会把它们排除（命令会明说被排除了多少条）。
+- **旧行没有时间**：`createdAt` / `sessionId` 为 NULL 的行来自比“加这两列的那次构建”更旧的构建，任何时间窗口查询都会把它们排除（命令会明说被排除了多少条）。
+  **不是“2026-09-15 之前的行”**：一个在升级前启动的长命进程会一直写 NULL 行到它退出为止。2026-09-16 实测：库里 id 497–499 的 NULL 行夹在两条 v1.2.3 行中间（05:08 与 17:07），全部标着 `version=1.2.2`。
+  同一形状也适用于枚举：`tool` 取到非 built-in 名字（`mcp__…` / `xd://…`）的行**全部**是无时间戳的那些，即来自枚举守卫之前的构建；带时间戳的行（v1.2.3）零条越界。旧进程退出后这种残留就不再新增。
+- **`--tools report_tool_issue` 是唯一能拿到无枚举变体的路径**：它落在 `createTools()` 的 `filteredRequestedTools` 分支上，直接调 `HIDDEN_TOOLS.report_tool_issue` 工厂（`tools/index.ts:261`，不传 `activeBuiltinNames`）。默认路径不走那里——`HIDDEN_TOOLS` 不被逐个枚举，带守卫的注入（`tools/index.ts:489-500`）才是活的注册点，而 `[]` 回退为自由字符串是**有意且被测试钉住**的行为（`test/tools/report-tool-issue.test.ts:184,210`）。目前仓内无任何调用方走 `--tools report_tool_issue`。

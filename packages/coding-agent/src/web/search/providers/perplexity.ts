@@ -22,6 +22,7 @@ import { SearchProviderError } from "../../../web/search/types";
 import { dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
+import { MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
 const PERPLEXITY_OAUTH_ASK_URL = "https://www.perplexity.ai/rest/sse/perplexity_ask";
@@ -157,6 +158,7 @@ function mergeOAuthEventSnapshot(
 }
 export interface PerplexitySearchParams {
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	query: string;
 	system_prompt?: string;
 	search_recency_filter?: "hour" | "day" | "week" | "month" | "year";
@@ -216,6 +218,7 @@ async function callPerplexityApi(
 	apiKey: string,
 	request: PerplexityRequest,
 	signal?: AbortSignal,
+	timeoutMs?: number,
 ): Promise<PerplexityResponse> {
 	const response = await fetch(PERPLEXITY_API_URL, {
 		method: "POST",
@@ -224,11 +227,11 @@ async function callPerplexityApi(
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify(request),
-		signal,
+		signal: withHardTimeout(signal, timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "perplexity", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError(
 			"perplexity",
 			`Perplexity API error (${response.status}): ${errorText}`,
@@ -341,11 +344,11 @@ async function callPerplexityOAuth(
 				skip_search_enabled: true,
 			},
 		}),
-		signal: params.signal,
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "perplexity", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError(
 			"perplexity",
 			`Perplexity OAuth API error (${response.status}): ${errorText}`,
@@ -512,7 +515,7 @@ export async function searchPerplexity(params: PerplexitySearchParams): Promise<
 		request.search_recency_filter = params.search_recency_filter;
 	}
 
-	const response = await callPerplexityApi(auth.token, request, params.signal);
+	const response = await callPerplexityApi(auth.token, request, params.signal, params.timeoutMs);
 	const result = parseResponse(response);
 	result.authMode = "api_key";
 	return applySourceLimit(result, params.num_results);
@@ -534,6 +537,7 @@ export class PerplexityProvider extends SearchProvider {
 	search(params: SearchParams): Promise<SearchResponse> {
 		return searchPerplexity({
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 			query: params.query,
 			temperature: params.temperature,
 			max_tokens: params.maxOutputTokens,

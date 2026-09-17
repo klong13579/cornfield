@@ -682,6 +682,14 @@ export interface GrepResult {
   filesSearched: number
   /** Whether the limit/offset stopped the search early. */
   limitReached?: boolean
+  /**
+   * Number of files the search could not read in full because they exceed
+   * [`MAX_FILE_BYTES`]. Set both when a file was skipped entirely (a walk)
+   * and when only its leading window was searched (an explicitly named
+   * file), so a caller can never read "no matches" as "the whole file was
+   * searched".
+   */
+  skippedOversized?: number
 }
 
 /**

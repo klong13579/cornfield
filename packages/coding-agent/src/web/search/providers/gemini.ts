@@ -19,6 +19,7 @@ import type { SearchCitation, SearchResponse, SearchSource } from "../../../web/
 import { SearchProviderError } from "../../../web/search/types";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
+import { MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const DEFAULT_ENDPOINT = "https://cloudcode-pa.googleapis.com";
 const ANTIGRAVITY_DAILY_ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
@@ -41,6 +42,7 @@ export interface GeminiSearchParams extends GeminiToolParams {
 	num_results?: number;
 	/** Abort signal — lets a cancelled agent turn kill the request in flight. */
 	signal?: AbortSignal;
+	timeoutMs?: number;
 	/** Maximum output tokens. */
 	max_output_tokens?: number;
 	/** Sampling temperature (0–1). Lower = more focused/factual. */
@@ -242,6 +244,7 @@ async function callGeminiSearch(
 	temperature?: number,
 	toolParams: GeminiToolParams = {},
 	signal?: AbortSignal,
+	timeoutMs?: number,
 ): Promise<{
 	answer: string;
 	sources: SearchSource[];
@@ -314,6 +317,10 @@ async function callGeminiSearch(
 		const url = `${endpoints[endpointIndex]}/v1internal:streamGenerateContent?alt=sse`;
 
 		for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+			// One composed signal per attempt: the hard ceiling must not be
+			// retried away, or a stalled endpoint would hold the chain for
+			// MAX_RETRIES × the ceiling before the next provider runs.
+			const requestSignal = withHardTimeout(signal, timeoutMs);
 			try {
 				response = await fetch(url, {
 					method: "POST",
@@ -324,11 +331,12 @@ async function callGeminiSearch(
 						...headers,
 					},
 					body: JSON.stringify(requestBody),
-					signal,
+					signal: requestSignal,
 				});
 			} catch (error) {
-				// Never retry an abort — propagate it out of the provider chain.
-				if (signal?.aborted) throw error;
+				// Never retry an abort — caller cancellation and the hard ceiling
+				// both mean this attempt made no progress.
+				if (requestSignal.aborted) throw error;
 				if (attempt < MAX_RETRIES) {
 					await Bun.sleep(BASE_DELAY_MS * 2 ** attempt);
 					continue;
@@ -345,7 +353,7 @@ async function callGeminiSearch(
 				break;
 			}
 
-			const errorText = await response.text();
+			const errorText = await readLimitedText(response, "gemini", MAX_SEARCH_ERROR_BYTES, true);
 			const canRefreshAuth =
 				response.status === 401 ||
 				response.status === 403 ||
@@ -402,7 +410,7 @@ async function callGeminiSearch(
 	}
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "gemini", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError(
 			"gemini",
 			`Gemini Cloud Code API error (${response.status}): ${errorText}`,
@@ -567,6 +575,7 @@ export async function searchGemini(params: GeminiSearchParams): Promise<SearchRe
 			url_context: params.url_context,
 		},
 		params.signal,
+		params.timeoutMs,
 	);
 
 	let sources = result.sources;
@@ -607,6 +616,7 @@ export class GeminiProvider extends SearchProvider {
 			code_execution: params.codeExecution,
 			url_context: params.urlContext,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

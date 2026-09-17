@@ -1,15 +1,15 @@
 /**
- * `omp acp` — ACP v1 JSON-RPC stdio server（Agent Client Protocol）。
+ * `cornfield acp` — ACP v1 JSON-RPC stdio server（Agent Client Protocol）。
  *
- * OMP 作为 ACP agent/server，Zed（或任意 ACP client）作为 client，通过
+ * CornField 作为 ACP agent/server，Zed（或任意 ACP client）作为 client，通过
  * newline-delimited JSON-RPC 2.0 over stdin/stdout 通信（非 TCP）。
  *
- * 握手：client 发 `initialize` → OMP 回 `InitializeResponse`（protocolVersion
+ * 握手：client 发 `initialize` → CornField 回 `InitializeResponse`（protocolVersion
  * 协商）→ client 发 `initialized` 通知。之后走完整 ACP 会话生命周期
  * （newSession/loadSession/prompt/…），复用 `modes/acp` 的 `runAcpMode` +
- * `AcpAgent`（与 `omp --mode acp` 同一实现）。
+ * `AcpAgent`（与 `cornfield --mode acp` 同一实现）。
  *
- * `ping` 是便捷 liveness 探针（非 ACP spec 方法）：client 发 `ping`，OMP 回
+ * `ping` 是便捷 liveness 探针（非 ACP spec 方法）：client 发 `ping`，CornField 回
  * `{ pong: true }`，用于冒烟验证传输层与握手已通。
  */
 

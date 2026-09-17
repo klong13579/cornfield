@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **TypeScript 5.0 的 `export type * from "mod"` 被解析成 ERROR 节点**（`crates/tree-sitter-typescript-vendored/`、根 `Cargo.toml`）：上游 tree-sitter-typescript 0.23.2（当前最新发布版，master 也一样）只接受带花括号的 `export type { … }`，星号形式落到错误节点，于是 `edit` 的写后解析门禁（`src/edit/post-write.ts` → `summarizeCode`）会回滚对这类文件的每一次编辑——本仓 14 个文件因此完全改不动。改为本地 vendor 该 crate 并补上 `export type *` / `export type * as ns` 两条语法分支，两个 `parser.c` 由 tree-sitter-cli 0.24.4 + tree-sitter-javascript 0.23.1 重新生成（未打补丁时与发布版逐字节一致，delta 只有这条规则）。
+
 ## [1.2.1] - 2026-09-13
 
 ### Fixed

@@ -104,7 +104,7 @@ Theme lookup order (`loadThemeJson`):
 Custom themes directory comes from `getCustomThemesDir()`:
 
 - default: `~/.cornfield/agent/themes`
-- overridden by `CORNFIELD_CODING_AGENT_DIR` (`$CORNFIELD_CODING_AGENT_DIR/themes`)
+- overridden by `CORNFIELD_AGENT_DIR` (`$CORNFIELD_AGENT_DIR/themes`)
 
 `getAvailableThemes()` returns merged built-in + custom names, sorted, with built-ins taking precedence on name collision.
 

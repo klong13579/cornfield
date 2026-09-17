@@ -23,9 +23,11 @@ import { expandInternalUrls, type InternalUrlExpansionOptions } from "./bash-ski
 import { formatStyledTruncationWarning, type OutputMeta } from "./output-meta";
 import { resolveToCwd } from "./path-utils";
 import { formatToolWorkingDirectory, replaceTabs } from "./render-utils";
+import { extractLeadingCdTarget } from "./shell-tokenize";
 import { ToolAbortError, ToolError } from "./tool-errors";
 import { toolResult } from "./tool-result";
 import { clampTimeout, TOOL_TIMEOUTS } from "./tool-timeouts";
+import { replaceableToolNames } from "./xdev";
 
 export const BASH_DEFAULT_PREVIEW_LINES = 10;
 
@@ -555,10 +557,10 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 
 		// Extract leading `cd <path> && ...` into cwd when the model ignores the cwd parameter.
 		if (!cwd) {
-			const cdMatch = command.match(/^cd\s+((?:[^&\\]|\\.)+?)\s*&&\s*/);
-			if (cdMatch) {
-				cwd = cdMatch[1].trim().replace(/^["']|["']$/g, "");
-				command = command.slice(cdMatch[0].length);
+			const cd = extractLeadingCdTarget(command);
+			if (cd) {
+				cwd = cd.path;
+				command = cd.rest;
 			}
 		}
 		if (asyncRequested && !this.#asyncEnabled) {
@@ -575,8 +577,11 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		if (this.session.settings.get("bashInterceptor.enabled")) {
 			const rules = this.session.settings.getBashInterceptorRules();
 			const commandsToCheck = rawCommand === command ? [command] : [rawCommand, command];
+			// A rule may name a mounted device (e.g. `python`); the context carries the
+			// top-level set only, so the Discoverable Tool Set is added here.
+			const replaceableTools = replaceableToolNames(ctx?.toolNames ?? [], this.session.xdevDevices);
 			for (const commandToCheck of commandsToCheck) {
-				const interception = checkBashInterception(commandToCheck, ctx?.toolNames ?? [], rules);
+				const interception = checkBashInterception(commandToCheck, replaceableTools, rules, rawCommand);
 				if (interception.block) {
 					throw new ToolError(interception.message ?? "Command blocked");
 				}

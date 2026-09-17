@@ -215,6 +215,12 @@ pub struct GrepResult {
 	pub files_searched:     u32,
 	/// Whether the limit/offset stopped the search early.
 	pub limit_reached:      Option<bool>,
+	/// Number of files the search could not read in full because they exceed
+	/// [`MAX_FILE_BYTES`]. Set both when a file was skipped entirely (a walk)
+	/// and when only its leading window was searched (an explicitly named
+	/// file), so a caller can never read "no matches" as "the whole file was
+	/// searched".
+	pub skipped_oversized:  Option<u32>,
 }
 
 enum TypeFilter {
@@ -578,24 +584,38 @@ fn build_searcher(context_before: u32, context_after: u32) -> Searcher {
 		.build()
 }
 
-/// Read file bytes, returning `None` for oversized or binary files.
-fn read_file_bytes(path: &Path) -> io::Result<Option<FileBytes>> {
+/// Outcome of attempting to read a file for searching.
+enum ReadOutcome {
+	/// Searchable bytes: the whole file, or the leading window of an oversized
+	/// one.
+	Read(FileBytes),
+	/// The file exceeds [`MAX_FILE_BYTES`]. Callers count these so the skip is
+	/// reported instead of surfacing as a plain "no matches".
+	Oversized,
+	/// Unreadable, binary, or not a regular file: nothing to search, nothing to
+	/// report.
+	Skipped,
+}
+
+/// Read file bytes, classifying binary and oversized files instead of
+/// collapsing both into one silent skip.
+fn read_file_bytes(path: &Path) -> io::Result<ReadOutcome> {
 	let metadata = std::fs::symlink_metadata(path)?;
 	let resolved_metadata = if metadata.file_type().is_symlink() {
 		let target_metadata = std::fs::metadata(path)?;
 		if !target_metadata.is_file() {
-			return Ok(None);
+			return Ok(ReadOutcome::Skipped);
 		}
 		target_metadata
 	} else if metadata.is_file() {
 		metadata
 	} else {
-		return Ok(None);
+		return Ok(ReadOutcome::Skipped);
 	};
 	if resolved_metadata.len() > MAX_FILE_BYTES {
-		return Ok(None);
+		return Ok(ReadOutcome::Oversized);
 	} else if resolved_metadata.len() == 0 {
-		return Ok(Some(FileBytes::Owned(Vec::new())));
+		return Ok(ReadOutcome::Read(FileBytes::Owned(Vec::new())));
 	}
 	let file = File::open(path)?;
 
@@ -613,9 +633,25 @@ fn read_file_bytes(path: &Path) -> io::Result<Option<FileBytes>> {
 	};
 
 	if bytes.as_slice().contains(&0) {
-		return Ok(None);
+		return Ok(ReadOutcome::Skipped);
 	}
-	Ok(Some(bytes))
+	Ok(ReadOutcome::Read(bytes))
+}
+
+/// Read only the leading [`MAX_FILE_BYTES`] window of an oversized file.
+///
+/// Used when the caller named one file explicitly: searching its prefix beats
+/// answering "no matches" for a file we never opened. Directory walks do not
+/// take this path — they count the skip instead, so one huge file cannot turn a
+/// bounded walk into an unbounded read.
+fn read_file_prefix(path: &Path) -> io::Result<ReadOutcome> {
+	let file = File::open(path)?;
+	let mut buffer = Vec::new();
+	file.take(MAX_FILE_BYTES).read_to_end(&mut buffer)?;
+	if buffer.contains(&0) {
+		return Ok(ReadOutcome::Skipped);
+	}
+	Ok(ReadOutcome::Read(FileBytes::Owned(buffer)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,6 +1096,91 @@ mod tests {
 		assert_eq!(result.limit_reached, None);
 	}
 
+	/// A file over the cap used to answer "no matches" without ever being read.
+	/// Named explicitly, it is now searched over its leading window instead.
+	#[cfg(unix)]
+	#[test]
+	fn grep_searches_the_prefix_of_an_explicitly_named_oversized_file() {
+		let root = TempDirGuard::new();
+		let big = root.path().join("big.log");
+		let mut content = String::from("needle at the very top\n");
+		while content.len() <= super::MAX_FILE_BYTES as usize {
+			content.push_str("filler line 0123456789\n");
+		}
+		write_file(&big, &content);
+		assert!(fs::metadata(&big).expect("stat oversized file").len() > super::MAX_FILE_BYTES);
+
+		let result = grep_sync(base_grep_config(&big), None, task::CancelToken::default())
+			.expect("oversized single-file grep should succeed");
+
+		assert_eq!(result.total_matches, 1, "the prefix window must be searched");
+		// Only the leading window was read, and the caller is told so.
+		assert_eq!(result.skipped_oversized, Some(1));
+	}
+
+	/// A needle past the front window is what the notice exists for: zero
+	/// matches must not read as "the whole file was searched".
+	#[cfg(unix)]
+	#[test]
+	fn grep_reports_a_partial_search_when_the_needle_lies_past_the_window() {
+		let root = TempDirGuard::new();
+		let big = root.path().join("tail-needle.log");
+		let mut content = String::new();
+		while content.len() <= super::MAX_FILE_BYTES as usize + 4096 {
+			content.push_str("filler line 0123456789\n");
+		}
+		content.push_str("needle past the window\n");
+		write_file(&big, &content);
+
+		let result = grep_sync(base_grep_config(&big), None, task::CancelToken::default())
+			.expect("oversized single-file grep should succeed");
+
+		assert_eq!(result.total_matches, 0);
+		assert_eq!(result.skipped_oversized, Some(1));
+	}
+
+	/// Boundary control for the cap: just under it was always searched. Pinned
+	/// so a future cap change cannot silently move both sides of the boundary
+	/// together.
+	#[cfg(unix)]
+	#[test]
+	fn grep_searches_a_file_just_under_the_cap() {
+		let root = TempDirGuard::new();
+		let file = root.path().join("under.log");
+		let mut content = String::from("needle under the cap\n");
+		while content.len() + 64 < super::MAX_FILE_BYTES as usize {
+			content.push_str("filler line 0123456789\n");
+		}
+		write_file(&file, &content);
+		assert!(fs::metadata(&file).expect("stat under-cap file").len() < super::MAX_FILE_BYTES);
+
+		let result = grep_sync(base_grep_config(&file), None, task::CancelToken::default())
+			.expect("under-cap grep should succeed");
+
+		assert_eq!(result.total_matches, 1);
+		assert_eq!(result.skipped_oversized, None);
+	}
+
+	/// A walk does not read oversized files, but it must say how many it skipped
+	/// — otherwise an empty result is indistinguishable from "nothing matched".
+	#[cfg(unix)]
+	#[test]
+	fn grep_walk_counts_oversized_files_instead_of_staying_silent() {
+		let root = TempDirGuard::new();
+		let mut big = String::from("needle only in the oversized file\n");
+		while big.len() <= super::MAX_FILE_BYTES as usize {
+			big.push_str("filler line 0123456789\n");
+		}
+		write_file(&root.path().join("a_big.log"), &big);
+		write_file(&root.path().join("b_small.log"), "needle in the small file\n");
+
+		let result = grep_sync(base_grep_config(root.path()), None, task::CancelToken::default())
+			.expect("directory grep should succeed");
+
+		assert_eq!(result.total_matches, 1, "only the small file is searched");
+		assert_eq!(result.skipped_oversized, Some(1));
+	}
+
 	fn run_engine_search(pattern: &str, content: &str, engine: SearchEngine) -> SearchResult {
 		search_sync(content.as_bytes(), SearchOptions {
 			pattern:        pattern.to_string(),
@@ -1196,6 +1317,7 @@ fn run_parallel_search<M: Matcher + Sync>(
 	entries: &[FileEntry],
 	matcher: &M,
 	params: SearchParams,
+	skipped_oversized: &std::sync::atomic::AtomicU64,
 ) -> Vec<FileSearchResult> {
 	let file_params = SearchParams { max_count: None, offset: 0, ..params };
 	let mut results: Vec<FileSearchResult> = entries
@@ -1203,7 +1325,14 @@ fn run_parallel_search<M: Matcher + Sync>(
 		.map_init(
 			|| (),
 			|(), entry| {
-				let bytes = read_file_bytes(&entry.path).ok()??;
+				let bytes = match read_file_bytes(&entry.path) {
+					Ok(ReadOutcome::Read(bytes)) => bytes,
+					Ok(ReadOutcome::Oversized) => {
+						skipped_oversized.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+						return None;
+					},
+					Ok(ReadOutcome::Skipped) | Err(_) => return None,
+				};
 				let search = run_search(matcher, bytes.as_slice(), file_params).ok()?;
 				Some(FileSearchResult {
 					relative_path: entry.relative_path.clone(),
@@ -1223,13 +1352,14 @@ fn run_sequential_search<M: Matcher + Sync>(
 	entries: &[FileEntry],
 	matcher: &M,
 	params: SearchParams,
-) -> (Vec<GrepMatch>, u64, u32, u32, bool) {
+) -> (Vec<GrepMatch>, u64, u32, u32, bool, u32) {
 	let SearchParams { mode, max_count, offset, .. } = params;
 	let mut matches = Vec::new();
 	let mut total_matches = 0u64;
 	let mut collected = 0u64;
 	let mut files_with_matches = 0u32;
 	let mut files_searched = 0u32;
+	let mut skipped_oversized = 0u32;
 	let mut limit_reached = false;
 
 	for entry in entries {
@@ -1246,8 +1376,13 @@ fn run_sequential_search<M: Matcher + Sync>(
 			break;
 		}
 
-		let Ok(Some(bytes)) = read_file_bytes(&entry.path) else {
-			continue;
+		let bytes = match read_file_bytes(&entry.path) {
+			Ok(ReadOutcome::Read(bytes)) => bytes,
+			Ok(ReadOutcome::Oversized) => {
+				skipped_oversized = skipped_oversized.saturating_add(1);
+				continue;
+			},
+			Ok(ReadOutcome::Skipped) | Err(_) => continue,
 		};
 		files_searched = files_searched.saturating_add(1);
 
@@ -1299,7 +1434,7 @@ fn run_sequential_search<M: Matcher + Sync>(
 		}
 	}
 
-	(matches, total_matches, files_with_matches, files_searched, limit_reached)
+	(matches, total_matches, files_with_matches, files_searched, limit_reached, skipped_oversized)
 }
 
 fn search_with(
@@ -1318,11 +1453,12 @@ fn parallel_search_with(
 	matcher: &SearchMatcher,
 	entries: &[FileEntry],
 	params: SearchParams,
+	skipped_oversized: &std::sync::atomic::AtomicU64,
 ) -> Vec<FileSearchResult> {
 	match matcher {
-		SearchMatcher::Rust(m) => run_parallel_search(entries, m, params),
+		SearchMatcher::Rust(m) => run_parallel_search(entries, m, params, skipped_oversized),
 		#[cfg(feature = "grep-pcre2")]
-		SearchMatcher::Pcre2(m) => run_parallel_search(entries, m, params),
+		SearchMatcher::Pcre2(m) => run_parallel_search(entries, m, params, skipped_oversized),
 	}
 }
 
@@ -1330,7 +1466,7 @@ fn sequential_search_with(
 	matcher: &SearchMatcher,
 	entries: &[FileEntry],
 	params: SearchParams,
-) -> (Vec<GrepMatch>, u64, u32, u32, bool) {
+) -> (Vec<GrepMatch>, u64, u32, u32, bool, u32) {
 	match matcher {
 		SearchMatcher::Rust(m) => run_sequential_search(entries, m, params),
 		#[cfg(feature = "grep-pcre2")]
@@ -1418,6 +1554,7 @@ fn grep_sync(
 			files_with_matches: 0,
 			files_searched:     0,
 			limit_reached:      None,
+			skipped_oversized:  None,
 		});
 	}
 
@@ -1431,17 +1568,39 @@ fn grep_sync(
 				files_with_matches: 0,
 				files_searched:     0,
 				limit_reached:      None,
+				skipped_oversized:  None,
 			});
 		}
 
-		let Ok(Some(bytes)) = read_file_bytes(&search_path) else {
-			return Ok(GrepResult {
-				matches:            Vec::new(),
-				total_matches:      0,
-				files_with_matches: 0,
-				files_searched:     0,
-				limit_reached:      None,
-			});
+		// An explicitly named oversized file is searched over its leading window;
+		// answering "no matches" for a file we never opened is the silent lie this
+		// branch exists to remove. Only the single-file path takes it — a walk counts
+		// the skip instead (see `run_parallel_search`).
+		let (bytes, prefix_only) = match read_file_bytes(&search_path) {
+			Ok(ReadOutcome::Read(bytes)) => (bytes, false),
+			Ok(ReadOutcome::Oversized) => match read_file_prefix(&search_path) {
+				Ok(ReadOutcome::Read(bytes)) => (bytes, true),
+				_ => {
+					return Ok(GrepResult {
+						matches:            Vec::new(),
+						total_matches:      0,
+						files_with_matches: 0,
+						files_searched:     0,
+						limit_reached:      None,
+						skipped_oversized:  Some(1),
+					});
+				},
+			},
+			Ok(ReadOutcome::Skipped) | Err(_) => {
+				return Ok(GrepResult {
+					matches:            Vec::new(),
+					total_matches:      0,
+					files_with_matches: 0,
+					files_searched:     0,
+					limit_reached:      None,
+					skipped_oversized:  None,
+				});
+			},
 		};
 
 		let search = search_with(&matcher, bytes.as_slice(), params)
@@ -1454,6 +1613,7 @@ fn grep_sync(
 				files_with_matches: 0,
 				files_searched:     1,
 				limit_reached:      None,
+				skipped_oversized:  if prefix_only { Some(1) } else { None },
 			});
 		}
 
@@ -1498,6 +1658,7 @@ fn grep_sync(
 			files_with_matches: 1,
 			files_searched: 1,
 			limit_reached: if limit_reached { Some(true) } else { None },
+			skipped_oversized: if prefix_only { Some(1) } else { None },
 		});
 	}
 
@@ -1532,12 +1693,14 @@ fn grep_sync(
 			files_with_matches: 0,
 			files_searched:     0,
 			limit_reached:      None,
+			skipped_oversized:  None,
 		});
 	}
 
 	let allow_parallel = max_count.is_none() && offset == 0;
 	if allow_parallel {
-		let results = parallel_search_with(&matcher, &entries, params);
+		let skipped_oversized = std::sync::atomic::AtomicU64::new(0);
+		let results = parallel_search_with(&matcher, &entries, params, &skipped_oversized);
 		let mut matches = Vec::new();
 		let mut total_matches = 0u64;
 		let mut files_with_matches = 0u32;
@@ -1593,17 +1756,29 @@ fn grep_sync(
 			}
 		}
 
+		let oversized = skipped_oversized.load(std::sync::atomic::Ordering::Relaxed);
 		return Ok(GrepResult {
 			matches,
 			total_matches: crate::utils::clamp_u32(total_matches),
 			files_with_matches,
 			files_searched,
 			limit_reached: None,
+			skipped_oversized: if oversized > 0 {
+				Some(crate::utils::clamp_u32(oversized))
+			} else {
+				None
+			},
 		});
 	}
 
-	let (matches, total_matches, files_with_matches, files_searched, limit_reached) =
-		sequential_search_with(&matcher, &entries, params);
+	let (
+		matches,
+		total_matches,
+		files_with_matches,
+		files_searched,
+		limit_reached,
+		skipped_oversized,
+	) = sequential_search_with(&matcher, &entries, params);
 
 	// Fire callbacks for sequential search results
 	if let Some(callback) = on_match {
@@ -1618,6 +1793,11 @@ fn grep_sync(
 		files_with_matches,
 		files_searched,
 		limit_reached: if limit_reached { Some(true) } else { None },
+		skipped_oversized: if skipped_oversized > 0 {
+			Some(crate::utils::clamp_u32(u64::from(skipped_oversized)))
+		} else {
+			None
+		},
 	})
 }
 

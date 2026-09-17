@@ -9,24 +9,20 @@
  * 不触发 LLM 计费：不发 prompt（除 abort_and_prompt 发个会立即 abort 的 dummy，
  * 使用不存在的假模型避免真实网络呼叫）。abort_retry 在无活动重试时也安全。
  * new_session/set_session_name/set_todos/set_host_tools 都是本地状态变更。
+ *
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
-import { waitForServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
-interface E2eContext {
-	proc: ReturnType<typeof Bun.spawn>;
-	url: string;
-	token: string;
-}
-
-let ctx: E2eContext;
+let fixture: ServeFixture | undefined;
 
 /** 封装单次命令往返（不多路复用，保证测试隔离）。 */
 async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> {
-	const ws = new WebSocket(ctx.url);
+	const ws = new WebSocket(fixture!.url);
 	const { promise: opened, resolve: resolveOpened, reject: rejectOpened } = Promise.withResolvers<void>();
 	ws.onopen = () => resolveOpened();
 	ws.onerror = ev => rejectOpened(new Error(`ws error: ${String(ev)}`));
@@ -54,7 +50,7 @@ async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> 
 		}
 	};
 
-	ws.send(JSON.stringify({ type: "hello", version: MULTIDEVICE_PROTOCOL_VERSION, token: ctx.token }));
+	ws.send(JSON.stringify({ type: "hello", version: MULTIDEVICE_PROTOCOL_VERSION, token: fixture!.token }));
 	await ackDone;
 	ws.send(JSON.stringify({ type: "request", id: "e2e", command: { id: "e2e", ...command } }));
 	try {
@@ -66,28 +62,11 @@ async function sendCommand(command: object, timeoutMs = 30_000): Promise<Frame> 
 }
 
 beforeAll(async () => {
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const cliPath = `${repoRoot}/packages/coding-agent/src/cli.ts`;
-	// 高位随机端口 (49152-65535)，避免与 gateway 等默认端中 7890/7891 冲突
-	const port = 55000 + Math.floor(Math.random() * 10_000);
-	const proc = Bun.spawn(["bun", cliPath, "serve", "--port", String(port), "--host", "127.0.0.1", "--no-extensions"], {
-		stdout: "pipe",
-		stderr: "pipe",
-		env: {
-			...process.env,
-			PI_NO_TITLE: "1",
-			HOME: process.env.HOME ?? "",
-		},
-	});
-	const info = await waitForServe(proc, port);
-	ctx = { proc, ...info };
-}, 90_000);
+	fixture = await spawnServeFixture({ homePrefix: "omp-serve-p2-commands-" });
+}, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {
-	if (ctx?.proc) {
-		ctx.proc.kill();
-		await ctx.proc.exited;
-	}
+	await fixture?.dispose();
 });
 
 describe("P2 wire-server 命令面 — 12 条真机 e2e", () => {

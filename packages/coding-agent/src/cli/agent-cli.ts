@@ -135,7 +135,6 @@ export async function runAgentInit(args: InitArgs): Promise<InitResult> {
 	// resolve its work surface, which is worse than a failed init.
 	const attachedRoots =
 		args.roots && args.roots.length > 0 ? (await attachRoots(agentDir, args.roots)).attachedRoots : undefined;
-
 	// Persist the (name, path) mapping so `cornfield agent list` / `show` can find
 	// this agentDir regardless of where it lives (default `~/.cornfield/agents/`,
 	// custom `--dir`, nested account id like `ops/hr`).

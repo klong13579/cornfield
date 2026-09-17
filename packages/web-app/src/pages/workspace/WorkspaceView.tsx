@@ -68,6 +68,8 @@ const PLAN_TASK_MARK: Record<TodoStatusDto, string> = {
 	in_progress: "◐",
 	completed: "✓",
 	abandoned: "✕",
+	// `blocked` 是 wire 侧新增的状态（`TodoStatusDto`）：跑不动、也不等于废弃 ⇒ 单独一个标记。
+	blocked: "⊘",
 };
 
 const PLAN_TASK_CLASS: Record<TodoStatusDto, string> = {
@@ -75,6 +77,7 @@ const PLAN_TASK_CLASS: Record<TodoStatusDto, string> = {
 	in_progress: "text-warning",
 	completed: "text-success",
 	abandoned: "text-ink-faint",
+	blocked: "text-warning",
 };
 
 /**

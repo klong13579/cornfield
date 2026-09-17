@@ -231,14 +231,27 @@ jobs:
         # parallel-package sweep made them flaky (0-fail exit-1 runs).
         run: |
           set -e
+          pids=()
           for dir in packages/*/; do
             pkg="${dir%/}"
             [ "${pkg##*/}" = "gateway" ] && continue
+            # benchmark harness 测的是 harness 自身而非产品，不给每次 push 当门禁
+            # （nightly.yml 的 benchmark_harness 每晚跑）。
+            [ "${pkg##*/}" = "typescript-edit-benchmark" ] && continue
             [ -f "$pkg/package.json" ] || continue
             grep -q '"test"' "$pkg/package.json" || continue
             (cd "$pkg" && bun run test -- --shard="${{ matrix.shard }}" --parallel=1) &
+            pids+=("$!")
           done
-          wait
+          # `wait` with no operands returns 0 no matter what the children did, so a
+          # failing package never failed this step — green runs carried failure-level
+          # annotations (2026-09-16: three compaction tests hung for weeks behind this).
+          # Wait on each pid and fail if any of them failed.
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          exit "$fail"
       - name: CLI smoke test
         run: bun run ci:test:smoke
 
@@ -279,8 +292,56 @@ jobs:
       - name: Test gateway (full suite)
         run: bun --cwd=packages/gateway run test -- --parallel=1
 
+  detect_installer_changes:
+    # install_methods builds the CLI from source and runs the three install flows
+    # (binary / source-link / tarball) — 7.6m spent on a path that only the
+    # installer scripts, the packaging layout, or the build pipeline can break.
+    # Gated the same way the Rust jobs are: run when those paths change, and
+    # always on tags and dispatches (a release ships the installers, and a
+    # dispatch is someone asking for the full set).
+    runs-on: ubuntu-22.04
+    outputs:
+      installers_changed: ${{ steps.diff.outputs.installers_changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Detect installer-related changes
+        id: diff
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "installers_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          range=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${GITHUB_SHA}"
+          elif [[ "${{ github.ref_type }}" != "tag" ]]; then
+            before="${{ github.event.before }}"
+            if [[ -n "$before" && "$before" != "0000000000000000000000000000000000000000" ]]; then
+              range="${before}...${GITHUB_SHA}"
+            else
+              range="HEAD~1...HEAD"
+            fi
+          fi
+          changed=""
+          if [[ -n "$range" ]]; then
+            changed="$(git diff --name-only "$range" 2>/dev/null || true)"
+          fi
+          # scripts/install covers install.sh, install.ps1 and install-tests/**.
+          # The manifests and the lockfile decide the package layout the install
+          # flows consume; the workflow file itself so the gate's own changes are
+          # exercised on the next run. Source/build scripts that feed the tarball
+          # and the binary path are listed explicitly.
+          if [[ "${{ github.ref_type }}" == "tag" ]] || echo "$changed" | grep -qE '^(scripts/install|scripts/build-binary\.ts|scripts/embed-native\.ts|package\.json|bun\.lock|\.github/workflows/ci\.yml|packages/[^/]+/package\.json)'; then
+            echo "installers_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "installers_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   install_methods:
-    if: github.repository == 'klong13579/cornfield'
+    if: github.repository == 'klong13579/cornfield' && needs.detect_installer_changes.outputs.installers_changed == 'true'
+    needs: [detect_installer_changes]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5

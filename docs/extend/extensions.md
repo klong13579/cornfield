@@ -417,7 +417,7 @@ Configured path sources in the main session startup path (`sdk.ts`):
 
 Global settings file:
 
-- `~/.cornfield/agent/config.yml` (or custom agent dir via `CORNFIELD_CODING_AGENT_DIR`)
+- `~/.cornfield/agent/config.yml` (or custom agent dir via `CORNFIELD_AGENT_DIR`)
 
 Project settings file:
 

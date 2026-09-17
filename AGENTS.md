@@ -495,6 +495,7 @@ Each package has its own `packages/*/CHANGELOG.md`. Format under `## [Unreleased
 **Vendored crates** under `crates/` (excluded from the workspace, wired via `[patch.crates-io]`):
 - `brush-core-vendored` / `brush-builtins-vendored` — vendored brush shell.
 - `maudio-vendored` — maudio 0.1.14 + a one-line `c_char` cast (upstream cannot compile on c_char-unsigned targets like aarch64-linux). Sync by re-copying the crate source from crates.io and re-applying the fix documented in `crates/maudio-vendored/Cargo.toml`.
+- `tree-sitter-typescript-vendored` — tree-sitter-typescript 0.23.2 + an `export type * from "mod"` grammar rule (TypeScript 5.0). Upstream — 0.23.2 is the newest published version — parses the star form as an ERROR node, which made `edit` roll back every change to a file using it (14 files in this repo; the gate is `src/edit/post-write.ts`). Sync by re-copying from crates.io and re-applying the grammar fix + regeneration recipe documented in `crates/tree-sitter-typescript-vendored/Cargo.toml`.
 
 ## User Data Directory
 

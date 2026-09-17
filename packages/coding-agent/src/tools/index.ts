@@ -210,6 +210,13 @@ export interface ToolSession {
 	queueDeferredMessage?(message: CustomMessage): void;
 	/** Tools mounted as xd:// devices (ADR-0003). Populated by createTools when mounting is active; absent otherwise. */
 	xdevDevices?: Map<string, Tool>;
+	/**
+	 * Set by createTools when the Python preflight failed: the `python` tool is not
+	 * registered, and the session prompt states why — so the agent does not lose the
+	 * capability silently (2026-09-16: it was lost for weeks with only a log line).
+	 * Cleared on a run that does not conclude "unavailable".
+	 */
+	pythonUnavailable?: { pythonPath: string | null; reason: string };
 }
 
 type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;
@@ -318,12 +325,23 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
 	const skipPythonWarm = (isTestEnv && !forcePythonWarmup) || $flag("PI_PYTHON_SKIP_CHECK");
 	const cachedPreludeDocs = getPreludeDocs();
 	const shouldWarmPython = !skipPythonWarm && (forcePythonWarmup || cachedPreludeDocs.length === 0);
+	// createTools can run more than once for the same session; a stale reason must
+	// never outlive the run that produced it.
+	session.pythonUnavailable = undefined;
 	if (shouldCheckPython) {
 		const availability = await logger.time("createTools:pythonCheck", checkPythonKernelAvailability, session.cwd);
 		pythonAvailable = availability.ok;
 		if (!availability.ok) {
+			const pythonPath = availability.pythonPath ?? null;
+			const reason = availability.reason ?? "Python kernel unavailable";
+			// The session prompt carries the reason, so the agent can tell the user
+			// instead of quietly degrading to bash.
+			session.pythonUnavailable = { pythonPath, reason };
 			logger.warn("Python kernel unavailable, falling back to bash", {
-				reason: availability.reason,
+				reason,
+				// 必须带上被选中的解释器：项目里的 `.venv` 会盖过托管环境（见 ipy/runtime.ts 的解析顺序），
+				// 不记下来就没人知道该往哪个 python 装包（2026-09-16 实测：定位花了四轮）。
+				pythonPath,
 			});
 		} else if (shouldWarmPython) {
 			const sessionFile = session.getSessionFile?.() ?? undefined;

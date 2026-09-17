@@ -31,6 +31,7 @@ import { SearchProviderError } from "../../../web/search/types";
 import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
+import { MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 20;
@@ -196,6 +197,7 @@ async function callSearXNGSearch(
 		categories?: string;
 		language?: string;
 		signal?: AbortSignal;
+		timeoutMs?: number;
 	},
 	auth: SearXNGAuth | null,
 ): Promise<SearXNGResponse> {
@@ -203,11 +205,11 @@ async function callSearXNGSearch(
 
 	const response = await fetch(url, {
 		headers,
-		signal: params.signal,
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "searxng", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError("searxng", `SearXNG API error (${response.status}): ${errorText}`, response.status);
 	}
 
@@ -220,6 +222,7 @@ export async function searchSearXNG(params: {
 	num_results?: number;
 	recency?: "day" | "week" | "month" | "year";
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }): Promise<SearchResponse> {
 	const numResults = clampNumResults(params.num_results, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 
@@ -291,6 +294,7 @@ export class SearXNGProvider extends SearchProvider {
 			num_results: params.numSearchResults ?? params.limit,
 			recency: params.recency,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

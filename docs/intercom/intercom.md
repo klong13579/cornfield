@@ -59,17 +59,39 @@ cornfield 会话 A(进程内)           cornfield 会话 B(进程内)      gatew
 | `list` / `list-cwd` | 在线会话(id/名字/cwd/模型/状态/上下文占比) |
 | `children` | 本会话的子会话列表(声明了本会话为父的在线会话,含实时状态) |
 | `send` | 单发,可带附件(file/snippet/context),自动推断 pending ask 作为回复 |
-| `ask` | 发送并阻塞等待回复(默认超时 10min,`CORNFIELD_INTERCOM_ASK_TIMEOUT_MS` 覆盖);**子模式下不带 `to` 时默认发给父** |
+| `ask` | 发送并阻塞等待回复(默认超时 10min,`PI_INTERCOM_ASK_TIMEOUT_MS` 覆盖);**子模式下不带 `to` 时默认发给父** |
 | `reply` | 回复指定待回复 ask(显式 `replyTo` 优先,始终带 correlation id;多条 pending 未指定时 fail loud 报错,不再按会话状态隐式猜测),保持线程 |
 | `pending` | 列出未回复的 inbound ask |
 | `status` | 连接状态 |
 | `cancel` | 撤销已发消息(实时会话发控制帧,mailbox 直接删) |
+| `history` | 回放最近的收/发消息(读 broker journal,默认 `direction:"in"`、20 条)——**唯一**能查「我忙的时候错过了什么」的入口,覆盖范围见下 |
 | presence | 模型/思考中/空闲/工具执行中/tool:xxx,上下文占比随心跳刷新 |
 | mailbox | 目标离线时队列暂存(256 条/24h),按 id 或「显式名字+同 cwd」补投;驱逐(超容量)与过期(24h)时向发送方回 `delivery_failed`,不静默丢件 |
 | 父子边 | 子注册时声明 `parentId`(父的目标名/sessionId),broker 全量广播保留该字段;父侧子表随 presence 事件增量维护 |
 
 协议与隐性行为:replyTo 必须匹配 pending ask(非 ask 的回复会被 broker 拒绝);
 互斥 ask(双方互相等)拒绝;supersede 只能顶替同 sender→receiver 的旧消息。
+
+### 4.1 `pending` 与 `history` 的覆盖范围
+
+这两个 action 最容易被当成同一件事,实际分工是「谁在等我回话」vs「我错过了什么」:
+
+- **`pending` 只列等你回复的 ask**:入表条件是消息带 `expectsReply` —— 只有 `ask` 会置位
+  (`contact_supervisor` 的 need_decision / interview_request 走同一条通路),所以普通
+  `send`(通知、FYI、完成报告)和 `reply` **永远不会出现**在 `pending` 里。它回答的是
+  「还有谁在等我回话」,不是「我收到了什么」;条目按到达时间正序,带 sender、message id、
+  已等待秒数与 80 字预览。未回复的 ask 超过 ask 超时(`PI_INTERCOM_ASK_TIMEOUT_MS`,
+  默认 10min)会被剪除,因此 **`pending` 为空 ≠ 从来没有 ask 来过**。
+- **`history` 是唯一能回放「我忙的时候错过了什么」的 action**:broker 在**接受**每条消息时
+  就把它写进 `~/.cornfield/intercom/journal.jsonl`(在线投递与离线暂存都写,暂存条目回放时
+  标 `(queued)`),与接收方当时忙不忙、有没有被触发过 turn 无关,broker 重启后 journal 仍在。
+  会话重连换了 sessionId 后,仍按「显式名字 + 同 cwd」匹配回自己的记录;`direction` 默认
+  `"in"`(发给我的),`"out"`(我发出的)/`"both"` 可切换,`since`/`limit` 可再收窄(默认 20 条)。
+  **空结果的含义是「还没有东西投递到你这儿」**(消息还没到 broker、或被你自己传的
+  `direction`/`since` 排掉、或已超出 journal 保留期),它**不是「没人给你发过」的证明**——
+  别据此断定对方没开口。
+- 其余 action 都不覆盖这两个语义:`status` 只看连接,`children` 只看子会话;没有「列出全部
+  已收消息」的独立动作,收件箱回放只走 `history`。
 
 ## 5. 使用方式
 
@@ -98,8 +120,8 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 - **planner-worker**:规划会话 `ask` 给执行会话,阻塞取回决定
 - **跨账号业务 agent**:gateway 账号(如 hr、finance)互发,或 TUI 直接指挥账号
 - **主 cornfield 监控子 cornfield(父子编排)**:主会话通过 `send ... openProjectPaneIfMissing: true` 拉起
-  子 cornfield 时,子进程启动注入 `CORNFIELD_SUBAGENT_ORCHESTRATOR_TARGET` / `_SESSION_ID` / `_RUN_ID` /
-  `_CHILD_AGENT` / `_CHILD_INDEX`,完成三件事:
+  子 cornfield 时,子进程启动注入 `PI_SUBAGENT_ORCHESTRATOR_TARGET` / `PI_SUBAGENT_ORCHESTRATOR_SESSION_ID` /
+  `PI_SUBAGENT_RUN_ID` / `PI_SUBAGENT_CHILD_AGENT` / `PI_SUBAGENT_CHILD_INDEX`,完成三件事:
   1. 子注册时携带 `parentId`,主会话 `intercom({ action: "children" })` 即可看到全部在线的子
      (状态/上下文占比随 presence 实时刷新,不轮询);
   2. 子每完成一个任务回合(`agent_end`)自动向父发送结构化完成报告(5s 防抖,标题
@@ -112,7 +134,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
   **gateway 账号当子**:`~/.cornfield/gateway.json` 的账号配置加 `intercomParent`
   (父的目标名或会话 id,通常是操作者 TUI 会话的 `/name` 或会话 id;父若用
   `PI_INTERCOM_STABLE_ID` 钉了地址,填那个),该账号
-  的 agent cornfield 启动时即注入 `CORNFIELD_SUBAGENT_*` 元数据并注册为父的子——主会话同样
+  的 agent cornfield 启动时即注入 `PI_SUBAGENT_*` 元数据并注册为父的子——主会话同样
   `children` 可见、收到自动完成报告、可裁决其 `contact_supervisor` 升级。
 
 ```json
@@ -156,7 +178,7 @@ intercom({ action: "send", to: "hr", message: "...", attachments: [{ type: "snip
 broker 守住这条:以一个**活着**的会话正在持有的 id 注册,会被拒绝并回 `error` 帧(帧内点名 id 与持有者 pid),
 只有持有者已经没了(连接已关)的 id 才能被下一个进程接管——这正是 resume 依赖的那条路。
 
-环境变量:`CORNFIELD_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`CORNFIELD_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)、`PI_INTERCOM_STABLE_ID`(本进程钉住的 intercom 地址)。
+环境变量:`PI_INTERCOM_ASK_TIMEOUT_MS`(ask 超时)、`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS`(心跳)、`PI_INTERCOM_STABLE_ID`(本进程钉住的 intercom 地址)。
 
 ## 7. 前置条件与排障
 
@@ -185,7 +207,7 @@ broker 守住这条:以一个**活着**的会话正在持有的 id 注册,会被
   连续拒绝 50 帧(持续洪水特征)才断开——一次性批量发送(如 260 条通知)
   只会被节流不会掉线
 - **掉线自愈**:优雅关闭 2s 内感知断线;SIGKILL/崩溃(无 FIN)由 liveness 心跳
-  (30s 间隔/5s 超时,`CORNFIELD_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS` 覆盖)
+  (30s 间隔/5s 超时,`PI_INTERCOM_LIVENESS_INTERVAL_MS`/`_TIMEOUT_MS` 覆盖)
   兜底,最迟 ~35s 感知;重连退避 1s→30s 无限重试,broker 恢复即自动入网
 
 ## 9. 相关实现

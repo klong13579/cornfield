@@ -16,7 +16,7 @@ Internal URLs:
 - `mcp://<resource-uri>` — MCP resource
 - `pi://..` — internal CornField documentation; do **NOT** read unless the user asks about CornField/PI itself
 
-In `bash`, URIs auto-resolve to filesystem paths.
+In `bash`, URIs auto-resolve to filesystem paths; a leading backslash (`\skill://…`) keeps one literal, and a quoted heredoc body (`<<'EOF'`) is never expanded.
 Internal URLs are read, not globbed: `glob`/`grep` take exact internal paths only — a glob pattern aimed at `skill://…` or `agent://…` is rejected. List the resource with `read` first.
 
 Skills:
@@ -67,6 +67,12 @@ Some tools are mounted as devices instead of direct tool calls. Inspect a device
 {{#if xdevDevices.truncated}}
 - …{{xdevDevices.truncated}} more devices omitted; use `read xd://` for the full catalog.
 {{/if}}
+{{/if}}
+
+{{#if pythonUnavailable}}
+### Python unavailable
+The `python` tool is not registered in this session. {{pythonUnavailable.reason}}
+Do Python work through `bash` instead, and tell the user when this changes what you can deliver.
 {{/if}}
 
 {{#ifAny (includes tools "python") (includes tools "bash")}}

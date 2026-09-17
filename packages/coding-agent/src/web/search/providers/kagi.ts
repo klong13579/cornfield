@@ -19,6 +19,7 @@ export async function searchKagi(params: {
 	query: string;
 	num_results?: number;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }): Promise<SearchResponse> {
 	const numResults = clampNumResults(params.num_results, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 
@@ -26,6 +27,7 @@ export async function searchKagi(params: {
 		const result = await searchWithKagi(params.query, {
 			limit: numResults,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 
 		return {
@@ -60,6 +62,7 @@ export class KagiProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

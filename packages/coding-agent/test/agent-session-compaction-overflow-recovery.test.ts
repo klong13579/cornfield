@@ -150,7 +150,11 @@ describe("AgentSession overflow recovery (gateway-swallowed errors)", () => {
 			if (event.type === "auto_compaction_end") onCompactionDone();
 		});
 
-		const contextWindow = 200_000;
+		// Window comes from the session's model, not a pinned constant: the catalog moved
+		// claude-sonnet-4-5 from 200k to 1M, which silently stopped this fixture from
+		// crossing the overflow line — the test then hung on the awaited event (found
+		// 2026-09-16, hidden until then by the CI step swallowing test exits).
+		const contextWindow = session.model?.contextWindow ?? 200_000;
 
 		// Mid-loop successful turn whose reported usage already exceeds the window.
 		const successMsg = {
@@ -195,13 +199,18 @@ describe("AgentSession overflow recovery (gateway-swallowed errors)", () => {
 		session.agent.emitExternalEvent({ type: "message_end", message: errorMsg });
 		session.agent.emitExternalEvent({ type: "agent_end", messages: [errorMsg] });
 
-		await withTimeout(compactionDone, 5000, "overflow compaction timed out");
+		// Hang guard, not a latency budget: these tests are event-driven, so a regression
+		// that stops the awaited event shows up as a wait. Kept above bun's 5s per-test
+		// default so the failure names the wait instead of bun's generic timeout
+		// (during the 2026-09-16 investigation the 5s default fired first and hid which
+		// event was missing).
+		await withTimeout(compactionDone, 30_000, "overflow compaction timed out");
 
 		const runtimeSignals = getRuntimeSignals();
 		expect(runtimeSignals).toContain("compaction:start:overflow");
 		expect(runtimeSignals.some(signal => signal.startsWith("compaction:end:"))).toBe(true);
 		expect(continueSpy).not.toHaveBeenCalled(); // autoContinue disabled
-	});
+	}, 30_000);
 
 	it("compacts on threshold when an error turn ends with oversized context (regression)", async () => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
@@ -211,9 +220,8 @@ describe("AgentSession overflow recovery (gateway-swallowed errors)", () => {
 			if (event.type === "auto_compaction_end") onCompactionDone();
 		});
 
-		// Reported prompt usage crosses the default threshold
-		// (window - max(15%, reserve)) but stays under the window.
-		const threshold = Math.floor(200_000 * 0.85);
+		// See the overflow case above: the window is the session model's, not a constant.
+		const threshold = Math.floor((session.model?.contextWindow ?? 200_000) * 0.85);
 
 		const successMsg = {
 			role: "assistant" as const,
@@ -256,10 +264,11 @@ describe("AgentSession overflow recovery (gateway-swallowed errors)", () => {
 		session.agent.emitExternalEvent({ type: "message_end", message: errorMsg });
 		session.agent.emitExternalEvent({ type: "agent_end", messages: [errorMsg] });
 
-		await withTimeout(compactionDone, 5000, "threshold compaction timed out");
+		// Same hang-guard rationale as the overflow case above.
+		await withTimeout(compactionDone, 30_000, "threshold compaction timed out");
 
 		const runtimeSignals = getRuntimeSignals();
 		expect(runtimeSignals).toContain("compaction:start:threshold");
 		expect(continueSpy).not.toHaveBeenCalled();
-	});
+	}, 30_000);
 });

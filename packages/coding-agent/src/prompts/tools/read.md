@@ -5,7 +5,7 @@ Multi-purpose: files, directories, archives, SQLite databases, images, documents
 - You **MUST** parallelize reads when exploring related files. For URLs, `read` returns clean extracted text/markdown (reader-mode) — reach for `read` first, not a browser.
 ## Parameters
 - `path` — file path or URL (required)
-- `sel` — optional selector for line ranges or raw mode
+- `sel` — optional selector for line ranges, a tail, or a mode (`raw`, `conflicts`)
 - `timeout` — seconds, for URLs only
 ## Selectors
 |`sel` value|Behavior|
@@ -15,6 +15,12 @@ Multi-purpose: files, directories, archives, SQLite databases, images, documents
 |`50-200`|Read lines 50-200|
 |`50+150`|Read 150 lines starting at line 50|
 |`20+1`|Read exactly one line|
+|`-60`|Read the last 60 lines (clamped to the file; `-N` ≥ file length reads the whole file)|
+|`1-2,40-45`|Read both ranges in one call. They keep their own line numbers and are separated by `…` — that marker is not file content|
+|`raw`|Return the text verbatim, with no line numbers|
+|`conflicts`|List the file's unresolved merge-conflict blocks (ids, line ranges, both sides) instead of its content|
+
+Ranges are 1-indexed and are never widened: an unrecognized selector is an error, not a whole-file read.
 ## Filesystem
 - Reading a directory path returns a list of dirents.
 {{#if IS_HASHLINE_MODE}}
@@ -26,8 +32,10 @@ Multi-purpose: files, directories, archives, SQLite databases, images, documents
 {{/if}}
 - Archives (`.tar`, `.tar.gz`, `.tgz`, `.zip`): `archive.ext:path/inside/archive` reads a member.
 - SQLite (`.sqlite`, `.sqlite3`, `.db`, `.db3`): `file.db:table?limit=50&offset=100`, `file.db?q=SELECT …`, etc.
+- Merge conflicts (`file.ts:conflicts`, also `sel=conflicts`): the file's unresolved conflict blocks as a numbered index. Read a block with `conflict://<id>` (`/ours`, `/theirs`, `/base` narrows to one side) and resolve it with `write({ path: "conflict://<id>", content })` — `conflict://*` resolves every registered block in one call. An ordinary read that lands on a conflict says so at the end of its output.
 ## Inspection & URLs
 - Extracts text from PDF, Word, PowerPoint, Excel, RTF, EPUB, Jupyter; inspects images.
+- PDF pages: `file.pdf:p3` renders page 3 with Chromium and returns it as an image attachment, for pages whose layout matters (figures, tables, scanned text) where the extracted text is not enough. Page numbers are 1-indexed; an out-of-range page is an error. Reading the plain `.pdf` path still extracts text.
 - URLs use reader-mode by default; `sel="raw"` for untouched HTML, `timeout` to override the default.
 - If `read` fails to fetch (timeout, bot wall, JS-rendered), use the `browser` tool instead of retrying `read`.
 </instruction>

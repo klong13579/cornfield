@@ -13,6 +13,7 @@ export async function searchParallel(params: {
 	query: string;
 	num_results?: number;
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }): Promise<SearchResponse> {
 	const numResults = clampNumResults(params.num_results, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 
@@ -21,6 +22,7 @@ export async function searchParallel(params: {
 			mode: "fast",
 			maxCharsPerResult: 10_000,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 
 		return {
@@ -53,6 +55,7 @@ export class ParallelProvider extends SearchProvider {
 			query: params.query,
 			num_results: params.numSearchResults ?? params.limit,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

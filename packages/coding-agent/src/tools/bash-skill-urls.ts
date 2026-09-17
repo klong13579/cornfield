@@ -8,8 +8,6 @@ import { normalizeLocalScheme } from "./path-utils";
 import { ToolError } from "./tool-errors";
 
 /** Regex to find skill:// tokens in command text. */
-const SKILL_URL_PATTERN = /'skill:\/\/[^'\s")`\\]+'|"skill:\/\/[^"\s')`\\]+"|skill:\/\/[^\s'")`\\]+/g;
-
 const INTERNAL_URL_PATTERN_INCLUDING_NORMALIZED_LOCAL =
 	/'(?:skill|agent|artifact|plan|memory|rule|local):\/\/[^'\s")`\\]+'|"(?:skill|agent|artifact|plan|memory|rule|local):\/\/[^"\s')`\\]+"|(?:skill|agent|artifact|plan|memory|rule|local):\/\/[^\s'")`\\]+|'local:\/[^'\s")`\\]+'|"local:\/[^"\s')`\\]+"|(?<![./\\\\\w-])local:\/[^\s'")`\\]+/g;
 
@@ -46,7 +44,7 @@ export interface InternalUrlExpansionOptions {
  * pointer to the offending text).
  */
 function withToken(message: string, url: string): string {
-	return `${message}\n  token: ${url}\n  note: bash commands auto-resolve internal URIs; write the literal differently`;
+	return `${message}\n  token: ${url}\n  note: bash commands auto-resolve internal URIs; prefix the URL with \\ to keep it literal`;
 }
 
 /**
@@ -222,25 +220,182 @@ async function resolveInternalUrlToPath(
 }
 
 /**
- * Expand all skill:// URIs in a bash command string.
- * Returns the command with URIs replaced by shell-escaped absolute paths.
- * Throws ToolError if any URI cannot be resolved.
+ * A span of the command text that must not be rewritten.
  */
-export function expandSkillUrls(command: string, skills: readonly Skill[]): string {
-	if (skills.length === 0 || !command.includes("skill://")) {
-		return command;
+interface ProtectedRange {
+	start: number;
+	end: number;
+}
+
+/** One heredoc redirection: its delimiter and whether the delimiter was quoted. */
+interface HeredocOpener {
+	delimiter: string;
+	stripTabs: boolean;
+	quoted: boolean;
+}
+
+/**
+ * Every heredoc redirection on the [from, lineEnd) line, in shell body order.
+ * All of them have to be collected before consuming bodies: bodies follow their
+ * openers in order, so skipping one would misplace the rest.
+ */
+function collectHeredocOpeners(command: string, from: number, lineEnd: number): HeredocOpener[] {
+	const openers: HeredocOpener[] = [];
+	let i = from;
+
+	while (i < lineEnd) {
+		const char = command[i];
+		if (char === "\\") {
+			i += 2;
+			continue;
+		}
+		if (char === "'" || char === '"') {
+			const close = command.indexOf(char, i + 1);
+			i = close === -1 || close >= lineEnd ? lineEnd : close + 1;
+			continue;
+		}
+		// `<<` opens a heredoc; `<<<` is a here-string and takes no body.
+		if (char !== "<" || command[i + 1] !== "<" || command[i + 2] === "<") {
+			i++;
+			continue;
+		}
+
+		let j = i + 2;
+		const stripTabs = command[j] === "-";
+		if (stripTabs) j++;
+		while (command[j] === " " || command[j] === "\t") j++;
+		const quote = command[j];
+		if (quote === "'" || quote === '"') {
+			const close = command.indexOf(quote, j + 1);
+			if (close !== -1 && close < lineEnd) {
+				openers.push({ delimiter: command.slice(j + 1, close), stripTabs, quoted: true });
+				i = close + 1;
+				continue;
+			}
+			i = j;
+			continue;
+		}
+
+		let k = j;
+		while (k < lineEnd && !/[\s;&|<>()]/.test(command[k])) k++;
+		if (k > j) openers.push({ delimiter: command.slice(j, k), stripTabs, quoted: false });
+		i = k > j ? k : j + 1;
 	}
 
-	return command.replace(SKILL_URL_PATTERN, token => {
-		const url = unquoteToken(token);
-		const resolvedPath = resolveSkillUrlToPath(url, skills);
-		return shellEscape(resolvedPath);
-	});
+	return openers;
+}
+
+/**
+ * Index where a heredoc body ends — the start of the line holding the closing
+ * delimiter (which carries nothing but the delimiter). An unterminated body runs to
+ * the end of the command, which is where the shell would have looked for it.
+ */
+function findHeredocBodyEnd(command: string, bodyStart: number, delimiter: string, stripTabs: boolean): number {
+	let lineStart = bodyStart;
+	while (lineStart <= command.length) {
+		const lineEnd = command.indexOf("\n", lineStart);
+		const rawLine = lineEnd === -1 ? command.slice(lineStart) : command.slice(lineStart, lineEnd);
+		const line = stripTabs ? rawLine.replace(/^\t+/, "") : rawLine;
+		if (line === delimiter) return lineStart;
+		if (lineEnd === -1) return command.length;
+		lineStart = lineEnd + 1;
+	}
+
+	return command.length;
+}
+
+/**
+ * Bodies of quoted heredocs (`<<'EOF'`, `<<"EOF"`, `<<-'EOF'`).
+ *
+ * Quoting the delimiter is how a shell is told "no expansion in this body": the
+ * text is data the command writes, not command text, so a URI in it is a string to
+ * emit rather than a path to resolve. Rewriting it there silently changes what the
+ * caller's file or script receives.
+ *
+ * Unquoted heredocs are left alone: the shell expands inside those, so expanding a
+ * URI there matches what the caller asked for.
+ */
+function findQuotedHeredocBodies(command: string): ProtectedRange[] {
+	const ranges: ProtectedRange[] = [];
+	let i = 0;
+	let inSingle = false;
+	let inDouble = false;
+
+	while (i < command.length) {
+		const char = command[i];
+
+		if (inSingle) {
+			if (char === "'") inSingle = false;
+			i++;
+			continue;
+		}
+		if (char === "\\") {
+			i += 2;
+			continue;
+		}
+		if (inDouble) {
+			if (char === '"') inDouble = false;
+			i++;
+			continue;
+		}
+		if (char === "'") {
+			inSingle = true;
+			i++;
+			continue;
+		}
+		if (char === '"') {
+			inDouble = true;
+			i++;
+			continue;
+		}
+		// An unquoted `#` at the start of a word comments out the rest of the line.
+		if (char === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+			const newline = command.indexOf("\n", i);
+			if (newline === -1) break;
+			i = newline + 1;
+			continue;
+		}
+
+		// `<<` opens a heredoc; `<<<` is a here-string and takes no body.
+		if (char === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
+			const openerLineEnd = command.indexOf("\n", i);
+			const lineEnd = openerLineEnd === -1 ? command.length : openerLineEnd;
+			const openers = collectHeredocOpeners(command, i, lineEnd);
+			if (openers.length > 0) {
+				let bodyStart = lineEnd === command.length ? command.length : lineEnd + 1;
+				for (const opener of openers) {
+					const bodyEnd = findHeredocBodyEnd(command, bodyStart, opener.delimiter, opener.stripTabs);
+					if (opener.quoted) ranges.push({ start: bodyStart, end: bodyEnd });
+					const closingLineEnd = command.indexOf("\n", bodyEnd);
+					bodyStart = closingLineEnd === -1 ? command.length : closingLineEnd + 1;
+				}
+				i = bodyStart;
+				continue;
+			}
+			i += 2;
+			continue;
+		}
+
+		i++;
+	}
+
+	return ranges;
+}
+
+/** Count the backslashes directly before `index` (text is unchanged above it). */
+function countPrecedingBackslashes(text: string, index: number): number {
+	let count = 0;
+	while (index - count - 1 >= 0 && text[index - count - 1] === "\\") count++;
+	return count;
 }
 
 /**
  * Expand supported internal URLs in a bash command string to shell-escaped absolute paths.
  * Supported schemes: skill://, agent://, artifact://, memory://, rule://, local://
+ *
+ * A backslash directly in front of a URL escapes it: the text is kept as written.
+ * Without that, a URI that exists resolves to a path and one that does not aborts
+ * the command — neither is "emit this string".
  */
 export async function expandInternalUrls(command: string, options: InternalUrlExpansionOptions): Promise<string> {
 	if (!command.includes("://") && !command.includes("local:/")) return command;
@@ -248,12 +403,22 @@ export async function expandInternalUrls(command: string, options: InternalUrlEx
 	const matches = Array.from(command.matchAll(INTERNAL_URL_PATTERN_INCLUDING_NORMALIZED_LOCAL));
 	if (matches.length === 0) return command;
 
+	const protectedRanges = findQuotedHeredocBodies(command);
+	const isProtected = (index: number) => protectedRanges.some(range => index >= range.start && index < range.end);
+
 	let expanded = command;
 	for (let i = matches.length - 1; i >= 0; i--) {
 		const match = matches[i];
 		const token = match[0];
 		const index = match.index;
 		if (index === undefined) continue;
+		if (isProtected(index)) continue;
+
+		// Escaped: drop the backslash, keep the URL as the caller wrote it.
+		if (countPrecedingBackslashes(command, index) % 2 === 1) {
+			expanded = `${expanded.slice(0, index - 1)}${expanded.slice(index)}`;
+			continue;
+		}
 
 		const rawUrl = unquoteToken(token);
 		const url = normalizeLocalScheme(rawUrl);

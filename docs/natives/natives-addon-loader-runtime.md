@@ -39,7 +39,7 @@ At module initialization, `native/index.js` computes:
   - otherwise `~/.cornfield/natives`.
 - **Compiled-binary mode** (`detectCompiledBinary`): true if any of:
   - embedded-addon manifest is non-null,
-  - `CORNFIELD_COMPILED` env var is set,
+  - `PI_COMPILED` env var is set,
   - `import.meta.url` contains Bun embedded markers (`$bunfs`, `~BUN`, `%7EBUN`).
 - **Variant override**: `CORNFIELD_NATIVE_VARIANT` (`modern`/`baseline` only; invalid values ignored).
 - **Selected variant**: explicit override, otherwise runtime AVX2 detection on x64 (`modern` if AVX2, else `baseline`).

@@ -21,12 +21,15 @@ import * as path from "node:path";
 import { validateToolArguments } from "@cornfield/ai";
 import { sanitizeSchemaForMCP } from "@cornfield/ai/utils/schema";
 import { Settings } from "@cornfield/coding-agent/config/settings";
+import { DEFAULT_BASH_INTERCEPTOR_RULES } from "@cornfield/coding-agent/config/settings-schema";
 import { XdevProtocolHandler } from "@cornfield/coding-agent/internal-urls/xd-protocol";
 import { buildSystemPrompt } from "@cornfield/coding-agent/system-prompt";
-import { createTools, type ToolSession, WriteTool } from "@cornfield/coding-agent/tools";
+import { BashTool, createTools, type ToolSession, WriteTool } from "@cornfield/coding-agent/tools";
+import { checkBashInterception } from "@cornfield/coding-agent/tools/bash-interceptor";
 import { ESSENTIAL_BUILTIN_TOOL_NAMES } from "@cornfield/coding-agent/tools/essential-tools";
 import {
 	buildXdevDeviceCatalog,
+	replaceableToolNames,
 	splitPostRegistrationMCPToolsForXdev,
 	XDEV_KEEP_TOP_LEVEL,
 } from "@cornfield/coding-agent/tools/xdev";
@@ -123,6 +126,58 @@ check(
 	"the device catalog renders each device's declared summary, not a description fallback",
 	notDeclared.length === 0,
 	`fell back to description: ${notDeclared.join(", ") || "none"}`,
+);
+
+// ── Case 1b: a consumer that decides from "which tools exist" sees the devices ─
+// `AgentToolContext.toolNames` carries the top-level set only. A bash-interceptor
+// rule names the tool it redirects to, so a rule naming a mounted device is dead in
+// production unless the consumer adds the Discoverable Tool Set itself — and the
+// unit suite cannot see that: mounting is off under the bun test runtime, so such a
+// rule looks alive there while it fires on nothing in production.
+console.log(`\n[case 1b] Enabled Set consumers (bash interceptor)`);
+const replaceable = replaceableToolNames(topNames, devices);
+const pythonBuilt = legacyNames.includes("python");
+const pythonMounted = deviceNames.includes("python");
+check(
+	"python is discoverable and mounted (ground truth for the consumer check)",
+	pythonBuilt && pythonMounted,
+	`built: ${pythonBuilt}; mounted: ${pythonMounted}; top-level: ${topNames.includes("python")}`,
+);
+const adHocPython = 'python -c "print(1)"';
+const pythonRules = DEFAULT_BASH_INTERCEPTOR_RULES.filter(rule => rule.tool === "python");
+check("an ad-hoc-python rule exists", pythonRules.length > 0);
+check(
+	"the rule fires through the replaceable set",
+	checkBashInterception(adHocPython, replaceable, pythonRules).block,
+	`replaceable includes python: ${replaceable.includes("python")}`,
+);
+check(
+	"the same rule cannot fire from the top-level set alone (why the helper exists)",
+	checkBashInterception(adHocPython, topNames, pythonRules).block === false,
+);
+
+// The wiring lives in BashTool.execute, not in the helper: drive the tool itself
+// against a session that mounted the devices, with NO context at all, so the only
+// source of "python is replaceable" is `session.xdevDevices`. The interceptor throws
+// before the shell is reached, so nothing is executed.
+const interceptSession: ToolSession = {
+	cwd: fs.mkdtempSync(path.join(os.tmpdir(), "xdev-verify-intercept-")),
+	hasUI: false,
+	getSessionFile: () => null,
+	getSessionSpawns: () => "*",
+	settings: Settings.isolated({ "tools.xdev": true, "bashInterceptor.enabled": true }),
+	xdevDevices: devices,
+};
+let interceptMessage = "";
+try {
+	await new BashTool(interceptSession).execute("xdev-intercept", { command: adHocPython });
+} catch (error) {
+	interceptMessage = error instanceof Error ? error.message : String(error);
+}
+check(
+	"BashTool.execute rejects ad-hoc python on a session that mounted the device",
+	interceptMessage.includes("Use the `python` tool instead of `python -c`"),
+	`message: ${interceptMessage || "(none — the command was NOT blocked)"}`,
 );
 
 // ── Case 2: explicit tool list → mounting off (runtime injection boundary) ──

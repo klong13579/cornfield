@@ -1,11 +1,11 @@
 Manages a phased task list. Pass `ops`: a flat array of operations.
-The next pending task is auto-promoted to `in_progress` after each completion.
+The next pending task is auto-promoted to `in_progress` after each completion. A `blocked` task never auto-promotes — only `unblock` moves it.
 
 > **IMPORTANT**: `ops` must be a **native JSON array**, NOT a JSON string. Do NOT wrap the array in quotes. For example, pass `ops=[{op:"init",list:[…]}]`, NOT `ops="[{op:\"init\",list:[…]}]"`.
 
 > **IMPORTANT**: `items` (in `init` and `append`) must be a **flat array of strings** — each element is the task content itself, not a wrapper. Do NOT model each task as `{task: "…"}` or any object. The schema is `Type.Array(Type.String())`. Pass `items=["Scaffold crate","Wire workspace"]`, NOT `items=[{task:"Scaffold crate",item:{…}}, …]`. Wrapping each string in an object triggers a validation error and a per-element recovery pass.
 
-> **Optional `op`**: each entry's `op` is optional and is inferred only when a field uniquely identifies the op — `list` → init, `items` → append, `text` → note. An entry with only `task`/`phase` is ambiguous (start/done/rm/drop all match) and must name its `op` explicitly; otherwise the tool errors listing the allowed `op` values.
+> **Optional `op`**: each entry's `op` is optional and is inferred only when a field uniquely identifies the op — `list` → init, `items` → append, `text` → note. An entry with only `task`/`phase` is ambiguous (start/done/rm/drop/block/unblock all match), so name its `op` explicitly; `block` and `view` always do too. Otherwise the tool errors listing the allowed `op` values.
 
 ## Operations
 
@@ -15,9 +15,12 @@ The next pending task is auto-promoted to `in_progress` after each completion.
 |`start`|`task`|Mark in progress|
 |`done`|`task` or `phase`|Mark completed|
 |`drop`|`task` or `phase`|Mark abandoned|
+|`block`|`task` or `phase`; optional `reason`|Mark blocked: waiting on something you cannot do yourself|
+|`unblock`|`task` or `phase`|Blocked task → `pending`|
 |`rm`|`task` or `phase`|Remove|
 |`append`|`phase`, `items: string[]`|Append tasks; lazily creates phase|
 |`note`|`task`, `text`|Append a note to a task. Reminders for future-you only.|
+|`view`|—|Read-only: echo the list. Changes nothing.|
 
 > **Each task / item is a plain string**, not an object. `task` and `items` are content, not structured records. Examples below show the only correct shape.
 
@@ -28,7 +31,8 @@ The next pending task is auto-promoted to `in_progress` after each completion.
 ## Rules
 - Mark tasks done immediately after finishing.
 - Complete phases in order.
-- On blockers, `append` a new task to the active phase to unblock yourself, or `drop`.
+- Waiting on something you cannot act on — a user decision, another agent, an external service — is not a reason to guess or to drop the task: `block` it, with an optional one-line `reason` saying what it waits for. It stays on the list, shows on the panel, and neither auto-promotes nor counts as open work. Blocking the active task hands `in_progress` to the next `pending` task, never back to the blocked one. `unblock` once it becomes actionable; if the blocker is something you *can* act on, `append` an unblocking task instead.
+- Lost the exact task text: `view` echoes the list. Never guess it from memory.
 - `task` and `phase` fields reference content/name verbatim; keep them stable once introduced.
 
 ## When to create a list
@@ -52,3 +56,9 @@ The next pending task is auto-promoted to `in_progress` after each completion.
 `{"ops":[{"op":"drop","task":"Run cargo test"}]}`
 # Append tasks to a phase
 `{"ops":[{"op":"append","phase":"Auth","items":["Handle retries","Run tests"]}]}`
+# Block the task you cannot proceed on
+`{"ops":[{"op":"block","task":"Run tests","reason":"waiting on the staging API key"}]}`
+# Unblock it once it is actionable again
+`{"ops":[{"op":"unblock","task":"Run tests"}]}`
+# Read the list without touching it
+`{"ops":[{"op":"view"}]}`

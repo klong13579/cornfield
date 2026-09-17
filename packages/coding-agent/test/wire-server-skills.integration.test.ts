@@ -1,7 +1,7 @@
 /**
  * W3 D5 e2e — serve `get_skills` 只读技能列表（真实 serve 子进程 + bun WS 客户端）。
  *
- * 预置：用户级技能（$HOME/.omp/agent/skills/）+ 项目级技能（serve cwd 的 .cornfield/skills/），
+ * 预置：用户级技能（<fixture.home>/.cornfield/agent/skills/）+ 项目级技能（serve cwd 的 .cornfield/skills/），
  * SKILL.md frontmatter 同真机格式。验证 session.skills 同源列表 + level 分类。
  *
  * 验证：
@@ -10,27 +10,20 @@
  *   3. 不依赖任何 attached session 之外的进程态（定向默认 active agent）
  *
  * 隔离 HOME + 临时项目 cwd（serve 以绝对路径启动），不污染仓库。
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）：
+ * 两边 SKILL.md 都得抢在 serve boot 之前落盘（技能在 default session 创建时一次发现），
+ * 所以走夹具的 `seed` 钩子 + `cwd: home => ...`，而不是 spawn 之后再写。
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { MULTIDEVICE_PROTOCOL_VERSION } from "@cornfield/wire";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 type Frame = { type: string; [k: string]: unknown };
 
-import * as net from "node:net";
-import { waitForServe } from "./wait-for-serve";
-
-function freePort(): Promise<number> {
-	return new Promise(resolve => {
-		const srv = net.createServer();
-		srv.listen(0, "127.0.0.1", () => {
-			const port = (srv.address() as net.AddressInfo).port;
-			srv.close(() => resolve(port));
-		});
-	});
-}
+/** serve 的 cwd：隔离 HOME 下的项目目录（项目级技能从 <cwd>/.cornfield/skills 发现）。 */
+const PROJECT_DIR = "project";
 
 interface SkillEntry {
 	name: string;
@@ -40,11 +33,7 @@ interface SkillEntry {
 	provider: string;
 }
 
-let isolatedHome: string;
-let projectCwd: string;
-let savedHome: string | undefined;
-let proc: ReturnType<typeof Bun.spawn> | undefined;
-let url = "";
+let fixture: ServeFixture | undefined;
 
 async function connect(wsUrl: string): Promise<WebSocket> {
 	const ws = new WebSocket(wsUrl);
@@ -100,7 +89,7 @@ function skillMd(name: string, description: string): string {
 
 describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 	test("停用 → get_skills 移除 + config.yml 写入；启用 → 恢复", async () => {
-		const ws = await connect(url);
+		const ws = await connect(fixture!.url);
 		try {
 			// 初始：demo-user-skill 在已加载集
 			const before = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
@@ -129,7 +118,7 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 
 			// config.yml 落盘（settings.ignoredSkills 含 demo-user-skill）——后台异步保存，轮询等写入。
 			// 落点是 default agent 的 **global 层** = 客户端目录那份（票 24 的层定案）。
-			const cfgPath = path.join(isolatedHome, ".cornfield", "agent", "config.yml");
+			const cfgPath = path.join(fixture!.home, ".cornfield", "agent", "config.yml");
 			let cfg = "";
 			const cfgDeadline = Date.now() + 3000;
 			while (Date.now() < cfgDeadline) {
@@ -160,7 +149,7 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 	}, 90_000);
 
 	test("非法技能名（含路径分隔符）→ 结构化错误 internal", async () => {
-		const ws = await connect(url);
+		const ws = await connect(fixture!.url);
 		try {
 			const bad = (await rawRequest(ws, {
 				type: "set_skill_enabled",
@@ -179,7 +168,7 @@ describe("P2-W3-3 — set_skill_enabled（B3 技能写协议）", () => {
 
 describe("W3 D5 — serve get_skills 只读技能列表", () => {
 	test("get_skills: 用户级 + 项目级技能（level 分类正确）", async () => {
-		const ws = await connect(url);
+		const ws = await connect(fixture!.url);
 		try {
 			const result = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
 			expect(Array.isArray(result.skills)).toBe(true);
@@ -205,7 +194,7 @@ describe("W3 D5 — serve get_skills 只读技能列表", () => {
 	});
 
 	test("get_skills: 幂等（重复调用同结果，无副作用）", async () => {
-		const ws = await connect(url);
+		const ws = await connect(fixture!.url);
 		try {
 			const again = (await request(ws, { type: "get_skills" })) as { skills: SkillEntry[] };
 			expect(again.skills.some(s => s.name === "demo-user-skill")).toBe(true);
@@ -217,52 +206,29 @@ describe("W3 D5 — serve get_skills 只读技能列表", () => {
 });
 
 beforeAll(async () => {
-	isolatedHome = await fs.mkdtemp(path.join(os.tmpdir(), "omp-serve-skills-"));
-	savedHome = process.env.HOME;
-	process.env.HOME = isolatedHome;
+	fixture = await spawnServeFixture({
+		homePrefix: "omp-serve-skills-",
+		cwd: home => path.join(home, PROJECT_DIR),
+		seed: async home => {
+			// 用户级技能：<home>/.cornfield/agent/skills/<name>/SKILL.md
+			const userSkillDir = path.join(home, ".cornfield", "agent", "skills", "demo-user-skill");
+			await fs.mkdir(userSkillDir, { recursive: true });
+			await Bun.write(
+				path.join(userSkillDir, "SKILL.md"),
+				skillMd("demo-user-skill", "用户级技能 seed for wire e2e"),
+			);
 
-	// 用户级技能：$HOME/.omp/agent/skills/<name>/SKILL.md
-	const userSkillDir = path.join(isolatedHome, ".cornfield", "agent", "skills", "demo-user-skill");
-	await fs.mkdir(userSkillDir, { recursive: true });
-	await Bun.write(path.join(userSkillDir, "SKILL.md"), skillMd("demo-user-skill", "用户级技能 seed for wire e2e"));
-
-	// 项目级技能：<serve cwd>/.cornfield/skills/<name>/SKILL.md——serve 以临时项目为 cwd 启动
-	projectCwd = path.join(isolatedHome, "project");
-	const projectSkillDir = path.join(projectCwd, ".cornfield", "skills", "demo-project-skill");
-	await fs.mkdir(projectSkillDir, { recursive: true });
-	await Bun.write(
-		path.join(projectSkillDir, "SKILL.md"),
-		skillMd("demo-project-skill", "项目级技能 seed for wire e2e"),
-	);
-
-	const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-	const port = await freePort();
-	proc = Bun.spawn(
-		[
-			"bun",
-			`${repoRoot}/packages/coding-agent/src/cli.ts`,
-			"serve",
-			"--port",
-			String(port),
-			"--host",
-			"127.0.0.1",
-			"--no-extensions",
-		],
-		{
-			cwd: projectCwd,
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, HOME: isolatedHome, PI_NO_TITLE: "1" },
+			// 项目级技能：<serve cwd>/.cornfield/skills/<name>/SKILL.md——serve 以该临时项目为 cwd 启动
+			const projectSkillDir = path.join(home, PROJECT_DIR, ".cornfield", "skills", "demo-project-skill");
+			await fs.mkdir(projectSkillDir, { recursive: true });
+			await Bun.write(
+				path.join(projectSkillDir, "SKILL.md"),
+				skillMd("demo-project-skill", "项目级技能 seed for wire e2e"),
+			);
 		},
-	);
-	url = (await waitForServe(proc, port)).url;
-}, 90_000);
+	});
+}, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {
-	if (proc) {
-		proc.kill();
-		await proc.exited;
-	}
-	if (savedHome !== undefined) process.env.HOME = savedHome;
-	await fs.rm(isolatedHome, { recursive: true, force: true });
+	await fixture?.dispose();
 });

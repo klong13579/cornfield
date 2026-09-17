@@ -1,19 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PiClient } from "@cornfield/client";
 import type { WireServerEvent } from "@cornfield/wire";
-import { type IsolatedServeHandle, startIsolatedServe } from "./wait-for-serve";
+import { SERVE_BOOT_BUDGET_MS, type ServeFixture, spawnServeFixture } from "./wire-serve-fixture";
 
 /**
  * 审批 shell e2e — 真 serve 子进程 + pi-client（P2-W1-4 的 inject 触发路径）。
  * 不触发 LLM：inject_permission 是 mock 审批源（测试通道），只验
  *   inject → permission_request push（广播）→ permission_respond → inject response 回 choice。
  *
- * serve 走夹具的隔离 HOME（`startIsolatedServe`）：真 HOME 的 registry.json 里有 `default` 时
- * 工作根会被换掉。cwd 与改动前一致（仍是进程 cwd），改的只有 HOME。
+ * 隔离 HOME / 端口 / 预算 / 停摆重试都在 `spawnServeFixture` 里（见该文件的说明）。
  */
 
-let served: IsolatedServeHandle | undefined;
-const serveInfo: { url: string; token: string } = { url: "", token: "" };
+let fixture: ServeFixture | undefined;
 
 function nextPermissionRequest(client: PiClient): Promise<Extract<WireServerEvent, { type: "permission_request" }>> {
 	const { promise, resolve } = Promise.withResolvers<Extract<WireServerEvent, { type: "permission_request" }>>();
@@ -27,18 +25,16 @@ function nextPermissionRequest(client: PiClient): Promise<Extract<WireServerEven
 }
 
 beforeAll(async () => {
-	served = await startIsolatedServe({ cwd: process.cwd() });
-	serveInfo.url = served.url;
-	serveInfo.token = served.token;
-}, 90_000);
+	fixture = await spawnServeFixture({ homePrefix: "omp-serve-permission-" });
+}, SERVE_BOOT_BUDGET_MS);
 
 afterAll(async () => {
-	await served?.stop();
+	await fixture?.dispose();
 });
 
 describe("审批 shell e2e（真 serve + pi-client，inject 触发）", () => {
 	test("inject_permission → permission_request push → respond once → 回 choice", async () => {
-		const client = new PiClient({ url: serveInfo.url, token: serveInfo.token, autoReconnect: false });
+		const client = new PiClient({ url: fixture!.url, token: fixture!.token, autoReconnect: false });
 		await client.connect();
 
 		try {

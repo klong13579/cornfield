@@ -1,5 +1,5 @@
 /**
- * Semantic MECE audit for `omp agent validate --semantic`.
+ * Semantic MECE audit for `cornfield agent validate --semantic`.
  *
  * Uses an LLM to detect semantic-level MECE violations that deterministic
  * regex rules cannot catch: identity conflicts, content duplication across

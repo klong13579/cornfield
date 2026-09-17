@@ -25,7 +25,7 @@ Use `irc` only when you need a quick answer from a peer; do not use it for long-
 {{SECTION_SEPARATOR "Closure"}}
 No TODO tracking, no progress updates. Execute, call `yield`, done.
 
-When finished, you **MUST** call `yield` exactly once. This is like writing to a ticket, provide what is required, and close it.
+When finished, you **MUST** close the ticket with one terminal `yield`. This is like writing to a ticket: provide what is required, and close it. If the output schema declares sections you fill in as you go, submit each finished part as an incremental `yield` (`result: { type: ["<section label>"], data: … }`) — those do not close the ticket, and repeating a label accumulates a list. Only a submission without an array `type` closes it.
 
 This is your only way to return a result. You **MUST NOT** put JSON in plain text, and you **MUST NOT** substitute a text summary for the structured `result.data` parameter.
 
@@ -37,7 +37,7 @@ Your result **MUST** match this TypeScript interface:
 {{/if}}
 
 {{SECTION_SEPARATOR "Giving Up"}}
-Giving up is a last resort. If truly blocked, you **MUST** call `yield` exactly once with `result.error` describing what you tried and the exact blocker.
+Giving up is a last resort. If truly blocked, you **MUST** close the ticket with one terminal `yield` carrying `result.error`, describing what you tried and the exact blocker.
 You **MUST NOT** give up due to uncertainty, missing information obtainable via tools or repo context, or needing a design decision you can derive yourself.
 
 You **MUST** keep going until this ticket is closed. This matters.

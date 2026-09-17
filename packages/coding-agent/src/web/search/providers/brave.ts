@@ -10,7 +10,7 @@ import { SearchProviderError } from "../../../web/search/types";
 import { clampNumResults, dateToAgeSeconds } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
-import { isApiKeyAvailable } from "./utils";
+import { isApiKeyAvailable, MAX_SEARCH_ERROR_BYTES, readLimitedText, withHardTimeout } from "./utils";
 
 const BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
 const DEFAULT_NUM_RESULTS = 10;
@@ -28,6 +28,7 @@ export interface BraveSearchParams {
 	num_results?: number;
 	recency?: "day" | "week" | "month" | "year";
 	signal?: AbortSignal;
+	timeoutMs?: number;
 }
 
 interface BraveSearchResult {
@@ -85,11 +86,11 @@ async function callBraveSearch(
 			Accept: "application/json",
 			"X-Subscription-Token": apiKey,
 		},
-		signal: params.signal,
+		signal: withHardTimeout(params.signal, params.timeoutMs),
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
+		const errorText = await readLimitedText(response, "brave", MAX_SEARCH_ERROR_BYTES, true);
 		throw new SearchProviderError("brave", `Brave API error (${response.status}): ${errorText}`, response.status);
 	}
 
@@ -142,6 +143,7 @@ export class BraveProvider extends SearchProvider {
 			num_results: params.numSearchResults ?? params.limit,
 			recency: params.recency,
 			signal: params.signal,
+			timeoutMs: params.timeoutMs,
 		});
 	}
 }

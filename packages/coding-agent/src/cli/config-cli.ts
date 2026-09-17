@@ -1,11 +1,12 @@
 /**
  * Config CLI command handlers.
  *
- * Handles `omp config <command>` subcommands for managing settings.
+ * Handles `cornfield config <command>` subcommands for managing settings.
  * Uses the settings schema as the source of truth for available settings.
  */
 
 import { APP_NAME, getDefaultAgentHome } from "@cornfield/utils";
+import { writeStdout } from "@cornfield/utils/cli";
 import chalk from "chalk";
 import {
 	getDefault,
@@ -269,7 +270,7 @@ function handleList(flags: { json?: boolean }): void {
 				description: def.description,
 			};
 		}
-		console.log(JSON.stringify(result, null, 2));
+		writeStdout(JSON.stringify(result, null, 2));
 		return;
 	}
 
@@ -290,14 +291,14 @@ function handleList(flags: { json?: boolean }): void {
 	});
 
 	for (const group of sortedGroups) {
-		console.log(chalk.bold.blue(`[${group}]`));
+		writeStdout(chalk.bold.blue(`[${group}]`));
 		for (const def of groups[group]) {
 			const value = settings.get(def.path);
 			const valueStr = formatValue(value);
 			const typeStr = getTypeDisplay(def);
-			console.log(`  ${chalk.white(def.path)} = ${valueStr} ${chalk.dim(typeStr)}`);
+			writeStdout(`  ${chalk.white(def.path)} = ${valueStr} ${chalk.dim(typeStr)}`);
 		}
-		console.log("");
+		writeStdout("");
 	}
 }
 
@@ -318,11 +319,11 @@ function handleGet(key: string | undefined, flags: { json?: boolean }): void {
 	const value = settings.get(def.path);
 
 	if (flags.json) {
-		console.log(JSON.stringify({ key: def.path, value, type: def.type, description: def.description }, null, 2));
+		writeStdout(JSON.stringify({ key: def.path, value, type: def.type, description: def.description }, null, 2));
 		return;
 	}
 
-	console.log(formatValue(value));
+	writeStdout(formatValue(value));
 }
 
 async function handleSet(key: string | undefined, value: string | undefined, flags: { json?: boolean }): Promise<void> {
@@ -349,9 +350,9 @@ async function handleSet(key: string | undefined, value: string | undefined, fla
 	const newValue = settings.get(def.path);
 
 	if (flags.json) {
-		console.log(JSON.stringify({ key: def.path, value: newValue }));
+		writeStdout(JSON.stringify({ key: def.path, value: newValue }));
 	} else {
-		console.log(chalk.green(`${theme.status.success} Set ${def.path} = ${formatValue(newValue)}`));
+		writeStdout(chalk.green(`${theme.status.success} Set ${def.path} = ${formatValue(newValue)}`));
 	}
 }
 
@@ -374,14 +375,15 @@ async function handleReset(key: string | undefined, flags: { json?: boolean }): 
 	settings.set(path, defaultValue as SettingValue<typeof path>);
 
 	if (flags.json) {
-		console.log(JSON.stringify({ key: def.path, value: defaultValue }));
+		writeStdout(JSON.stringify({ key: def.path, value: defaultValue }));
 	} else {
-		console.log(chalk.green(`${theme.status.success} Reset ${def.path} to ${formatValue(defaultValue)}`));
+		writeStdout(chalk.green(`${theme.status.success} Reset ${def.path} to ${formatValue(defaultValue)}`));
 	}
 }
 
 function handlePath(): void {
-	console.log(getDefaultAgentHome());
+	// 打印 default Agent 的家（base 的语义：它才是 agent 的配置根）；输出走 writeStdout（main 的 stdout 上界修复）。
+	writeStdout(getDefaultAgentHome());
 }
 
 // =============================================================================

@@ -35,14 +35,14 @@
 - **gateway 配置文件**：`~/.cornfield/gateway.json`
 - **gateway 数据目录**：`~/.cornfield/gateway-data/`
 - **调度器数据库**：`~/.cornfield/gateway-data/scheduler/scheduler.db`
-- **日志**：`~/.cornfield/logs/omp.YYYY-MM-DD.log`
+- **日志**：`~/.cornfield/logs/cornfield.YYYY-MM-DD.log`
 
 同 gateway 下可能还运行其他账号的机器人，各自独立 agentDir 和 session，互不干扰。
 
 ### 消息流
 
 你的回复**不是直接发给用户**，而是经过 gateway 处理后发到钉钉：
-1. 你产出回复文本（在 omp rpc 进程内）
+1. 你产出回复文本（在 cornfield rpc 进程内）
 2. gateway 创建钉钉 AI 卡片，扫描回复正文中的内容并渲染
 3. 卡片推送到用户的钉钉单聊/群聊
 
@@ -140,9 +140,9 @@ cornfield-gateway config                      # 打印当前生效配置
 #### agent 工作区管理
 
 ```bash
-omp agent list                          # 列出所有 agent 目录
-omp agent show <name>                   # 查看 agent 详情
-omp agent validate                      # 校验当前 agent 目录结构
+cornfield agent list                    # 列出所有 agent 目录
+cornfield agent show <name>             # 查看 agent 详情
+cornfield agent validate                # 校验当前 agent 目录结构
 ```
 
 ## 主动模型管理（LLM 工具）

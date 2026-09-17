@@ -1,7 +1,7 @@
 import { THINKING_EFFORTS } from "@cornfield/ai";
 import { TASK_SIMPLE_MODES } from "../task/simple-mode";
 import { EDIT_MODES } from "../utils/edit-mode";
-import { MODEL_ROLE_IDS } from "./model-registry";
+import { MODEL_ROLE_IDS } from "./model-role-ids";
 import type { ModelRoleRoute } from "./model-routes";
 
 /** Unified settings schema - single source of truth for all settings.
@@ -203,6 +203,18 @@ export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
 		tool: "read",
 		message:
 			"There is no `skill` shell command. To load a skill, use the read tool: `read skill://<name>`. To discover skills, use `read ~/.cornfield/agent/skills/`.",
+	},
+	{
+		// Ad-hoc `python -c` reimplements in bash what the `python` tool already is:
+		// a persistent kernel with structured output. The flags must sit directly
+		// after the interpreter, so `python script.py` and `python -m pip` stay
+		// untouched. There is deliberately no `node -e` / `bun -e` counterpart: a
+		// rule only fires when its `tool` is available, and nothing can replace
+		// ad-hoc JS until a JS runtime tool exists.
+		pattern: "^\\s*(python3?|ipython3?)\\s+(-[^\\s]+\\s+)*-[cC](\\s|$)",
+		tool: "python",
+		message:
+			"Use the `python` tool instead of `python -c`. It keeps imports, variables and functions across calls in a persistent IPython kernel, and renders structured output. Its input is `cells: [{ code }]`, not a `command` string.",
 	},
 ];
 
@@ -1599,6 +1611,26 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"edit.blackbox.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "editing",
+			label: "Record Parse Regressions",
+			description: "Append every edit that breaks a file's parse to <agentDir>/edit-blackbox.jsonl",
+		},
+	},
+
+	"edit.blackbox.maxBytes": {
+		type: "integer",
+		default: 5242880,
+		ui: {
+			tab: "editing",
+			label: "Parse Regression Log Limit",
+			description: "Rotate the parse-regression log once it reaches this many bytes (0 = never rotate)",
+		},
+	},
+
 	readLineNumbers: {
 		type: "boolean",
 		default: false,
@@ -2007,6 +2039,38 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"github.cache.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "GitHub View Cache",
+			description:
+				"Cache fetched issue/PR/diff views so repeated reads of the same number skip the GitHub round trip",
+		},
+	},
+
+	"github.cache.softTtlSec": {
+		type: "number",
+		default: 300,
+		ui: {
+			tab: "tools",
+			label: "GitHub Cache Soft TTL",
+			description: "Within this window a cached view is returned as-is (seconds; default 5 minutes)",
+		},
+	},
+
+	"github.cache.hardTtlSec": {
+		type: "number",
+		default: 604800,
+		ui: {
+			tab: "tools",
+			label: "GitHub Cache Hard TTL",
+			description:
+				"Past the soft TTL a cached view is refreshed; past this one it is dropped before the live fetch (seconds; default 7 days)",
+		},
+	},
+
 	"web_search.enabled": {
 		type: "boolean",
 		default: true,
@@ -2366,6 +2430,28 @@ export const SETTINGS_SCHEMA = {
 			tab: "providers",
 			label: "Web Search Provider",
 			description: "Provider for web search tool",
+			submenu: true,
+		},
+	},
+	"providers.webSearchTimeoutSeconds": {
+		type: "number",
+		default: 60,
+		ui: {
+			tab: "providers",
+			label: "Web Search Timeout",
+			description:
+				"Hard ceiling in seconds for a provider that synthesizes its answer (Anthropic, Gemini, Codex, Perplexity, Kimi). A slow request is abandoned and the next provider is tried (1-300)",
+			submenu: true,
+		},
+	},
+	"providers.webSearchIndexTimeoutSeconds": {
+		type: "number",
+		default: 20,
+		ui: {
+			tab: "providers",
+			label: "Web Search Timeout (Index)",
+			description:
+				"Hard ceiling in seconds for a provider that answers from a search index (Brave, Exa, Jina, Kagi, Parallel, SearXNG, Synthetic, Tavily, Z.AI). Kept short so an unreachable provider cannot spend a synthesis-sized budget before the next one runs (1-300)",
 			submenu: true,
 		},
 	},

@@ -94,6 +94,24 @@ export function splitToolsForXdev(tools: Tool[]): XdevSplit {
 }
 
 /**
+ * Every tool a consumer may treat as replaceable, given the top-level set the
+ * session exposed and the devices it mounted.
+ *
+ * A mounted device is a dedicated tool too — it is reachable through
+ * `write xd://<name>` — so a consumer that decides from "which tools exist"
+ * (the bash interceptor, whose rules name the tool they redirect to) must count
+ * it. `AgentToolContext.toolNames` carries only the top-level set: `createTools`
+ * returns `split.topLevel` and parks `discoverable` tools in `session.xdevDevices`.
+ * A consumer that reads the context alone therefore sees a rule naming a mounted
+ * tool as dead in production while `bun test` (where mounting is off) reports it
+ * alive — the failure mode `scripts/verify-xdev-mounting.ts` exists to catch.
+ */
+export function replaceableToolNames(topLevel: readonly string[], devices?: Map<string, Tool>): string[] {
+	if (!devices || devices.size === 0) return [...topLevel];
+	return [...topLevel, ...devices.keys()];
+}
+
+/**
  * Split tools registered after `createTools` (MCP tools) for xd:// mounting.
  *
  * `createTools` splits built-in tools inside its own run; MCP tools are

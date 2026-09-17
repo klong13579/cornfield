@@ -8,7 +8,6 @@ import path from "node:path";
 import type { AgentEvent, ThinkingLevel } from "@cornfield/agent";
 import { logger, prompt, untilAborted } from "@cornfield/utils";
 import type { TSchema } from "@sinclair/typebox";
-import Ajv, { type ValidateFunction } from "ajv";
 import { ModelRegistry } from "../config/model-registry";
 import { resolveModelOverride } from "../config/model-resolver";
 import type { PromptTemplate } from "../config/prompt-templates";
@@ -29,7 +28,8 @@ import type { AuthStorage } from "../session/auth-storage";
 import { SessionManager } from "../session/session-manager";
 import { truncateTail } from "../session/streaming-output";
 import type { ContextFileEntry } from "../tools";
-import { jtdToJsonSchema, normalizeSchema } from "../tools/jtd-to-json-schema";
+import { normalizeSchema } from "../tools/jtd-to-json-schema";
+import { buildOutputValidator } from "../tools/output-schema-validator";
 import { ToolAbortError } from "../tools/tool-errors";
 import type { EventBus } from "../utils/event-bus";
 import { buildNamedToolChoice } from "../utils/tool-choice";
@@ -45,9 +45,9 @@ import {
 	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "./types";
+import { arrayValuedLabels, assembleYieldResult, isIncrementalYieldType } from "./yield-assembly";
 
 const MCP_CALL_TIMEOUT_MS = 60_000;
-const ajv = new Ajv({ allErrors: true, strict: false, logger: false });
 
 /** Agent event types to forward for progress tracking. */
 const agentEventTypes = new Set<AgentEvent["type"]>([
@@ -178,18 +178,6 @@ function parseStringifiedJson(value: unknown): unknown {
 	}
 }
 
-function buildOutputValidator(schema: unknown): { validate?: ValidateFunction; error?: string } {
-	const { normalized, error } = normalizeSchema(schema);
-	if (error) return { error };
-	if (normalized === undefined) return {};
-	const jsonSchema = jtdToJsonSchema(normalized);
-	try {
-		return { validate: ajv.compile(jsonSchema as any) };
-	} catch (err) {
-		return { error: err instanceof Error ? err.message : String(err) };
-	}
-}
-
 function tryParseJsonOutput(text: string): unknown | undefined {
 	const trimmed = text.trim();
 	if (!trimmed) return undefined;
@@ -233,7 +221,7 @@ function resolveFallbackCompletion(rawOutput: string, outputSchema: unknown): { 
 	if (candidate === undefined) return null;
 	const { validate, error } = buildOutputValidator(outputSchema);
 	if (error) return null;
-	if (validate && !validate(candidate)) return null;
+	if (validate && !validate(candidate).valid) return null;
 	return { data: candidate };
 }
 
@@ -241,6 +229,8 @@ export interface YieldItem {
 	data?: unknown;
 	status?: "success" | "aborted";
 	error?: string;
+	/** Non-empty `string[]` = incremental section labels; a string (or absent) = terminal submission. */
+	type?: string | string[];
 }
 
 interface FinalizeSubprocessOutputArgs {
@@ -273,18 +263,21 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 	const hasYield = Array.isArray(yieldItems) && yieldItems.length > 0;
 
 	if (hasYield) {
-		const lastYield = yieldItems[yieldItems.length - 1];
-		if (lastYield?.status === "aborted") {
+		// Sections and the terminal submission fold into one payload. A run that only
+		// ever reported sections still has a result — the assembled sections — and a
+		// run that submitted one untyped result keeps the historical "last wins".
+		const assembled = assembleYieldResult(yieldItems, arrayValuedLabels(outputSchema));
+		if (assembled?.terminalStatus === "aborted") {
 			abortedViaYield = true;
 			exitCode = 0;
-			stderr = lastYield.error || "Subagent aborted task";
+			stderr = assembled.terminalError || "Subagent aborted task";
 			try {
-				rawOutput = JSON.stringify({ aborted: true, error: lastYield.error }, null, 2);
+				rawOutput = JSON.stringify({ aborted: true, error: assembled.terminalError }, null, 2);
 			} catch {
-				rawOutput = `{"aborted":true,"error":"${lastYield.error || "Unknown error"}"}`;
+				rawOutput = `{"aborted":true,"error":"${assembled.terminalError || "Unknown error"}"}`;
 			}
 		} else {
-			const submitData = lastYield?.data;
+			const submitData = assembled?.data;
 			if (submitData === null || submitData === undefined) {
 				rawOutput = rawOutput ? `${SUBAGENT_WARNING_NULL_YIELD}\n\n${rawOutput}` : SUBAGENT_WARNING_NULL_YIELD;
 			} else {
@@ -301,8 +294,12 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 		}
 	} else {
 		const allowFallback = exitCode === 0 && !doneAborted && !signalAborted;
-		const { normalized: normalizedSchema, error: schemaError } = normalizeSchema(outputSchema);
-		const hasOutputSchema = normalizedSchema !== undefined && !schemaError;
+		// "Was a schema declared?" is a different question from "does this payload satisfy it?",
+		// and only needs the declaration read, not a compiled validator: `normalizeSchema` is a
+		// pure read, while building the validator converts the declaration (and throws on shapes
+		// that defeat conversion, which this branch must keep tolerating).
+		const { normalized: normalizedSchema } = normalizeSchema(outputSchema);
+		const hasOutputSchema = normalizedSchema !== undefined;
 		const fallback = allowFallback ? resolveFallbackCompletion(rawOutput, outputSchema) : null;
 		if (fallback) {
 			const completeData = normalizeCompleteData(fallback.data, reportFindings);
@@ -800,7 +797,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 								existing.push(data);
 							}
 							progress.extractedToolData[event.toolName] = existing;
-							if (event.toolName === "yield") {
+							if (
+								event.toolName === "yield" &&
+								!isIncrementalYieldType((data as { type?: unknown } | undefined)?.type)
+							) {
+								// Only a terminal submission closes the run. An incremental section
+								// reports a part of the result, so ending the loop here would cut the
+								// subagent off mid-result and lose everything it had left to send.
 								yieldCalled = true;
 							}
 						}
@@ -1245,9 +1248,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	rawOutput = finalized.rawOutput;
 	exitCode = finalized.exitCode;
 	stderr = finalized.stderr;
-	const lastYield = yieldItems?.[yieldItems.length - 1];
-	const yieldAbortReason = lastYield?.status === "aborted" ? lastYield.error || "Subagent aborted task" : undefined;
 	const { abortedViaYield, hasYield } = finalized;
+	// The terminal submission decides an abort, and its error is already in
+	// `stderr` — the last item in the list may be a section reported after it.
+	const yieldAbortReason = abortedViaYield ? stderr || "Subagent aborted task" : undefined;
 	const { content: truncatedOutput, truncated } = truncateTail(rawOutput, {
 		maxBytes: MAX_OUTPUT_BYTES,
 		maxLines: MAX_OUTPUT_LINES,

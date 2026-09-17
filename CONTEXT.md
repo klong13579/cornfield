@@ -39,6 +39,14 @@ _Avoid_: Permission, enabled state
 Tool 的静态呈现元数据，由 Tool 自身按规范名声明：Load Mode，以及用于发现与目录展示的稳定能力摘要（`internal` Tool 摘要可为空）。摘要只说明 Tool 能解决什么问题，不复制完整 description，不包含参数、权限、启用条件或使用指导。集中 essential 名单只做兜底，防止 adapter 或 UI 重注册把核心 Tool 静默降级为 `discoverable`。Tool 的动态说明、参数、权限、启用条件和实现不属于 Tool Metadata。
 _Avoid_: Tool spec, Tool configuration
 
+### Bash 拦截
+在 bash 段里识别出能被专用 Tool 替代的意图，拦下并指向该 Tool 的行为。逐段判定；段的 stdin 来自管道或 heredoc 时豁免，因为专用 Tool 替代不了那种段。
+_Avoid_: Command filter, bash guard, 命令白名单
+
+### Edit Auto-repair
+编辑把可解析的文件改坏后，定位出能恢复解析的最小 hunk 集，只让模型改这一区域的行为。只接受重新可解析、且不是撤回本次修改的候选。
+_Avoid_: Auto-fix, 自愈, self-healing edit
+
 ### Provider
 LLM 提供商（OpenAI、Anthropic、Codex、Google Gemini 等）。每个 provider 有自己的 API 格式和认证方式，由 pi-ai 封装为统一接口。
 _Avoid_: Backend, service, API

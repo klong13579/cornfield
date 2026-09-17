@@ -1,7 +1,7 @@
 /**
- * `omp serve` — multidevice host（P3 多 Agent）。
+ * `cornfield serve` — multidevice host（P3 多 Agent）。
  *
- * 在本地把 omp 会话暴露为 WS 服务：TUI 继续进程内渲染，web/pc/mobile
+ * 在本地把 CornField 会话暴露为 WS 服务：TUI 继续进程内渲染，web/pc/mobile
  * 通过 ws://127.0.0.1:<port>/ws?token=<token> 连接。
  *
  * P3：serve 从单 AgentSession 升级为会话注册表。
@@ -67,6 +67,10 @@ export default class Serve extends Command {
 			// 一个 Session 只属于一个家：注册表里 default 的路径与本进程解析出的家不一致就拒绝
 			// 启动（不静默挑一个）。先于任何文件写入，避免把会话落到一个没人认的家。
 			await assertDefaultAgentHome();
+			// 启动可见性：boot 块里直到 "serve:session" 之前没有任何日志，早期卡住就只能表现为
+			// 「子进程零输出、既不监听也不退出」（2026-09-16 排查 150s 挂起时正是这个样子，
+			// 拿到的捕获输出是空的）。先落一行起点，之后的沉默就能定位到具体阶段。
+			logger.info("serve:boot:start", { cwd, host, port });
 			await initTheme();
 			const authStorage = await discoverAuthStorage();
 			const modelRegistry = new ModelRegistry(authStorage);

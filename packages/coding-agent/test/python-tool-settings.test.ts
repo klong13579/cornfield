@@ -55,9 +55,24 @@ describe("python tool settings", () => {
 			reason: "missing",
 		});
 		const sessionFile = path.join(testDir, "session.jsonl");
-		const tools = await createTools(createSession(testDir, sessionFile), ["python"]);
+		const session = createSession(testDir, sessionFile);
+		const tools = await createTools(session, ["python"]);
 
 		expect(tools.map(tool => tool.name).sort()).toEqual(["bash", "exit_plan_mode", "identity"]);
+		// The prompt has to state what was lost and why: a removed tool is otherwise
+		// invisible to the agent (see buildSystemPrompt — python unavailable notice).
+		expect(session.pythonUnavailable).toEqual({ pythonPath: null, reason: "missing" });
+	});
+
+	it("clears a stale unavailable reason when the kernel is available", async () => {
+		vi.spyOn(pythonKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });
+		const sessionFile = path.join(testDir, "session.jsonl");
+		const session = createSession(testDir, sessionFile);
+		session.pythonUnavailable = { pythonPath: "/tmp/stale/bin/python", reason: "stale" };
+
+		await createTools(session, ["python"]);
+
+		expect(session.pythonUnavailable).toBeUndefined();
 	});
 
 	it("passes kernel owner and kernel mode from settings to executor", async () => {

@@ -2,8 +2,8 @@
  * Print mode (single-shot): Send prompts, output result, exit.
  *
  * Used for:
- * - `omp -p "prompt"` - text output
- * - `omp --mode json "prompt"` - JSON event stream
+ * - `cornfield -p "prompt"` - text output
+ * - `cornfield --mode json "prompt"` - JSON event stream
  */
 import type { AssistantMessage, ImageContent } from "@cornfield/ai";
 import { stripReasoningTagsFromText } from "@cornfield/ai/utils/reasoning-tags";
@@ -202,7 +202,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 				if (content.type === "text") {
 					// Same defensive strip as the TUI renderer. The streaming
 					// parser in pi-ai normally moves `<think>...</think>` into
-					// a separate thinking block; this catches leaks so `omp -p`
+					// a separate thinking block; this catches leaks so `cornfield -p`
 					// never prints a raw `<think>` literal to stdout.
 					process.stdout.write(`${sanitizeText(stripReasoningTagsFromText(content.text))}\n`);
 				}

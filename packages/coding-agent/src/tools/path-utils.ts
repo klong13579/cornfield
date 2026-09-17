@@ -241,8 +241,9 @@ function parseLineRangeChunk(sel: string): LineRange | null {
 
 /**
  * Parse a comma-separated list of line ranges (`5-16,960-973`). The ranges come
- * back ascending with overlapping and adjacent ones merged, so a caller that can
- * only address one window can honor whatever merges into one.
+ * back ascending with overlapping and adjacent ones merged, so an adjacent
+ * pair (`1-2,3-5`) collapses to the single window it always described and two
+ * surviving ranges always have at least one line between them.
  */
 export function parseLineRanges(sel: string): [LineRange, ...LineRange[]] | null {
 	const chunks = sel.split(",");
@@ -270,6 +271,25 @@ export function parseLineRanges(sel: string): [LineRange, ...LineRange[]] | null
 		merged.push(current);
 	}
 	return merged as [LineRange, ...LineRange[]];
+}
+
+const TAIL_SELECTOR_RE = /^-(\d+)$/;
+
+/**
+ * Parse a `-N` tail selector into its line count (the last N lines). Returns
+ * `null` when `sel` is not tail-shaped; throws for `-0`, which names no lines.
+ *
+ * The count is relative, not absolute: `-N` cannot be turned into a line range
+ * until the source's line count is known (see `resolveTailSelector`).
+ */
+export function parseTailCount(sel: string): number | null {
+	const match = TAIL_SELECTOR_RE.exec(sel);
+	if (!match) return null;
+	const count = Number.parseInt(match[1]!, 10);
+	if (count < 1) {
+		throw new ToolError("Tail selector -0 is invalid; use -N with N >= 1 to read the last N lines.");
+	}
+	return count;
 }
 
 export interface ParsedSearchPath {

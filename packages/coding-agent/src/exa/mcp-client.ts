@@ -1,7 +1,7 @@
 import { $env, logger } from "@cornfield/utils";
 import type { TSchema } from "@sinclair/typebox";
 import type { CustomTool, CustomToolResult } from "../extensibility/custom-tools/types";
-import { callMCP } from "../mcp/json-rpc";
+import { type CallMcpOptions, callMCP } from "../mcp/json-rpc";
 import type {
 	ExaRenderDetails,
 	ExaSearchResponse,
@@ -19,6 +19,27 @@ export function findApiKey(): string | null {
 function asRecord(value: unknown): Record<string, unknown> | null {
 	if (typeof value !== "object" || value === null) return null;
 	return value as Record<string, unknown>;
+}
+
+/**
+ * Cloudflare's blocked-client envelope, served verbatim by `mcp.exa.ai`:
+ * `error_name: "browser_signature_banned"`, `retryable: false`.
+ */
+const BLOCKED_CLIENT_PATTERN = /browser_signature_banned|error-1010|blocked access based on your browser/i;
+
+/**
+ * Name the actionable cause when the public MCP endpoint refuses the client.
+ * Left raw, a Cloudflare error envelope reads like a provider bug.
+ */
+function explainMcpFailure(error: unknown): Error {
+	const message = error instanceof Error ? error.message : String(error);
+	if (BLOCKED_CLIENT_PATTERN.test(message)) {
+		return new Error(
+			"mcp.exa.ai blocked this client (Cloudflare reports the browser signature as banned and tells callers not to retry). " +
+				"Store an Exa API key to use the authenticated endpoint instead.",
+		);
+	}
+	return error instanceof Error ? error : new Error(message);
 }
 
 function parseJsonContent(text: string): unknown | null {
@@ -72,12 +93,16 @@ function normalizeMcpToolPayload(payload: unknown): unknown {
 }
 
 /** Fetch available tools from Exa MCP */
-export async function fetchExaTools(apiKey: string | null, toolNames: string[]): Promise<MCPTool[]> {
+export async function fetchExaTools(
+	apiKey: string | null,
+	toolNames: string[],
+	options?: CallMcpOptions,
+): Promise<MCPTool[]> {
 	const params = new URLSearchParams();
 	if (apiKey) params.set("exaApiKey", apiKey);
 	params.set("toolNames", toolNames.join(","));
 	const url = `https://mcp.exa.ai/mcp?${params.toString()}`;
-	const response = (await callMCP(url, "tools/list")) as MCPToolsResponse;
+	const response = (await callMCP(url, "tools/list", undefined, options)) as MCPToolsResponse;
 
 	if (response.error) {
 		logger.error("MCP tools/list error", { toolNames, error: response.error });
@@ -88,9 +113,9 @@ export async function fetchExaTools(apiKey: string | null, toolNames: string[]):
 }
 
 /** Fetch available tools from Websets MCP */
-export async function fetchWebsetsTools(apiKey: string): Promise<MCPTool[]> {
+export async function fetchWebsetsTools(apiKey: string, options?: CallMcpOptions): Promise<MCPTool[]> {
 	const url = `https://websetsmcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(apiKey)}`;
-	const response = (await callMCP(url, "tools/list")) as MCPToolsResponse;
+	const response = (await callMCP(url, "tools/list", undefined, options)) as MCPToolsResponse;
 
 	if (response.error) {
 		logger.error("Websets MCP tools/list error", { error: response.error });
@@ -105,15 +130,26 @@ export async function callExaTool(
 	toolName: string,
 	args: Record<string, unknown>,
 	apiKey: string | null,
+	options?: CallMcpOptions,
 ): Promise<unknown> {
 	const params = new URLSearchParams();
 	if (apiKey) params.set("exaApiKey", apiKey);
 	params.set("tools", toolName);
 	const url = `https://mcp.exa.ai/mcp?${params.toString()}`;
-	const response = (await callMCP(url, "tools/call", {
-		name: toolName,
-		arguments: args,
-	})) as MCPCallResponse;
+	let response: MCPCallResponse;
+	try {
+		response = (await callMCP(
+			url,
+			"tools/call",
+			{
+				name: toolName,
+				arguments: args,
+			},
+			options,
+		)) as MCPCallResponse;
+	} catch (error) {
+		throw explainMcpFailure(error);
+	}
 
 	if (response.error) {
 		logger.error("MCP tools/call error", { toolName, args, error: response.error });
@@ -128,12 +164,18 @@ export async function callWebsetsTool(
 	apiKey: string,
 	toolName: string,
 	args: Record<string, unknown>,
+	options?: CallMcpOptions,
 ): Promise<unknown> {
 	const url = `https://websetsmcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(apiKey)}`;
-	const response = (await callMCP(url, "tools/call", {
-		name: toolName,
-		arguments: args,
-	})) as MCPCallResponse;
+	const response = (await callMCP(
+		url,
+		"tools/call",
+		{
+			name: toolName,
+			arguments: args,
+		},
+		options,
+	)) as MCPCallResponse;
 
 	if (response.error) {
 		logger.error("Websets MCP tools/call error", { toolName, args, error: response.error });
@@ -192,6 +234,7 @@ export async function fetchMCPToolSchema(
 	apiKey: string,
 	mcpToolName: string,
 	isWebsetsTool = false,
+	options?: CallMcpOptions,
 ): Promise<MCPTool | null> {
 	const cacheKey = `${isWebsetsTool ? "websets" : "exa"}:${mcpToolName}`;
 	if (mcpSchemaCache.has(cacheKey)) {
@@ -199,7 +242,9 @@ export async function fetchMCPToolSchema(
 	}
 
 	try {
-		const tools = isWebsetsTool ? await fetchWebsetsTools(apiKey) : await fetchExaTools(apiKey, [mcpToolName]);
+		const tools = isWebsetsTool
+			? await fetchWebsetsTools(apiKey, options)
+			: await fetchExaTools(apiKey, [mcpToolName], options);
 		const tool = tools.find(t => t.name === mcpToolName);
 		if (tool) {
 			mcpSchemaCache.set(cacheKey, tool);
@@ -248,8 +293,12 @@ export class MCPWrappedTool implements CustomTool<TSchema, ExaRenderDetails> {
 			}
 
 			const response = this.config.isWebsetsTool
-				? await callWebsetsTool(apiKey!, this.config.mcpToolName, params as Record<string, unknown>)
-				: await callExaTool(this.config.mcpToolName, params as Record<string, unknown>, apiKey);
+				? await callWebsetsTool(apiKey!, this.config.mcpToolName, params as Record<string, unknown>, {
+						signal: _signal,
+					})
+				: await callExaTool(this.config.mcpToolName, params as Record<string, unknown>, apiKey, {
+						signal: _signal,
+					});
 
 			if (isSearchResponse(response)) {
 				const formatted = formatSearchResults(response);

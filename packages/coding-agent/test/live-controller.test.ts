@@ -262,6 +262,22 @@ async function waitForMessage(server: TestServer, type: string, timeoutMs = 2_00
 	throw new Error(`server never received ${type}`);
 }
 
+/**
+ * Polls until `type` has landed at least `want` times. Use before a *count* assertion: a fixed
+ * sleep is not enough under load — the queued commit and the overflow clears are emitted
+ * asynchronously, and a slow runner reaches the assertion first (CI 2026-09-16: 0 clears where 3
+ * were expected, and no commit at all after response.done).
+ */
+async function waitForCount(server: TestServer, type: string, want: number, timeoutMs = 2_000): Promise<void> {
+	const seen = (): number => server.received.filter(m => m.type === type).length;
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (seen() >= want) return;
+		await Bun.sleep(10);
+	}
+	throw new Error(`server received ${seen()}/${want} ${type}`);
+}
+
 function lastAppendAudio(server: TestServer): Uint8Array | undefined {
 	const appends = server.received.filter(m => m.type === "input_audio_buffer.append") as Array<{ audio: string }>;
 	const last = appends.at(-1);
@@ -1087,9 +1103,10 @@ describe("LiveSessionController", () => {
 		await Bun.sleep(20);
 		expect(h.server.received.map(m => m.type)).not.toContain("input_audio_buffer.commit");
 
-		// The response completes → the queued commit fires.
+		// The response completes → the queued commit fires. 等结算再断言，不用固定 sleep：
+		// 负载下这个帧比 20ms 晚到（CI 2026-09-16 就是在这里红的）。
 		h.server.send({ type: "response.done", response: { id: "r1" } });
-		await Bun.sleep(20);
+		await waitForCount(h.server, "input_audio_buffer.commit", 1);
 		const types = h.server.received.map(m => m.type);
 		expect(types).toContain("input_audio_buffer.commit");
 		expect(types.lastIndexOf("response.create")).toBeGreaterThan(types.indexOf("input_audio_buffer.commit"));
@@ -1188,7 +1205,7 @@ describe("LiveSessionController", () => {
 				error: { type: "server_error", message: "Input audio buffer exceeded maximum duration (300s)." },
 			});
 		}
-		await Bun.sleep(20);
+		await waitForCount(h.server, "input_audio_buffer.clear", 3);
 		const clears = h.server.received.filter(m => m.type === "input_audio_buffer.clear");
 		expect(clears.length).toBe(3);
 

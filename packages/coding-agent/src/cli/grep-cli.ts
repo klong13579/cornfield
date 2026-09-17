@@ -1,11 +1,12 @@
 /**
  * Grep CLI command handlers.
  *
- * Handles `omp grep` subcommand for testing grep tool on Windows.
+ * Handles `cornfield grep` subcommand for testing grep tool on Windows.
  */
 import * as path from "node:path";
 import { GrepOutputMode, grep } from "@cornfield/natives";
 import { APP_NAME } from "@cornfield/utils";
+import { writeStdout } from "@cornfield/utils/cli";
 import chalk from "chalk";
 
 export interface GrepCommandArgs {
@@ -74,13 +75,13 @@ export async function runGrepCommand(cmd: GrepCommandArgs): Promise<void> {
 	}
 
 	const searchPath = path.resolve(cmd.path);
-	console.log(chalk.dim(`Searching in: ${searchPath}`));
-	console.log(chalk.dim(`Pattern: ${cmd.pattern}`));
-	console.log(
+	writeStdout(chalk.dim(`Searching in: ${searchPath}`));
+	writeStdout(chalk.dim(`Pattern: ${cmd.pattern}`));
+	writeStdout(
 		chalk.dim(`Mode: ${cmd.mode}, Limit: ${cmd.limit}, Context: ${cmd.context}, Gitignore: ${cmd.gitignore}`),
 	);
 
-	console.log("");
+	writeStdout("");
 
 	try {
 		const result = await grep({
@@ -94,13 +95,13 @@ export async function runGrepCommand(cmd: GrepCommandArgs): Promise<void> {
 			gitignore: cmd.gitignore,
 		});
 
-		console.log(chalk.green(`Total matches: ${result.totalMatches}`));
-		console.log(chalk.green(`Files with matches: ${result.filesWithMatches}`));
-		console.log(chalk.green(`Files searched: ${result.filesSearched}`));
+		writeStdout(chalk.green(`Total matches: ${result.totalMatches}`));
+		writeStdout(chalk.green(`Files with matches: ${result.filesWithMatches}`));
+		writeStdout(chalk.green(`Files searched: ${result.filesSearched}`));
 		if (result.limitReached) {
-			console.log(chalk.yellow(`Limit reached: true`));
+			writeStdout(chalk.yellow(`Limit reached: true`));
 		}
-		console.log("");
+		writeStdout("");
 
 		for (const match of result.matches) {
 			const displayPath = match.path.replace(/\\/g, "/");
@@ -108,20 +109,20 @@ export async function runGrepCommand(cmd: GrepCommandArgs): Promise<void> {
 			if (cmd.mode === GrepOutputMode.Content) {
 				if (match.contextBefore) {
 					for (const ctx of match.contextBefore) {
-						console.log(chalk.dim(`${displayPath}-${ctx.lineNumber}- ${ctx.line}`));
+						writeStdout(chalk.dim(`${displayPath}-${ctx.lineNumber}- ${ctx.line}`));
 					}
 				}
-				console.log(`${chalk.cyan(displayPath)}:${chalk.yellow(String(match.lineNumber))}: ${match.line}`);
+				writeStdout(`${chalk.cyan(displayPath)}:${chalk.yellow(String(match.lineNumber))}: ${match.line}`);
 				if (match.contextAfter) {
 					for (const ctx of match.contextAfter) {
-						console.log(chalk.dim(`${displayPath}-${ctx.lineNumber}- ${ctx.line}`));
+						writeStdout(chalk.dim(`${displayPath}-${ctx.lineNumber}- ${ctx.line}`));
 					}
 				}
-				console.log("");
+				writeStdout("");
 			} else if (cmd.mode === GrepOutputMode.Count) {
-				console.log(`${chalk.cyan(displayPath)}: ${match.matchCount ?? 0} matches`);
+				writeStdout(`${chalk.cyan(displayPath)}: ${match.matchCount ?? 0} matches`);
 			} else {
-				console.log(chalk.cyan(displayPath));
+				writeStdout(chalk.cyan(displayPath));
 			}
 		}
 	} catch (err) {

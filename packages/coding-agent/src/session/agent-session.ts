@@ -95,7 +95,14 @@ import {
 } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import type { Settings, SkillsSettings } from "../config/settings";
-import { normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../edit";
+import {
+	normalizeDiff,
+	normalizeToLF,
+	ParseError,
+	previewPatch,
+	recoverInlineSloppyEditFromTools,
+	stripBom,
+} from "../edit";
 import { type BashResult, executeBash as executeBashCommand } from "../exec/bash-executor";
 import { exportSessionToHtml } from "../export/html";
 import type { TtsrManager, TtsrMatchContext } from "../export/ttsr";
@@ -153,7 +160,13 @@ import type { CheckpointState } from "../tools/checkpoint";
 import { outputMeta } from "../tools/output-meta";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
 import { isAutoQaEnabled } from "../tools/report-tool-issue";
-import { getLatestTodoPhasesFromEntries, type TodoItem, type TodoPhase } from "../tools/todo-write";
+import {
+	clonePhases,
+	getLatestTodoPhasesFromEntries,
+	isReadOnlyTodoCall,
+	type TodoItem,
+	type TodoPhase,
+} from "../tools/todo-write";
 import { ToolError } from "../tools/tool-errors";
 import { clampTimeout } from "../tools/tool-timeouts";
 import { parseCommandArgs } from "../utils/command-args";
@@ -643,6 +656,17 @@ export class AgentSession {
 		// Always subscribe to agent events for internal handling
 		// (session persistence, hooks, auto-compaction, retry logic)
 		this.#unsubscribeAgent = this.agent.subscribe(this.#handleAgentEvent);
+
+		// A sloppy edit payload the model wrote as prose is rewritten into a real edit
+		// tool call by the loop, before the finalized message is published — so the turn
+		// dispatches, renders and journals that call like any other, and the message the
+		// session log stores is the same one the dispatcher ran.
+		this.agent.setTransformAssistantMessage(message => {
+			const recovered = recoverInlineSloppyEditFromTools(this.agent.state.tools, message);
+			if (recovered > 0) {
+				logger.info("recovered inline sloppy edit payload into an edit tool call", { regions: recovered });
+			}
+		});
 	}
 
 	/** Model registry for API key resolution and model discovery */
@@ -999,7 +1023,7 @@ export class AgentSession {
 			if (event.message.role === "toolResult") {
 				const { toolName, details, isError, content } = event.message as {
 					toolName?: string;
-					details?: { path?: string; phases?: TodoPhase[]; report?: string; startedAt?: string };
+					details?: { path?: string; phases?: TodoPhase[]; ops?: string[]; report?: string; startedAt?: string };
 					isError?: boolean;
 					content?: Array<TextContent | ImageContent>;
 				};
@@ -1007,7 +1031,9 @@ export class AgentSession {
 				if (toolName === "edit" && details?.path) {
 					this.#invalidateFileCacheForPath(details.path);
 				}
-				if (toolName === "todo" && !isError && Array.isArray(details?.phases)) {
+				// A `view` call echoes the list without touching it; republishing it here
+				// would restart the auto-clear grace period for finished tasks.
+				if (toolName === "todo" && !isError && Array.isArray(details?.phases) && !isReadOnlyTodoCall(details.ops)) {
 					this.setTodoPhases(details.phases);
 				}
 				if (toolName === "todo" && isError) {
@@ -3301,11 +3327,11 @@ export class AgentSession {
 	}
 
 	getTodoPhases(): TodoPhase[] {
-		return this.#cloneTodoPhases(this.#todoPhases);
+		return clonePhases(this.#todoPhases);
 	}
 
 	setTodoPhases(phases: TodoPhase[]): void {
-		this.#todoPhases = this.#cloneTodoPhases(phases);
+		this.#todoPhases = clonePhases(phases);
 		this.#scheduleTodoAutoClear(phases);
 	}
 
@@ -3317,17 +3343,6 @@ export class AgentSession {
 			phase.tasks = phase.tasks.filter(t => t.status !== "completed" && t.status !== "abandoned");
 		}
 		this.setTodoPhases(phases.filter(p => p.tasks.length > 0));
-	}
-
-	#cloneTodoPhases(phases: TodoPhase[]): TodoPhase[] {
-		return phases.map(phase => ({
-			name: phase.name,
-			tasks: phase.tasks.map(task => {
-				const out: TodoItem = { content: task.content, status: task.status };
-				if (task.notes && task.notes.length > 0) out.notes = [...task.notes];
-				return out;
-			}),
-		}));
 	}
 
 	/** Schedule auto-removal of completed/abandoned tasks after a delay. */

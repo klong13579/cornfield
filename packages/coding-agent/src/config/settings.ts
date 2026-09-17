@@ -269,7 +269,7 @@ export class Settings {
 	 *
 	 * Unlike init(), does NOT touch the global singleton — each call loads its own
 	 * agentDir/config.yml and persists changes through the same debounced save path.
-	 * Used by `omp serve` for per-agent settings (each registry agent gets its own
+	 * Used by `cornfield serve` for per-agent settings (each registry agent gets its own
 	 * Settings rooted at <agentDir>/config.yml).
 	 */
 	static async create(options: SettingsOptions = {}): Promise<Settings> {
