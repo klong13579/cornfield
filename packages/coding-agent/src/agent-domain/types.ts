@@ -245,7 +245,12 @@ export interface WorkspaceContext {
 	projectRoot?: string;
 	/** Working directory the session will run in. */
 	cwd: string;
-	/** Agent-scoped model/config source, e.g. `<agentDir>/.cornfield/config.yml`. */
+	/**
+	 * Agent-scoped model/config source: `<agentDir>/config.yml` (the per-agent `Settings` instance).
+	 * WP4 §10 flagged the old comment here as wrong (it said `<agentDir>/.cornfield/config.yml`).
+	 * Writes follow the read precedence — when the session cwd has a `.cornfield/config.yml`
+	 * (project layer), that is the layer they land on (`Settings#setEffective`).
+	 */
 	modelConfigPath: string;
 	/**
 	 * The Agent the workspace declaration names as its default (§10 rung 3), mirrored here
