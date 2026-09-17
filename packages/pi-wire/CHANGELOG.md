@@ -4,6 +4,12 @@
 
 ### Added
 
+- **`set_thinking_level` 增加可选 `persist`**（`src/commands.ts`）：缺省只改本次会话（与随时切档同语义）；`persist: true` 时内核把生效档位一并写进目标 agent 的配置，重启后仍是它。内核只在档位真的发生变化时才写盘。
+
+- **`get_agent_prompt_sources`**（`src/commands.ts`, `src/results/agents.ts`）：读目标 agentDir 的 prompt 源清单，逐项 `{ path, title, description, exists }`。清单的权威在服务端（`skeleton/agent-dir-files.ts`），形状与 `exists` 一起构成契约：缺的那项也在清单里，不裁成「存在的那些」。
+
+- **`create_agent`**（`src/commands.ts`, `src/results/agents.ts`）：建一个 agentDir（`name` 必填，`dir` / `mission` / `template` 可选），回传 `{ name, agentDir, created, filesWritten }` —— serve 侧复用 `cornfield agent init` 的实现，失败把服务端原文交给客户端。
+
 - **「最深祖先 root 获胜」规则单源化**（`src/scope.ts`）：新增纯选择函数 `pickDeepestRootIndex(roots, targetPath)` —— 返回命中 `targetPath` 的最深祖先 root 的下标（未命中 = -1）。不碰文件系统、不做归一化：输入是调用方按自己运行时的真实能力归一后的字符串（serve 用 realpath，浏览器用词法），判定只有这一份。边界：`/a/b` 不是 `/a/bc` 的祖先；`/a/b/` 与 `/a/b` 等价；空串 root 跳过；多个命中取最深者。
 
 - **调度定义写面与 schedule 绑定形状**（`src/commands.ts`, `src/results/cron.ts`）：新增 `cron_create` / `cron_update` / `cron_remove` / `cron_test_run` 四条 wire 命令（`cron_update` / `cron_remove` 用 `taskId` —— 不复用命令的关联 `id`）；`TaskRowDto` 补 agent 绑定（`agentId` / `agentDir` / `agentDisplayName` / `agentResolution` / `agentEnabled` / `agentError` / `projectIds`）与可靠性事实（`taskType` / `timeoutMs` / `retry` / `repeatCount` / `repeatCompleted` / `delivery` / `lastDeliveryError` / 时间戳），`CronLogEntryDto` 补 `agentSessionPath`；新增 `ScheduleAgentResolution` 三态（registered / unregistered / unbound）与写面入参/回写形状。

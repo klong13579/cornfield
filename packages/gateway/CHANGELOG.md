@@ -16,6 +16,8 @@
 
 ### Fixed
 
+- **提示文案不再指向不存在的命令 / 旧产品名**（`src/doctor.ts`, `src/setup.ts`, `src/credential-resolver.ts`, `src/scheduler/cli-commands.ts`, `src/scheduler/cron-service.ts`）：`Run \`omp login\`` 指的是一个**没有的**子命令（登录是会话内斜杠命令 `/login`），`omp agent show/validate` 指的真命令是 `cornfield agent show/validate`。现在指向真入口、产品名统一为 `cornfield`。
+
 - **`TaskRowDto.accountId` 不再由 agentDir 顶替**（`src/wire-endpoint.ts`）：旧实现 `task.accountId ?? task.agentDir` 把目录当成账号上报，读的人无法区分两者；现在按原样透出，绑定事实一律走 agent 字段。
 
 - **`src/scheduler/file-store.ts` 的内联 import 类型清掉**（`import("./types").X` → 顶部 import）：仓库禁止内联 import，且这种写法让文件对工具链不可解析（无法做结构化编辑）。

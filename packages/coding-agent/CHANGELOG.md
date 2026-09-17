@@ -4,15 +4,23 @@
 
 ### Added
 
+- **`cornfield agent init --root <path>`：声明额外读写根**（`src/cli/agent-cli.ts`, `src/skeleton/workspace.ts`, `src/commands/agent.ts`, `test/agent-cli-attached-roots.test.ts`）：`attachedRoots` 此前只有读者（`src/session/session-workspace.ts` 把每个声明的 root 折进会话工作面），全仓没有写侧 ——「一个 agent 读多个根」只能手改 JSON 才可达。现在每个 root 先解析成绝对 realpath 并校验存在、是目录、不是 agentDir 自己，任一不合法就报错且**不改动声明文件**（声明一个不存在的 root 会让这个 agent 每次会话解析都失败，宁可 init 失败）；写入是读-改-写，其它键（含本模块不认识的键）与键序原样保留。`agent validate` 对「声明了但已不存在」的 root 报 error（此前它会说 valid: true）。
+
+- **agentDir 文件单一真相 + `get_agent_prompt_sources` 读命令**（`src/skeleton/agent-dir-files.ts`, `src/server/wire-server.ts`, `test/skeleton-agent-dir-files.test.ts`, `test/wire-server-prompt-sources.integration.test.ts`）：agentDir 里有哪些文件、每一项是 prompt 面还是配置/技能面、缺失算 error 还是 warning，收在 `skeleton/agent-dir-files.ts` 一处；`agent validate` 的三个校验集改从它推导（元素与顺序不变）。新增 wire 读命令按这份清单**逐项报 `exists`**（缺的那项也在清单里），前端不再自备一份会漂移的 prompt 源清单。
+
 - **听记 provenance + 定时任务写面转发**（`src/stt/listen-provenance.ts`, `src/stt/listen-service.ts`, `src/stt/listen-controller.ts`, `src/server/wire-server.ts`, `src/modes/wire-stdio.ts`）：听记落盘新增 `provenance`（agentId / agentDir / projectId / sessionFile），由**写入方当时的事实**标定（serve 用 agent-scope 的锚点，TUI /record 用进程自己的 agentDir + 工作目录归属）；Project 读不到就不写这一项——旧记录（v1）就是「未标注」，不得在展示层被归给当前 Agent。`record_transcribe*` 落盘时打标，`listen_list` 原样带出。`cron_create` / `cron_update` / `cron_remove` / `cron_test_run` 在 serve WS 面转发 gateway 生产端点（写面失败用字符串错误，不冒充 `internal`）；wire-stdio 面把这四条列入「本模式未实现」而不是「未知命令」。
 
 ### Changed
+
+- **`registry.json` 的 read-modify-write 加文件锁**（`src/skeleton/registry.ts`, `src/config/file-lock.ts`, `test/registry-concurrency.test.ts`）：`registerAgent` 是「读整份 → 改一条 → 写回整份」，CLI 里「一次一个人敲」让旧假设成立，但 `serve` 是逐帧并发处理命令、gateway 启动时也在注册账号 —— 两个写方同时落笔，后写的那次会把先写的条目从 registry.json 里抹掉（agentDir 两份都在盘上，`agent list` 里少一个；同进程并发两次 `agent init` 实测 5/5 轮丢、两条 WS 连接 2/3 轮丢）。锁放在注册表自己身上，所以 CLI / serve / gateway 三个写方都受保护。`config/file-lock` 顺带自己建锁目录（新 HOME 上 `.cornfield/agent/` 还不存在时，拿锁不再以 ENOENT 失败）。
 
 - **`matchProjectForPath` 的规则改由 pi-wire 提供**（`src/agent-domain/project-store.ts`）：签名与返回类型不变（现有调用点零改动），内部改为对 target 与每个 root 各做 `resolveEquivalentPath` 归一，再调 pi-wire 的 `pickDeepestRootIndex` —— 前端用量面板问的是同一件事，规则不能再有两份实现（归一化留在 serve：realpath 是这边独有的事实）。
 
 - **听记条目改用 pi-wire 的规范形状**（`src/stt/listen-service.ts`）：`ListenRecordingSummary` 不再自建同形接口，改从 `@cornfield/wire` 引入 `ListenRecordingDto`（两端一份，字段加一处同时可见）。
 
 ### Fixed
+
+- **看板选 thinking 档位现在真的落盘**（`src/server/wire-server.ts`, `packages/pi-wire/src/commands.ts`, `test/wire-server-thinking-persist.integration.test.ts`）：`set_thinking_level` 增加可选 `persist`。此前 UI 上改了档位、配置文件一个字节不动、重启回退，而且没有任何提示 —— 「看起来能配、其实只改了本次会话」。缺省仍是只改本会话（`cycle_thinking_level` 等随时切档的语义不变），看板显式传 `persist: true` 才写进目标 agent 的配置。
 
 - **`read <url> sel="raw"` 不再对 JSON / feed 整形**（`src/tools/fetch.ts`、`test/tools/fetch-raw-mode.test.ts`）：`renderUrl` 里的 `raw` 只守了 HTML（`isHtml && !raw`），JSON 分支与 feed 分支在它之前就把正文改了 —— JSON 被 `formatJson` 重排，RSS/Atom 被 `parseFeedToMarkdown` 转成 markdown 并**截到 10 条**，而调用者明确要的是原文。现按 upstream 的位置加早退（在二进制分支之后、文本整形之前）：raw 对所有文本 content-type 原样返回 body。回归 4 条，用真实 HTTP server 覆盖「raw 拿到逐字 JSON / 不写 raw 仍美化」与「raw 拿到全部 12 条 / 不写 raw 截到 10 条」。
 
