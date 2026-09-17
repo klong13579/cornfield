@@ -1,15 +1,26 @@
 import type { AgentInfoDto } from "@cornfield/wire";
-import { Search, Server, TerminalSquare } from "lucide-react";
+import { Plus, Search, Server, TerminalSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { useSessionStore } from "../../state/session-store";
 import { useSession } from "../../state/use-session";
+import {
+	CreateAgentPanel,
+	type CreateAgentPhase,
+	type CreateAgentValues,
+	EMPTY_CREATE_AGENT_VALUES,
+	submitCreateAgent,
+} from "./CreateAgentPanel";
 
 /**
  * Agent 列表（FR-2）—— 数据源：server_snapshot → adapter 映射（view.agents）。
  * 数据源：server_snapshot → adapter 映射（view.agents），serve 启动即预挂载全部注册 agent。
- * 交互：状态点 / 工作区分节 / CODING-WORKER 徽标 / 搜索 / 进会话与详情入口。
+ * 交互：状态点 / 工作区分节 / CODING-WORKER 徽标 / 搜索 / 进会话与详情入口 / 创建员工。
+ *
+ * 「创建员工」是本页唯一一个**写**动作：它调 `create_agent`（serve 侧就是 `cornfield agent init`），
+ * 成功之后列表已经刷成 serve 的现状 —— 所以新建的那种成功直接进详情页，而「同名已存在、这次只
+ * 补齐了缺的文件」那种成功留在面板上说清楚（`created` 这一位就是用来分开这两种成功的）。
  */
 export function AgentsView(): React.JSX.Element {
 	const view = useSession();
@@ -19,6 +30,38 @@ export function AgentsView(): React.JSX.Element {
 	const [wsFilter, setWsFilter] = useState<string>("all");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [query, setQuery] = useState("");
+
+	// 「创建员工」面板：两个入口（筛选行右侧 / 空态里）开的是同一个，面板状态也归这里。
+	const [createOpen, setCreateOpen] = useState(false);
+	const [createValues, setCreateValues] = useState<CreateAgentValues>(EMPTY_CREATE_AGENT_VALUES);
+	const [createPhase, setCreatePhase] = useState<CreateAgentPhase>({ kind: "idle" });
+	// 提交在飞的时候两个入口都按不动：点它会把面板重置成空表单，而后台那次请求的结论
+	// （跳详情 / 已在）随后才到 —— 屏上不该先擦掉一个还在进行中的动作。
+	const createBusy = createPhase.kind === "submitting";
+
+	const openCreate = (): void => {
+		// 每次都从干净状态开：上一次的输入与结论不能当成这一次的前提。
+		setCreateValues(EMPTY_CREATE_AGENT_VALUES);
+		setCreatePhase({ kind: "idle" });
+		setCreateOpen(true);
+	};
+
+	const submitCreate = async (): Promise<void> => {
+		setCreatePhase({ kind: "submitting" });
+		const outcome = await submitCreateAgent(store, createValues);
+		if (!outcome.ok) {
+			setCreatePhase({ kind: "failed", message: outcome.message });
+			return;
+		}
+		if (outcome.agent.created) {
+			// 新建：store 已经把列表刷成 serve 的现状（它就在里面），直接进它的详情页。
+			setCreateOpen(false);
+			navigate(`/agents/${outcome.agent.name}`);
+			return;
+		}
+		// 同名 agentDir 本来就在（增量补齐）：也是成功，但不是「新建」，留在面板上说明白。
+		setCreatePhase({ kind: "existing", agent: outcome.agent });
+	};
 
 	// serve 多 Agent 注册表就绪：挂载时拉一次 list_agents（server_snapshot 推送也会更新）
 	useEffect(() => {
@@ -157,12 +200,45 @@ export function AgentsView(): React.JSX.Element {
 							className="w-full border-none bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
 						/>
 					</div>
+					<button
+						type="button"
+						className="btn btn-sm flex shrink-0 items-center gap-1.5"
+						onClick={openCreate}
+						disabled={createBusy}
+					>
+						<Plus size={13} strokeWidth={2} />
+						创建员工
+					</button>
 				</div>
 
+				{createOpen && (
+					<CreateAgentPanel
+						values={createValues}
+						phase={createPhase}
+						onChange={patch => setCreateValues(prev => ({ ...prev, ...patch }))}
+						onSubmit={() => void submitCreate()}
+						onClose={() => setCreateOpen(false)}
+						onOpenAgent={agentName => navigate(`/agents/${agentName}`)}
+					/>
+				)}
+
 				{agents.length === 0 && (
-					<div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-hairline-strong bg-surface px-6 py-16 text-center">
+					<div className="flex flex-col items-center gap-2.5 rounded-lg border border-dashed border-hairline-strong bg-surface px-6 py-16 text-center">
 						<TerminalSquare size={28} strokeWidth={1.5} className="text-ink-faint" />
-						<div className="text-[14px] text-ink-muted">还没有 agent。在 agents 目录创建后会出现在这里。</div>
+						<div className="text-[14px] text-ink-muted">还没有 agent。</div>
+						<div className="max-w-[420px] text-[12px] text-ink-faint">
+							点下面的按钮建一个 —— 它会在 serve 上真的建出一个 agentDir（骨架文件 + registry
+							登记），建好就出现在这里。
+						</div>
+						<button
+							type="button"
+							className="btn btn-sm flex items-center gap-1.5"
+							onClick={openCreate}
+							disabled={createBusy}
+						>
+							<Plus size={13} strokeWidth={2} />
+							创建员工
+						</button>
 					</div>
 				)}
 

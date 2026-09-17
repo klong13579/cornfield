@@ -1,4 +1,6 @@
 import type {
+	AgentCreateDto,
+	AgentCreateInput,
 	AgentInfoDto,
 	AvailableModelsDto,
 	BroughtBackChildResultDto,
@@ -811,6 +813,21 @@ export class SessionStore {
 		this.#view = cloneView(this.getSnapshot());
 		this.#view.agents = agents;
 		this.#notify();
+	}
+
+	/**
+	 * 新建一个 agent（create_agent），成功后把列表刷成 serve 的现状。
+	 *
+	 * 刷新放在这里而不是交给调用方：`view.agents` 是本 store 的状态，「刚建好的 agent 在不在列表里」
+	 * 就是这个状态的一部分 —— 让每个调用方各自记得刷，早晚有人忘（漏了就是一个「建成功但看不见」）。
+	 * 刷新本身沿用 `fetchAgents` 的既有语义（拉不到就留上一次的列表，不把视图清空）。
+	 *
+	 * 失败**原样抛**（serve 的原文）：这里不改写原因、也不把失败弄成一次「看起来成了」。
+	 */
+	async createAgent(input: AgentCreateInput): Promise<AgentCreateDto> {
+		const created = await this.#client.createAgent(input);
+		await this.fetchAgents();
+		return created;
 	}
 
 	/** 切换活动会话（switch_session；serve 随后推新 session_snapshot，工作台自动跟随）。 */

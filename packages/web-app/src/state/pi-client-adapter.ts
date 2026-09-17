@@ -1,6 +1,8 @@
 import type { PiClientEventKind, PiWebSocketCtor } from "@cornfield/client";
 import { PiServerError, PiClient as WirePiClient } from "@cornfield/client";
 import type {
+	AgentCreateDto,
+	AgentCreateInput,
 	AgentInfoDto,
 	AvailableModelsDto,
 	BroughtBackChildResultDto,
@@ -526,6 +528,18 @@ export class PiClientAdapter implements PiClient {
 			console.warn("[web-app] list_agents unavailable", err);
 		}
 		return this.#agents;
+	}
+
+	/**
+	 * 建一个新 agentDir（create_agent）。serve 侧就是 `cornfield agent init` 那条实现，所以这里
+	 * 只把入参搬过去、把答复原样交回 —— 不在这里拼路径、不在这里推断「建到哪去了」（`agentDir`
+	 * 是服务端归一后的读数，`--dir` 给父目录时客户端算不出它）。
+	 *
+	 * 列表缓存的刷新**不在这里**：`#agents` 是 `listAgents()` 的产物，由调用方（store）建完
+	 * 再拉一次就是现状。两边都刷就是两次网络往返 + 两处真相。
+	 */
+	createAgent(input: AgentCreateInput): Promise<AgentCreateDto> {
+		return this.#req<AgentCreateDto>({ type: "create_agent", ...input });
 	}
 
 	attach(sessionId: string): Promise<void> {
