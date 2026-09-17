@@ -36,15 +36,15 @@ Kanban 是控制协议的投影，不以视觉看板为第一目标。
 TODO/topic → Proposal → Task[] → TaskRun[] → Verification[]
 ```
 
-- TODO.md：default Agent workspace 中人的入口和意图索引（`~/cf-workspace/TODO.md`）。
-- Topic：default Agent workspace 中的长期背景、设计、决策、整体验收（`~/cf-workspace/topics/`）。
+- TODO.md：default Agent workspace 中人的入口和意图索引（`~/.cornfield/agents/default/TODO.md`）。
+- Topic：default Agent workspace 中的长期背景、设计、决策、整体验收（`~/.cornfield/agents/default/topics/`）。
 - Proposal：整理 Agent 的未确认建议。
 - Task：可独立派发和验收的持久工作单元。
 - TaskRun：一次具体执行及其事实。
 - Agent：长期身份、agentDir、指令、工具、记忆和运行配置；v1 先只支持 serve 自带的 `default` Agent。
 - Main Worker：每个 Topic Package 一个独立的 default Agent 执行实例，负责子 Task 分解、分配、调度、监督和验收。
 - Worker：Main Worker 为某个子 TaskRun 启动的执行角色，不是独立配置主体。
-- Default workspace：`~/cf-workspace`，作为 default Agent 的完整 agentDir，使用 Agent skeleton 初始化；其中包含 `TODO.md`、`topics/`、`.cornfield/config.yml`、sessions 和其他骨架文件。
+- Default workspace：`~/.cornfield/agents/default`，作为 default Agent 的完整 agentDir，使用 Agent skeleton 初始化；其中包含 `TODO.md`、`topics/`、`.cornfield/config.yml`、sessions 和其他骨架文件。
 - Code repository：用户选择的 Git 仓库，与 default Agent workspace 分开。
 - AgentSession/Process：TaskRun 的运行载体。
 - Verification：独立验收记录。
@@ -73,7 +73,7 @@ Main Worker → 分解/派发子 Task → 子 Worker 执行
 全部子 Task accepted → Package review → 人/Lead 合并
 ```
 
-一条 TODO/topic 可生成一个或多个 Task；Topic 不是 Task。v1 的 TODO/topic 来源固定为 `~/cf-workspace/TODO.md` 与 `~/cf-workspace/topics/`，代码 Task 的 `repositoryRoot` 是独立的用户选择资源。裸 TODO 默认 triage，不自动执行。
+一条 TODO/topic 可生成一个或多个 Task；Topic 不是 Task。v1 的 TODO/topic 来源固定为 `~/.cornfield/agents/default/TODO.md` 与 `~/.cornfield/agents/default/topics/`，代码 Task 的 `repositoryRoot` 是独立的用户选择资源。裸 TODO 默认 triage，不自动执行。
 
 ## 6. 状态
 
@@ -97,7 +97,7 @@ completion:
   evidence: []     # 必须留下的事实
 ```
 
-Task 必须绑定一个 Agent、一个 repository/workspace、优先级 P0/P1/P2/P3、来源 revision、执行快照、工作区策略和验收方式。v1 的 Agent 固定为欢迎页 `default`；default Agent 的 agentDir/workspace 为 `~/cf-workspace`，使用 skeleton 初始化；代码 Task 仍必须绑定真实 Git 仓库，不提供 Agent 选择器，也不设 Worker Profile 模型分层、deadline、Task 级工具/权限、network、budgetTokens。
+Task 必须绑定一个 Agent、一个 repository/workspace、优先级 P0/P1/P2/P3、来源 revision、执行快照、工作区策略和验收方式。v1 的 Agent 固定为欢迎页 `default`；default Agent 的 agentDir/workspace 为 `~/.cornfield/agents/default`，使用 skeleton 初始化；代码 Task 仍必须绑定真实 Git 仓库，不提供 Agent 选择器，也不设 Worker Profile 模型分层、deadline、Task 级工具/权限、network、budgetTokens。
 
 ## 8. 执行与生命周期
 
@@ -112,7 +112,7 @@ Main Worker: queued → starting → decomposing → dispatching → supervising
 
 Worker 必须返回 `outcome`、`summary`、`changedFiles`、`artifacts`、验证尝试/结果、残余风险、阻塞和下一步。
 
-ready 只表示规格完整且可派发，不表示自动执行。v1 固定由欢迎页 `default` Agent 手动启动：`agentId = default`。首次访问时确保 `~/cf-workspace` 按 Agent skeleton 初始化（包括 `TODO.md` 和 `topics/`），但不自动 `git init`。Task 创建时绑定具体 `repositoryRoot + baseRevision`；未选择 Git 仓库的代码 Task 进入 incomplete。TaskRun 新建独立 Session/进程，复用 `~/cf-workspace/.cornfield/config.yml` 和 default Agent 的模型解析链，不新建模型配置文件，也不提供单次 Run 模型覆盖；只记录实际生效模型。claim 记录 `claimedBy/claimedAt/heartbeatAt/leaseUntil`；租约过期只标记 stale，v1 不自动回收。
+ready 只表示规格完整且可派发，不表示自动执行。v1 固定由欢迎页 `default` Agent 手动启动：`agentId = default`。首次访问时确保 `~/.cornfield/agents/default` 按 Agent skeleton 初始化（包括 `TODO.md` 和 `topics/`），但不自动 `git init`。Task 创建时绑定具体 `repositoryRoot + baseRevision`；未选择 Git 仓库的代码 Task 进入 incomplete。TaskRun 新建独立 Session/进程，复用 `~/.cornfield/agents/default/.cornfield/config.yml` 和 default Agent 的模型解析链，不新建模型配置文件，也不提供单次 Run 模型覆盖；只记录实际生效模型。claim 记录 `claimedBy/claimedAt/heartbeatAt/leaseUntil`；租约过期只标记 stale，v1 不自动回收。
 
 ## 9. 工作区和合并
 
@@ -158,9 +158,9 @@ UI/intercom      展示或事件通道，不是状态真源
 - 通过验收且人工确认后才允许合并。
 - 所有状态、执行、失败和验收证据可追溯。
 - 默认 workspace 首次访问按 Agent skeleton 初始化，默认包含 `TODO.md` 和 `topics/`；不自动 `git init`。
-- Default Agent 的配置根为 `~/cf-workspace/.cornfield/config.yml`；首次初始化时将旧 `~/.cornfield/agent/config.yml` 内容合并迁移到该文件，旧文件保留为备份但不再作为 default Agent 运行时真源。
+- Default Agent 的配置根为 `~/.cornfield/agents/default/.cornfield/config.yml`；首次初始化时将旧 `~/.cornfield/agent/config.yml` 内容合并迁移到该文件，旧文件保留为备份但不再作为 default Agent 运行时真源。
 - 其他 Agent 继续使用各自 `<agentDir>/.cornfield/config.yml`；全局系统配置与 Agent 业务配置的拆分另行定义。
-- 所有通过 Agent skeleton 初始化的 agentDir 默认包含 `TODO.md` 和 `topics/`；default Agent 的 agentDir 固定为 `~/cf-workspace`。
+- 所有通过 Agent skeleton 初始化的 agentDir 默认包含 `TODO.md` 和 `topics/`；default Agent 的 agentDir 固定为 `~/.cornfield/agents/default`。
 - 每个 Topic Package 只能手动启动一个独立 Main Worker。
 - Main Worker 可以分解、派发、调度并验收子 Task；子 Task 验收拒绝可回到 rework 并创建新的 TaskRun。
 - Main Worker 遇到关键不确定性必须进入 `waiting_user`，不能自行猜测继续。
@@ -180,4 +180,4 @@ Package 全部 required 子 Task accepted 且 Main Worker 形成汇总后，才�
 ### v1.0 — 初始控制面定义
 
 - TODO/topic → triage → proposal → Task → TaskRun → Verification。
-- default Agent、`~/cf-workspace`、单仓库、worktree、人工派发和显式合并。
+- default Agent、`~/.cornfield/agents/default`、单仓库、worktree、人工派发和显式合并。

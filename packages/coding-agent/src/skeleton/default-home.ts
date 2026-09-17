@@ -7,7 +7,7 @@
  *   - the **client dir** (`getClientDir()`, `~/.cornfield/agent`): credentials, the Agent
  *     registry, the Project store, caches, blobs, terminal breadcrumbs — state that belongs to
  *     the client and outlives any one Agent;
- *   - the **default Agent's home** (`getDefaultAgentHome()`, `~/cf-workspace`): that Agent's own
+ *   - the **default Agent's home** (`getDefaultAgentHome()`, `~/.cornfield/agents/default`): that Agent's own
  *     agentDir — sessions, config, memories, commands.
  *
  * Two jobs live here, both about the seam between them:
@@ -47,7 +47,7 @@ const DEFAULT_AGENT_ID = "default";
 // =============================================================================
 
 export interface DefaultHomeCheck {
-	/** The home this process resolves (`~/cf-workspace` unless overridden). */
+	/** The home this process resolves (`~/.cornfield/agents/default` unless overridden). */
 	home: string;
 	/** `default`'s agentDir in `registry.json`, when the registry declares one. */
 	registryPath?: string;
@@ -126,7 +126,11 @@ export const DEFAULT_HOME_OWNERSHIP: readonly DefaultHomeOwnership[] = [
 		name: "memories",
 		owner: "agent",
 		target: "memories",
-		reason: "`getMemoryRoot(agentDir, cwd)` — the session's memory zone follows its agentDir",
+		reason:
+			"`<agentDir>/memories/<encoded-key>` (`resolveGlobalMemoryRootCandidates(agentDir, key)`) — the flat per-project " +
+			"memory column that travels with the agentDir (its second argument is the memory key, not an agentDir). NOT the " +
+			"canonical dir: `getMemoryRoot(key)` ignores the agentDir entirely and keys `memoryDir` on the memory key alone " +
+			"(`self-evolution/src/paths.ts`, ticket 27)",
 	},
 	{
 		name: "commands",
@@ -139,7 +143,8 @@ export const DEFAULT_HOME_OWNERSHIP: readonly DefaultHomeOwnership[] = [
 		owner: "agent",
 		target: path.join(".cornfield", "config.yml"),
 		reason:
-			"doc §12: the default Agent's config root is `~/cf-workspace/.cornfield/config.yml`; merged, never overwritten",
+			"doc §12: the default Agent's home is a workspace, so its project layer is `<home>/.cornfield/config.yml`; " +
+			"merged, never overwritten",
 	},
 	{
 		name: "skills",

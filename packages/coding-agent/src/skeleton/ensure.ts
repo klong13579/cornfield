@@ -1,7 +1,7 @@
 /**
  * agentDir skeleton creation.
  *
- * Per `packages/coding-agent/docs/agent-design-v1.md` §6.1:
+ * Per `docs/gateway/agent-bridge.md`（Agent Design V1）§6.1:
  *   - `mission.md` missing → full creation (directories + content files + .gitkeep stubs).
  *   - `mission.md` present → additive update: only fill in files that are missing.
  *

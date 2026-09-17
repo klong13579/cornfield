@@ -7,10 +7,10 @@
  *     the process/client and outlives any single Agent — credentials (`agent.db`), the Agent
  *     registry, the Project store, caches (history/models/autoqa/diagnosis), blobs, terminal
  *     breadcrumbs, extension installs. Overridable with `CORNFIELD_CLIENT_DIR`.
- *   - **Default Agent home** (`getDefaultAgentHome()`, fixed to `~/cf-workspace` by
- *     `docs/agent-task-control-plane-v1.md` §12): the default Agent's own agentDir — its
- *     sessions, config, memories and other Agent-scoped files. Other Agents pass their own
- *     agentDir explicitly.
+ *   - **Default Agent home** (`getDefaultAgentHome()`, `~/.cornfield/agents/default`):
+ *     the default Agent's own agentDir — sessions, config, memories and other Agent-scoped
+ *     files. Other Agents pass their own agentDir explicitly. Follows the config root
+ *     (`CORNFIELD_CONFIG_DIR`) so it stays coherent when the root is overridden.
  *
  * `CORNFIELD_CONFIG_DIR` (default `.cornfield`) names the config root (`getConfigRootDir()`).
  * On Linux, if XDG_DATA_HOME / XDG_STATE_HOME / XDG_CACHE_HOME are set, *client- and
@@ -37,9 +37,6 @@ export const VERSION: string = version;
 
 /** Minimum Bun version */
 export const MIN_BUN_VERSION: string = engines.bun.replace(/[^0-9.]/g, "");
-
-/** Directory name of the default Agent's home under the user's home. */
-export const DEFAULT_AGENT_HOME_DIR_NAME: string = "cf-workspace";
 
 // =============================================================================
 // Project directory
@@ -226,7 +223,7 @@ class DirResolver {
  * the CORNFIELD_CONFIG_DIR-derived default. Pass `undefined` to reset to the default. */
 let configRootOverride: string | undefined;
 
-/** Test-only override for the default Agent's home (normally `~/cf-workspace`). */
+/** Test-only override for the default Agent's home (normally `~/.cornfield/agents/default`). */
 let defaultAgentHomeOverride: string | undefined;
 
 let dirs = new DirResolver(process.env.CORNFIELD_CLIENT_DIR);
@@ -262,7 +259,7 @@ export function getClientDir(): string {
  * Set (or reset, when `dir` is undefined) the default Agent's home.
  *
  * An override point, not a compatibility path: embedding (tests, a fork that ships another
- * default workspace) can point the default Agent somewhere other than `~/cf-workspace`.
+ * default workspace) can point the default Agent somewhere other than the built-in home.
  * Resolved at call time so a caller that changed HOME between calls is honoured.
  */
 export function setDefaultAgentHome(dir: string | undefined): void {
@@ -270,8 +267,9 @@ export function setDefaultAgentHome(dir: string | undefined): void {
 }
 
 /**
- * The default Agent's home — its agentDir, fixed to `~/cf-workspace` by
- * `docs/agent-task-control-plane-v1.md` §12 ("default Agent 的 agentDir 固定为 ~/cf-workspace").
+ * The default Agent's home — its agentDir, under `~/.cornfield/agents/default`.
+ * Follows the config root (`CORNFIELD_CONFIG_DIR`/`getConfigDirName()`) so the path
+ * stays coherent when the root is overridden.
  *
  * Resolved through `process.env.HOME` first (like `skeleton/registry` and
  * `agent-domain/project-store`): a caller or test that points HOME at another client must get
@@ -280,7 +278,7 @@ export function setDefaultAgentHome(dir: string | undefined): void {
 export function getDefaultAgentHome(): string {
 	if (defaultAgentHomeOverride) return defaultAgentHomeOverride;
 	const home = process.env.HOME ?? os.homedir();
-	return path.join(home, DEFAULT_AGENT_HOME_DIR_NAME);
+	return path.join(resolveConfigRootDir(home), "agents", "default");
 }
 
 export function getProjectAgentDir(cwd: string = getProjectDir()): string {

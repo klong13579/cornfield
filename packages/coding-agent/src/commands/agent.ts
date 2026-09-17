@@ -1,11 +1,15 @@
 /**
  * `cornfield agent <subcommand>` — manage agentDir workspaces.
  *
- * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
- *   - init <name>     create a new agentDir
- *   - list            list agentDirs under ~/.cornfield/agents/
- *   - show <name>     print identity / tools / skills / cron summary
- *   - validate <dir>  check always-on files + runtime artifacts
+ * Subcommands (per `docs/gateway/agent-bridge.md`（Agent Design V1）§6.2):
+ *   - init <name>           create a new agentDir
+ *   - list                  list agentDirs under ~/.cornfield/agents/
+ *   - show <name>           print identity / tools / skills / cron summary
+ *   - validate --dir <dir>  check always-on files + runtime artifacts
+ *   - register <name>       add an existing agentDir to the registry (--dir <path>)
+ *   - unregister <name>     drop it from the registry (--delete-files also rm -rf)
+ *   - reconcile             re-scan the default location, prune stale entries
+ *   - migrate-default-home  move default's own state into its own home
  *
  * The heavy lifting lives in `../cli/agent-cli.ts` so each handler can be
  * unit-tested without going through the Command parser.
@@ -121,7 +125,7 @@ export default class Agent extends Command {
 		"",
 		"  ======== default agent 的家 ========",
 		"  cornfield agent migrate-default-home --dry-run          Show what would move out of ~/.cornfield/agent",
-		"  cornfield agent migrate-default-home                    Move the default Agent's own state into ~/cf-workspace",
+		"  cornfield agent migrate-default-home                    Move the default Agent's own state into ~/.cornfield/agents/default",
 		"",
 	];
 

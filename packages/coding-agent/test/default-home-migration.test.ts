@@ -2,8 +2,9 @@
  * `migrateDefaultAgentHome` — the ownership list and the two shapes that matter.
  *
  * Real temp dirs, real files, no mocks: the point of the migration is what ends up on disk.
- * Isolated by pointing both roots at temp dirs (`setClientDir` / `setDefaultAgentHome`), so the
- * developer's own `~/.cornfield/agent` and `~/cf-workspace` are never touched.
+ * Isolated by pointing HOME and the client dir at temp dirs, so the developer's own
+ * `~/.cornfield/agent` and `~/.cornfield/agents/default` are never touched. The home is the one
+ * `getDefaultAgentHome()` resolves — not a path this file picked.
  *
  * Cases:
  *   - only the old side has data → everything moves, the config is merged into the home's
@@ -16,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { setClientDir, setConfigRootDir, setDefaultAgentHome } from "@cornfield/utils";
+import { getDefaultAgentHome, setClientDir, setConfigRootDir } from "@cornfield/utils";
 import { YAML } from "bun";
 import { checkDefaultAgentHome, DEFAULT_HOME_OWNERSHIP, migrateDefaultAgentHome } from "../src/skeleton/default-home";
 
@@ -29,20 +30,19 @@ let savedClientEnv: string | undefined;
 beforeEach(async () => {
 	root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-default-home-migration-"));
 	clientDir = path.join(root, "client", "agent");
-	home = path.join(root, "cf-workspace");
-	await fs.mkdir(clientDir, { recursive: true });
-	await fs.mkdir(path.join(home, ".cornfield"), { recursive: true });
 	savedHomeEnv = process.env.HOME;
 	savedClientEnv = process.env.CORNFIELD_CLIENT_DIR;
+	// 家的位置从 HOME 推出来（不 override）：这里要测的是真实推导。
 	process.env.HOME = path.join(root, "home");
+	home = getDefaultAgentHome();
+	await fs.mkdir(clientDir, { recursive: true });
+	await fs.mkdir(path.join(home, ".cornfield"), { recursive: true });
 	setConfigRootDir(path.join(root, "client"));
 	setClientDir(clientDir);
-	setDefaultAgentHome(home);
 });
 
 afterEach(async () => {
 	setConfigRootDir(undefined);
-	setDefaultAgentHome(undefined);
 	if (savedClientEnv === undefined) delete process.env.CORNFIELD_CLIENT_DIR;
 	else setClientDir(savedClientEnv);
 	if (savedHomeEnv === undefined) delete process.env.HOME;
@@ -219,15 +219,13 @@ describe("注册表里 default 的路径 vs 本进程解析出的家", () => {
 	}
 
 	test("一致：ok", async () => {
-		setDefaultAgentHome(undefined);
-		const resolved = path.join(process.env.HOME!, "cf-workspace");
+		const resolved = getDefaultAgentHome();
 		await writeRegistry(resolved);
 		const check = await checkDefaultAgentHome();
 		expect(check).toEqual({ home: resolved, registryPath: resolved, ok: true });
 	});
 
 	test("没有声明：没有可比较的两边（ok，不是「挑了一个」）", async () => {
-		setDefaultAgentHome(undefined);
 		await writeRegistry(undefined);
 		const check = await checkDefaultAgentHome();
 		expect(check.ok).toBe(true);
@@ -235,16 +233,13 @@ describe("注册表里 default 的路径 vs 本进程解析出的家", () => {
 	});
 
 	test("不一致：ok=false 且错误文本同时点名两个路径", async () => {
-		setDefaultAgentHome(undefined);
 		const declared = path.join(process.env.HOME!, "somewhere-else");
 		await writeRegistry(declared);
 		const check = await checkDefaultAgentHome();
 		expect(check.ok).toBe(false);
 		expect(check.registryPath).toBe(declared);
 		expect(check.message).toContain(`declares Agent "default" at "${declared}"`);
-		expect(check.message).toContain(
-			`resolves the default Agent's home to "${path.join(process.env.HOME!, "cf-workspace")}"`,
-		);
+		expect(check.message).toContain(`resolves the default Agent's home to "${getDefaultAgentHome()}"`);
 		expect(check.message).toContain("refusing to pick either");
 	});
 });

@@ -1,7 +1,7 @@
 /**
  * Tests for the agentDir skeleton module.
  *
- * Verifies the contract documented in `packages/coding-agent/docs/agent-design-v1.md` §2 and §6.1:
+ * Verifies the contract documented in `docs/gateway/agent-bridge.md`（Agent Design V1）§2 and §6.1:
  *   - All required skeleton files are created on first run.
  *   - The skeleton is idempotent (re-running on an initialized dir is a no-op).
  *   - Missing files are added additively when `mission.md` already exists.
@@ -19,7 +19,7 @@ import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "../src/s
 
 /**
  * Files the skeleton must create on first run. Mirrors the layout in
- * `packages/coding-agent/docs/agent-design-v1.md` §2.
+ * `docs/gateway/agent-bridge.md`（Agent Design V1）§2.
  */
 const REQUIRED_FILES = [
 	// 5 always-on at root
@@ -39,6 +39,8 @@ const REQUIRED_FILES = [
 	"sessions/.gitkeep",
 	"cron/tasks/.gitkeep",
 	"cron/logs/.gitkeep",
+	// Topic 存放处（default Agent workspace 的长期背景/设计/决策），与 TODO.md 同为骨架的一部分
+	"topics/.gitkeep",
 ];
 
 /**

@@ -4,7 +4,7 @@
  * Two facts this file pins, both from the split of "the client dir" and "the default Agent's home"
  * (`docs/agent-task-control-plane-v1.md` §12, `docs/agent-task-control-plane-v1-implementation.md` §2):
  *
- *   1. A session of the default Agent lands **in its home** (`~/cf-workspace/sessions/<encoded-cwd>`),
+ *   1. A session of the default Agent lands **in its home** (`~/.cornfield/agents/default/sessions/<encoded-cwd>`),
  *      while the session's own cwd stays the process cwd (P1). The client dir must not grow a
  *      second copy of that session directory.
  *   2. When the registry's `default` entry and the home this process resolves disagree, `serve`
@@ -37,7 +37,7 @@ afterAll(async () => {
 });
 
 const CLI = new URL("../src/cli.ts", import.meta.url).pathname;
-const defaultHome = (): string => path.join(isolatedHome, "cf-workspace");
+const defaultHome = (): string => path.join(isolatedHome, ".cornfield", "agents", "default");
 const clientDir = (): string => path.join(isolatedHome, ".cornfield", "agent");
 /**
  * The session file `serve` reports for its default session, read from the client's log file.
@@ -95,7 +95,7 @@ function spawnServe(port: number): ReturnType<typeof Bun.spawn> {
 	);
 }
 
-describe("default Agent 的家 = ~/cf-workspace", () => {
+describe("default Agent 的家 = ~/.cornfield/agents/default", () => {
 	test("真 serve：default 的新会话根在 <home>/sessions/<encoded-cwd>/by-date/，client dir 不长第二份", async () => {
 		await writeRegistry(defaultHome());
 		const port = await freePort();

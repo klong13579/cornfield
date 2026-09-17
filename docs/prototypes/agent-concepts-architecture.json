@@ -9,7 +9,7 @@
   },
   "components": [
     {"id":"agent","type":"backend","label":"Agent","sublabel":"身份 配置 记忆 模型 能力边界","pos":[420,80],"size":[260,100]},
-    {"id":"home","type":"database","label":"AgentHome","sublabel":"default: ~/cf-workspace","pos":[420,240],"size":[260,100]},
+    {"id":"home","type":"database","label":"AgentHome","sublabel":"default: ~/.cornfield/agents/default","pos":[420,240],"size":[260,100]},
     {"id":"board","type":"backend","label":"Board","sublabel":"Task 持久管理边界","pos":[80,420],"size":[260,100]},
     {"id":"topic","type":"backend","label":"Topic","sublabel":"长期目标与上下文","pos":[420,420],"size":[260,100]},
     {"id":"repo","type":"database","label":"Repository","sublabel":"代码项目 Git 基线","pos":[80,620],"size":[260,100]},

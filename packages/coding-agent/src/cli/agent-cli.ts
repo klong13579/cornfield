@@ -5,13 +5,18 @@
  * standing up the CLI parser. The Command class in `../commands/agent.ts`
  * is a thin dispatcher that calls these.
  *
- * Subcommands (per `packages/coding-agent/docs/agent-design-v1.md` §6.2):
- *   - init <name>     create a new agentDir
- *   - list            list agentDirs under ~/.cornfield/agents/
- *   - show <name>     print identity / tools / skills / cron summary
- *   - validate <dir>  check always-on files + runtime artifacts
+ * Subcommands (per `docs/gateway/agent-bridge.md`（Agent Design V1）§6.2):
+ *   - init <name>           create a new agentDir
+ *   - list                  list agentDirs under ~/.cornfield/agents/
+ *   - show <name>           print identity / tools / skills / cron summary
+ *   - validate --dir <dir>  check always-on files + runtime artifacts
+ *   - register <name>       add an existing agentDir to the registry (--dir <path>)
+ *   - unregister <name>     drop it from the registry (--delete-files also rm -rf)
+ *   - reconcile             re-scan the default location, prune stale entries
+ *   - migrate-default-home  move default's own state into its own home
  */
 
+import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,7 +37,14 @@ import {
 import { APP_NAME } from "@cornfield/utils";
 import { migrateLegacyModelConfig } from "../config/model-routes";
 import { agentDirFilesWithRequirement } from "../skeleton/agent-dir-files";
-import { MECE_FILES, type MeceContext, runMeceChecks, runMeceRepairs } from "./mece-rules";
+import {
+	MECE_FILES,
+	type MeceContext,
+	type MeceRepair,
+	type MeceViolation,
+	runMeceChecks,
+	runMeceRepairs,
+} from "./mece-rules";
 import { runSemanticAudit, type SemanticViolation } from "./semantic-audit";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -181,7 +193,7 @@ export async function runAgentList(args: ListArgs): Promise<AgentSummary[]> {
 	// This picks up legacy agentDirs created before the registry existed and entries
 	// the user dropped into the default location without going through `cornfield agent init`.
 	const root = path.resolve(args.dir ?? path.join(homeDir(), ".cornfield", "agents"));
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(root, { withFileTypes: true });
 	} catch (err) {
@@ -378,7 +390,7 @@ async function readToolsList(toolsPath: string): Promise<string[]> {
 }
 
 async function readSkills(skillsDir: string): Promise<Array<{ name: string; description?: string }>> {
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(skillsDir, { withFileTypes: true });
 	} catch {
@@ -424,7 +436,7 @@ async function countJsonlFiles(dir: string): Promise<number> {
 }
 
 async function countFilesWithExt(dir: string, exts: string[]): Promise<number> {
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(dir, { withFileTypes: true });
 	} catch {
@@ -462,8 +474,8 @@ export interface ValidateResult {
 	issues: ValidateIssue[];
 	valid: boolean;
 	mece?: {
-		violations: import("./mece-rules").MeceViolation[];
-		repaired: import("./mece-rules").MeceRepair[];
+		violations: MeceViolation[];
+		repaired: MeceRepair[];
 	};
 	semantic?: {
 		violations: SemanticViolation[];
@@ -618,7 +630,7 @@ export async function runAgentValidate(args: ValidateArgs): Promise<ValidateResu
 	}
 
 	const meceViolations = await runMeceChecks(meceCtx);
-	let meceRepaired: import("./mece-rules").MeceRepair[] = [];
+	let meceRepaired: MeceRepair[] = [];
 
 	if (args.fix && meceViolations.some(v => v.repairable)) {
 		meceRepaired = runMeceRepairs(meceCtx, meceViolations);
@@ -904,7 +916,7 @@ export async function runAgentReconcile(_args: ReconcileArgs = {}): Promise<Reco
 	const registered: string[] = [];
 	const skipped: string[] = [];
 	const defaultRoot = path.join(homeDir(), ".cornfield", "agents");
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(defaultRoot, { withFileTypes: true });
 	} catch {
@@ -1003,7 +1015,7 @@ export interface MigrateDefaultHomeArgs {
 }
 
 /**
- * Move the default Agent's own state out of the client dir into its home (`~/cf-workspace`).
+ * Move the default Agent's own state out of the client dir into its home (`~/.cornfield/agents/default`).
  * Thin wrapper over `skeleton/default-home#migrateDefaultAgentHome` so the CLI path and the
  * library share one implementation (and one idempotence story).
  */

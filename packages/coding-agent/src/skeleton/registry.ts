@@ -132,13 +132,22 @@ export async function registerAgent(name: string, agentDir: string, template = "
 			// Declarations are optional; fall back to registry-only entry.
 		}
 		const entry: AgentEntry = {
+			// 从盘上的旧条目起手，而不是按当前类型重建一个：条目里可能有本版本不认识的键
+			//（旧版本 / 别的工具写的，例如 default 条目的 `domain`），重建会**静默**删掉它们。
+			// 与 workspace.ts 的 attachRoots 同一条规矩：read-modify-write 不许丢自己看不懂的东西。
+			...reg.agents[name],
 			path: resolved,
 			registeredAt: new Date().toISOString(),
 			template,
 		};
-		if (displayName !== undefined) entry.displayName = displayName;
-		if (workspaceVersion !== undefined) entry.workspaceVersion = workspaceVersion;
-		if (workspaceUpdatedAt !== undefined) entry.workspaceUpdatedAt = workspaceUpdatedAt;
+		// 本版本认识的缓存字段仍按本轮声明读数重算：读到就写，读不到就清
+		//（留着上一轮的旧值，等于把一个已删除 / 改名的声明缓存成事实）。
+		if (displayName === undefined) delete entry.displayName;
+		else entry.displayName = displayName;
+		if (workspaceVersion === undefined) delete entry.workspaceVersion;
+		else entry.workspaceVersion = workspaceVersion;
+		if (workspaceUpdatedAt === undefined) delete entry.workspaceUpdatedAt;
+		else entry.workspaceUpdatedAt = workspaceUpdatedAt;
 		reg.agents[name] = entry;
 		// Writing v2 entries: bump the file version so legacy v1 registries are
 		// migrated on the next write (their entries are preserved unchanged).
