@@ -45,7 +45,34 @@ describe("git 最小集 — 有改动 + 多分支仓库", () => {
 		await Bun.write(path.join(repo, "a.txt"), "alpha\nbeta\ngamma\n");
 		await Bun.write(path.join(repo, "b.txt"), "untracked\n");
 
-		fixture = await spawnServeFixture({ homePrefix: "omp-git-rich-home-", cwd: repo });
+		// 项目注册在隔离 HOME 里：为 `repo` 声明一条 Project，让 `resolveSessionWorkspace`
+		// 从 session cwd 命中 Project 并解析出 `projectRoot = repo`。wire-server 内建
+		// default meta 的 agentDir = `<HOME>/.cornfield/agents/default`（票 28 新兜底），
+		// 不是 git 仓库；git 命令需要走 `projectRoot ?? agentDir` —— 必须把 projectRoot
+		// 解析成 repo 才能保留旧 fixture 的语义（git 命令 cwd = repo）。
+		async function seedProject(home: string): Promise<void> {
+			const storeDir = path.join(home, ".cornfield", "agent");
+			await fs.mkdir(storeDir, { recursive: true });
+			await Bun.write(
+				path.join(storeDir, "projects.json"),
+				JSON.stringify({
+					version: 1,
+					projects: {
+						"test-git-rich": {
+							projectId: "test-git-rich",
+							root: repo,
+							name: "test-git-rich",
+						},
+					},
+				}),
+			);
+		}
+
+		fixture = await spawnServeFixture({
+			homePrefix: "omp-git-rich-home-",
+			cwd: repo,
+			seed: seedProject,
+		});
 	}, SERVE_BOOT_BUDGET_MS);
 
 	afterAll(async () => {
@@ -140,7 +167,29 @@ describe("git 最小集 — 空仓库（无 commit）", () => {
 		await runGit(repo, ["init", "-b", "main"]);
 		await Bun.write(path.join(repo, "seed.txt"), "seed\n");
 
-		fixture = await spawnServeFixture({ homePrefix: "omp-git-empty-home-", cwd: repo });
+		async function seedProject(home: string): Promise<void> {
+			const storeDir = path.join(home, ".cornfield", "agent");
+			await fs.mkdir(storeDir, { recursive: true });
+			await Bun.write(
+				path.join(storeDir, "projects.json"),
+				JSON.stringify({
+					version: 1,
+					projects: {
+						"test-git-empty": {
+							projectId: "test-git-empty",
+							root: repo,
+							name: "test-git-empty",
+						},
+					},
+				}),
+			);
+		}
+
+		fixture = await spawnServeFixture({
+			homePrefix: "omp-git-empty-home-",
+			cwd: repo,
+			seed: seedProject,
+		});
 	}, SERVE_BOOT_BUDGET_MS);
 
 	afterAll(async () => {

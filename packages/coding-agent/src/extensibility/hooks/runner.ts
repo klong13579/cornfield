@@ -2,7 +2,7 @@
  * Hook runner - executes hooks and manages their lifecycle.
  */
 import type { AgentMessage } from "@cornfield/agent";
-import type { Model } from "@cornfield/ai";
+import type { ImageContent, Model } from "@cornfield/ai";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { SessionManager } from "../../session/session-manager";
 import { createNoOpUIContext } from "../utils";
@@ -391,7 +391,7 @@ export class HookRunner {
 	 */
 	async emitBeforeAgentStart(
 		prompt: string,
-		images?: import("@cornfield/ai").ImageContent[],
+		images?: ImageContent[],
 	): Promise<BeforeAgentStartEventResult | undefined> {
 		const ctx = this.#createContext();
 		let result: BeforeAgentStartEventResult | undefined;

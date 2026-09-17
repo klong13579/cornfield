@@ -227,7 +227,7 @@ export async function createAccountBridgeOptions(
 	accountId: string,
 	account: DingtalkAccountConfig,
 	agentDir: string,
-	hostToolDispatcher?: import("./host-tool-dispatcher").HostToolDispatcher,
+	hostToolDispatcher?: HostToolDispatcher,
 ): Promise<AgentBridgeOptions> {
 	// Try to read the model from the agent's settings.json
 	let model = account.model ?? agentConfig?.model;

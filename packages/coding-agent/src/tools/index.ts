@@ -2,6 +2,7 @@ import type { AgentTool } from "@cornfield/agent";
 import type { Model, ToolChoice } from "@cornfield/ai";
 import { $env, $flag, isBunTestRuntime, logger } from "@cornfield/utils";
 import type { AsyncJobManager } from "../async";
+import type { ModelRegistry } from "../config/model-registry";
 import type { PromptTemplate } from "../config/prompt-templates";
 import type { Settings } from "../config/settings";
 import { EditTool } from "../edit";
@@ -10,8 +11,10 @@ import type { InternalUrlRouter, LocalProtocolOptions } from "../internal-urls";
 import { getPreludeDocs, resetPreludeDocsCache, warmPythonEnvironment } from "../ipy/executor";
 import { checkPythonKernelAvailability } from "../ipy/kernel";
 import { LspTool } from "../lsp";
+import type { MCPManager } from "../mcp/manager";
 import type { PlanModeState } from "../plan-mode/state";
 import type { AgentRegistry } from "../registry/agent-registry";
+import type { AuthStorage } from "../session/auth-storage";
 import type { CustomMessage } from "../session/messages";
 import type { ToolChoiceQueue } from "../session/tool-choice-queue";
 import { TaskTool } from "../task";
@@ -172,11 +175,11 @@ export interface ToolSession {
 		| { provider: string; baseUrl: string; id: string; name: string; api: string }
 		| undefined;
 	/** Auth storage for passing to subagents (avoids re-discovery) */
-	authStorage?: import("../session/auth-storage").AuthStorage;
+	authStorage?: AuthStorage;
 	/** Model registry for passing to subagents (avoids re-discovery) */
-	modelRegistry?: import("../config/model-registry").ModelRegistry;
+	modelRegistry?: ModelRegistry;
 	/** MCP manager for proxying MCP calls through parent */
-	mcpManager?: import("../mcp/manager").MCPManager;
+	mcpManager?: MCPManager;
 	/** Internal URL router for protocols like agent://, skill://, and mcp:// */
 	internalRouter?: InternalUrlRouter;
 	/** Agent output manager for unique agent:// IDs across task invocations */

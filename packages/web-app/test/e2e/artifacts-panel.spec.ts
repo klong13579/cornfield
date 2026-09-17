@@ -40,7 +40,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const SHOTS = "test-results/panel";
@@ -220,7 +220,7 @@ async function seedSessionArtifacts(sessionFile: string, calls: readonly SeedCal
 }
 
 /** 右栏里某个 tab 的按钮（role=tab）。 */
-function tab(page: import("@playwright/test").Page, label: string) {
+function tab(page: Page, label: string) {
 	return page.getByRole("tab", { name: label });
 }
 

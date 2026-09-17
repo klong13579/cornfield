@@ -11,6 +11,7 @@ import type {
 } from "../extensibility/extensions";
 import type { CompactOptions } from "../extensibility/extensions/types";
 import type { MCPManager } from "../mcp";
+import type { InMemoryWireClient } from "../server/memory-wire";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import type { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
@@ -63,7 +64,7 @@ export interface InteractiveModeContext {
 	// Session access
 	session: AgentSession;
 	/** P3：进程内 wire 客户端（事件源切换用，注入后取代 session.subscribe）。 */
-	wireClient?: import("../server/memory-wire").InMemoryWireClient;
+	wireClient?: InMemoryWireClient;
 	sessionManager: SessionManager;
 	settings: Settings;
 	keybindings: KeybindingsManager;

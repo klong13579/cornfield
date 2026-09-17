@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import type { Model } from "@cornfield/ai";
 import { LlmRegressionReplayBackend } from "../src/regression/replay-backend";
 import { parseReplayVerdictFromResponse } from "../src/regression/replay-llm";
 import { clearRegressionReplayRuntime, setRegressionReplayRuntime } from "../src/regression/replay-runtime";
@@ -56,7 +57,7 @@ describe("LlmRegressionReplayBackend", () => {
 			'{"passed": false, "reason": "Unrelated to read errors."}',
 		);
 		setRegressionReplayRuntime({
-			model: { provider: "openai", id: "test", api: "openai-completions" } as import("@cornfield/ai").Model,
+			model: { provider: "openai", id: "test", api: "openai-completions" } as Model,
 		});
 		const backend = new LlmRegressionReplayBackend();
 		const result = await backend.evaluateSkillOnFixture(skill, fixture);
@@ -69,7 +70,7 @@ describe("LlmRegressionReplayBackend", () => {
 	test("falls back to heuristic when LLM returns empty", async () => {
 		const spy = spyOn(llmModule, "callBackgroundLlm").mockResolvedValue("");
 		setRegressionReplayRuntime({
-			model: { provider: "openai", id: "test", api: "openai-completions" } as import("@cornfield/ai").Model,
+			model: { provider: "openai", id: "test", api: "openai-completions" } as Model,
 		});
 		const backend = new LlmRegressionReplayBackend();
 		const result = await backend.evaluateSkillOnFixture(skill, fixture);

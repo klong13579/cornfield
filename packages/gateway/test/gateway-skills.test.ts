@@ -21,6 +21,7 @@
  * files (mirroring how the real gateway resolves skills from disk).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -82,7 +83,7 @@ async function loadSkillsFromDir(
 		source: string;
 		level: "user" | "project";
 	}> = [];
-	let entries: import("node:fs").Dirent[];
+	let entries: Dirent[];
 	try {
 		entries = await fs.readdir(dir, { withFileTypes: true });
 	} catch {

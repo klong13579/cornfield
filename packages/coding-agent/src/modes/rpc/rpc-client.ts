@@ -6,6 +6,7 @@
 import type { AgentEvent, AgentMessage, AgentToolResult, ThinkingLevel } from "@cornfield/agent";
 import type { ImageContent, Model } from "@cornfield/ai";
 import { isRecord, ptree, readJsonl } from "@cornfield/utils";
+import type { FileSink } from "bun";
 import type { BashResult } from "../../exec/bash-executor";
 import type { SessionStats } from "../../session/agent-session";
 import type { CompactionResult } from "../../session/compaction";
@@ -734,7 +735,7 @@ export class RpcClient {
 		if (!this.#process?.stdin) {
 			throw new Error("Client not started");
 		}
-		const stdin = this.#process.stdin as import("bun").FileSink;
+		const stdin = this.#process.stdin as FileSink;
 		stdin.write(`${JSON.stringify(frame)}\n`);
 		const flushResult = stdin.flush();
 		if (flushResult instanceof Promise) {

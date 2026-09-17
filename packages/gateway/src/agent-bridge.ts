@@ -15,7 +15,9 @@ import * as path from "node:path";
 import { isEnoent, logger } from "@cornfield/utils";
 import { type AgentEvent, type RpcTransportEvent, WireTransport, WireTransportError } from "./agent-transport-wire";
 import { CircuitBreaker, type CircuitState } from "./circuit-breaker";
+import type { CrashLog } from "./crash-log";
 import { CrashRecovery } from "./crash-recovery";
+import type { HostToolDispatcher } from "./host-tool-dispatcher";
 import { PromptExtractor } from "./prompt-extractor";
 import { PromptQueue } from "./prompt-queue";
 import { extractAssistantError, extractAssistantText, friendlyLlmError, ResponseMetaBuilder } from "./response-meta";
@@ -93,7 +95,7 @@ export interface AgentBridgeOptions {
 	/** Optional crash log sink. When set, every crash / recovery /
 	 *  suppressed event is mirrored to a JSONL file so the death loop
 	 *  survives gateway restarts. See `crash-log.ts`. */
-	crashLog?: import("./crash-log").CrashLog;
+	crashLog?: CrashLog;
 	/** Data dir for the restart sentinel. When set, every active
 	 *  prompt writes a sentinel to `<dataDir>/restart-pending.json`
 	 *  while it runs and clears it on completion — so a SIGKILL or
@@ -117,10 +119,10 @@ export interface AgentBridgeOptions {
 	/** Host tool dispatcher wired to the gateway's HostToolDispatcher. When
 	 *  set, the bridge sends `set_host_tools` to OMP on each `ready` event
 	 *  and routes `host_tool_call` frames to the dispatcher. */
-	hostToolDispatcher?: import("./host-tool-dispatcher").HostToolDispatcher;
+	hostToolDispatcher?: HostToolDispatcher;
 	/** Active chat context provider — returns the current InboundMessage
 	 *  (if any) for delivery auto-inference by host tools like cron. */
-	getActiveChatContext?: () => import("./types").InboundMessage | undefined;
+	getActiveChatContext?: () => InboundMessage | undefined;
 }
 
 /** Re-exported for use by PromptQueue and for backward compatibility. */
@@ -151,7 +153,7 @@ export class AgentBridge {
 	 *  by host tools (cron) for delivery auto-inference. Lives on the bridge
 	 *  (not the transport) so it survives across session switches within a
 	 *  single prompt. Cleared in the `forwardWithMeta` finally block. */
-	#activeChatContext: import("./types").InboundMessage | undefined;
+	#activeChatContext: InboundMessage | undefined;
 	#crash: CrashRecovery;
 	#circuit: CircuitBreaker;
 	#metaBuilder: ResponseMetaBuilder;
@@ -159,7 +161,7 @@ export class AgentBridge {
 	#reconnectGuard = false;
 	#lastError: string | undefined;
 	#accountId: string;
-	#crashLog: import("./crash-log").CrashLog | undefined;
+	#crashLog: CrashLog | undefined;
 	#dataDir: string | undefined;
 	#streamingWatchdogMs: number;
 
@@ -397,7 +399,7 @@ export class AgentBridge {
 	/** Public hook for host tools (cron) to read the active chat context for
 	 *  delivery auto-inference. Returns the InboundMessage currently being
 	 *  processed by `forwardWithMeta`, or undefined outside a prompt. */
-	getActiveChatContext(): import("./types").InboundMessage | undefined {
+	getActiveChatContext(): InboundMessage | undefined {
 		return this.#activeChatContext;
 	}
 
@@ -416,7 +418,7 @@ export class AgentBridge {
 		return this.#activeSessionPath;
 	}
 
-	#setActiveChatContext(msg: import("./types").InboundMessage): void {
+	#setActiveChatContext(msg: InboundMessage): void {
 		this.#activeChatContext = msg;
 	}
 

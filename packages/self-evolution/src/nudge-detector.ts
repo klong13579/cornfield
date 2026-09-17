@@ -3,7 +3,7 @@
  * with causal root-cause attribution.
  */
 import { TraceAnalyzer } from "./trace-analyzer";
-import type { Nudge, SessionTrace } from "./types";
+import type { Nudge, SessionTrace, ToolChainDiagnosis } from "./types";
 
 const NUDGE_COOLDOWN_WARN_MS = 15_000;
 const NUDGE_COOLDOWN_INFO_MS = 30_000;
@@ -40,7 +40,7 @@ export class NudgeDetector {
 		return nudge;
 	}
 
-	#detectEarlyEditVerifyFailure(diagnosis: import("./types").ToolChainDiagnosis): Nudge | undefined {
+	#detectEarlyEditVerifyFailure(diagnosis: ToolChainDiagnosis): Nudge | undefined {
 		const verifyFailures = diagnosis.readFailures.filter(rf => rf.failureType === "verify_after_edit_failure");
 		if (verifyFailures.length >= 1) {
 			const first = verifyFailures[0]!;
@@ -55,7 +55,7 @@ export class NudgeDetector {
 		return undefined;
 	}
 
-	#detectCascadingReadFailures(diagnosis: import("./types").ToolChainDiagnosis): Nudge | undefined {
+	#detectCascadingReadFailures(diagnosis: ToolChainDiagnosis): Nudge | undefined {
 		const verifyFailures = diagnosis.readFailures.filter(rf => rf.failureType === "verify_after_edit_failure");
 		if (verifyFailures.length >= 2) {
 			return {
@@ -69,7 +69,7 @@ export class NudgeDetector {
 		return undefined;
 	}
 
-	#detectEditVerifyMismatch(diagnosis: import("./types").ToolChainDiagnosis): Nudge | undefined {
+	#detectEditVerifyMismatch(diagnosis: ToolChainDiagnosis): Nudge | undefined {
 		const mismatches = diagnosis.readFailures.filter(
 			rf =>
 				rf.failureType === "path_not_found" &&
@@ -89,7 +89,7 @@ export class NudgeDetector {
 		return undefined;
 	}
 
-	#detectSearchMisledRead(diagnosis: import("./types").ToolChainDiagnosis): Nudge | undefined {
+	#detectSearchMisledRead(diagnosis: ToolChainDiagnosis): Nudge | undefined {
 		const misled = diagnosis.readFailures.filter(rf => rf.failureType === "search_misled");
 		if (misled.length >= 1) {
 			return {

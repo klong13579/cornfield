@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
-import { getClientDir, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
+import { getClientDir, getDefaultAgentHome, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
@@ -266,10 +266,15 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 	const { defaultSession } = options;
 
 	const registry = new SessionRegistry(options.sessionFactory);
+	// 内建 default meta 的兜底 agentDir = 官方默认家（`~/.cornfield/agents/default`）。
+	// 这是「注册表里没有 default 条目时」的语义：有声明时以注册表条目为准（loadMetasSafe()
+	// 之后的 `registerMeta(meta)` 会覆盖这条），声明缺位时落到默认家，让全新机器 / 删掉那条
+	// 后也走同一根，而不是「你碰巧在哪个目录起了 serve」。识别身份 = 用户的 home 解析得到的那条
+	// 路径，与 `createAgentSession` 的 default Agent 拼接口径一致。
 	registry.registerMeta({
 		id: "default",
 		name: "default",
-		agentDir: process.cwd(),
+		agentDir: getDefaultAgentHome(),
 	});
 	// record_transcribe 的 API 转写路径（record.model）复用 default 会话的模型注册表；
 	// 未配置 API 模型时仅走本地 whisper，本引用不会被触碰。
