@@ -9,10 +9,36 @@ import type { RouteObject } from "react-router-dom";
  * 各有一份表（panelRegistry / router 的 PAGE_META / createHashRouter 的 children），
  * 加一个页面要改三处、漏一处不报错只表现错（面包屑落在 Home、子路由命中父面板的顶栏、
  * 侧栏有而路由没有）。现在只有这一份：
- *   - AppSidebar 由 getPanels() 渲染；
+ *   - AppSidebar 由 getPanelGroups() 渲染（组标题 + 组内条目，都是这里声明的事实）；
  *   - router.tsx 由 getPanels() 派生路由（path / element / children 同源）；
  *   - AppShell 由路由匹配链上的 handle（panelHandle）解析当前面板，取 title / customTopbar。
  */
+
+/**
+ * 侧栏分组 id —— 分组名与顺序见 PANEL_GROUPS（唯一一份）。
+ *
+ * 这里不再是「primary/bottom」那种与页面无关的布局槽位：分组本身就是导航的一部分，
+ * 一个面板属于哪个组是它的导航事实，不是侧栏的排版细节。
+ */
+export type PanelGroupId = "work" | "agent" | "capability" | "system";
+
+/** 一个侧栏分组：id + 组标题（标题文本就是屏幕上的那行字，也是测试断言的锚点）。 */
+export interface PanelGroupDef {
+	id: PanelGroupId;
+	title: string;
+}
+
+/**
+ * 侧栏的四个组，**数组顺序即渲染顺序**（对齐 docs/proma-comparison/mock.html 的
+ * 「工作 / Agent / 能力 / 系统」四段）。加一个组 = 这里加一项，否则 getPanelGroups() 会抛。
+ */
+export const PANEL_GROUPS: readonly PanelGroupDef[] = [
+	{ id: "work", title: "工作" },
+	{ id: "agent", title: "Agent" },
+	{ id: "capability", title: "能力" },
+	{ id: "system", title: "系统" },
+];
+
 export interface PanelDef {
 	/** panel 唯一标识 */
 	id: string;
@@ -22,9 +48,9 @@ export interface PanelDef {
 	icon: LucideIcon;
 	/** badge 计数（null 表示不显示） */
 	badge?: () => number | null;
-	/** 导航分组：primary（主功能）或 bottom（底部） */
-	group: "primary" | "bottom";
-	/** 同组内排序（1 起） */
+	/** 侧栏分组（组顺序见 PANEL_GROUPS） */
+	group: PanelGroupId;
+	/** 组内排序（1 起） */
 	order: number;
 	/** 路由路径（用于深链和 history） */
 	path: string;
@@ -64,14 +90,39 @@ export function requirePanel(id: string): PanelDef {
 	return def;
 }
 
-/** 获取所有已注册 panel（按 group + order 排序） */
+/** 分组在侧栏里的次序；未声明的分组返回 -1（调用方负责把它当错）。 */
+function groupRank(id: PanelGroupId): number {
+	return PANEL_GROUPS.findIndex(group => group.id === id);
+}
+
+/** 获取所有已注册 panel（按分组顺序 + 组内 order 排序） */
 export function getPanels(): PanelDef[] {
 	return Array.from(panelRegistry.values()).sort((a, b) => {
-		if (a.group !== b.group) {
-			return a.group === "primary" ? -1 : 1;
-		}
-		return a.order - b.order;
+		const rank = groupRank(a.group) - groupRank(b.group);
+		return rank !== 0 ? rank : a.order - b.order;
 	});
+}
+
+/** 一个分组 + 它的条目（已按组内 order 排好）。 */
+export interface PanelGroupView extends PanelGroupDef {
+	panels: PanelDef[];
+}
+
+/**
+ * 侧栏渲染要的全部事实：四个组（含空组）与各自的条目。
+ *
+ * 空组照样返回（AppSidebar 只是不画条目）——「这个组现在没有页面」与「这个组不存在」不是一回事。
+ * 反过来，注册了 PANEL_GROUPS 里没有的分组**直接抛**：那种面板会从侧栏悄悄消失，
+ * 而侧栏少一项是没人会收到报错的错误。
+ */
+export function getPanelGroups(): PanelGroupView[] {
+	const views: PanelGroupView[] = PANEL_GROUPS.map(group => ({ ...group, panels: [] }));
+	for (const panel of getPanels()) {
+		const view = views.find(item => item.id === panel.group);
+		if (!view) throw new Error(`panel ${panel.id} 的分组未在 PANEL_GROUPS 里声明：${panel.group}`);
+		view.panels.push(panel);
+	}
+	return views;
 }
 
 /** 路由 handle：声明这条路由（及其子路由）穿哪个面板的外壳。 */

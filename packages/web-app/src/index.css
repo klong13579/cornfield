@@ -415,22 +415,30 @@ details[open] > summary.chip {
 	border-radius: 1px;
 }
 
-/* ── 功能描述侧栏（AppSidebar）：图标下加 10px label，撑宽容纳 2-4 个中文字 ── */
-/* 仅 AppSidebar 使用；不动基础 .nav-item（SessionSidebar 折叠钮仍依赖 40px 方钮） */
-.nav-item-labeled {
-	width: 60px;
-	height: 44px;
-	flex-direction: column;
-	gap: 3px;
+/* ── 功能描述侧栏（AppSidebar，240px）：组标题 + 整行的导航条目 ── */
+/* 条目不缩在方钮里：文字与图标同一行左对齐（mock 的 .nav button）；
+   基础 .nav-item（40px 方钮）留给 SessionSidebar 的折叠钮，两者不再共用一个类。 */
+.sidebar-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 9px;
+	border-radius: 7px;
+	font-size: 13px;
+	color: var(--color-ink-subtle);
+	transition: background var(--ease), color var(--ease);
 }
-.nav-item-labeled .nav-item-label {
-	font-size: 10px;
+.sidebar-item:hover {
+	background: var(--color-surface-2);
+	color: var(--color-ink);
+}
+.sidebar-item:active {
+	transform: scale(0.99);
+}
+.sidebar-item.active {
+	background: var(--color-accent-dim);
+	color: var(--color-ink);
 	font-weight: 500;
-	line-height: 1.3;
-	max-width: 56px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 /* ── toggle（42×24 滑动开关）── */

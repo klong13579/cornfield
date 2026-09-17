@@ -129,9 +129,10 @@ test.describe("创建员工（真实 serve + 真实前端）", () => {
 				{ wsUrl: `ws://127.0.0.1:${servePort}/ws` },
 			);
 			await page.goto(`http://127.0.0.1:${appPort}/#/workspace`, { waitUntil: "domcontentloaded" });
-			// 工作台顶栏的连接点是「真连上了」的权威信号（Agent 管理页自己没有这个点）
+			// 工作台顶栏的连接点是「真连上了」的权威信号（Agent 总览页自己没有这个点）
 			await page.locator(".conn-dot:not(.reconnecting)").first().waitFor({ state: "visible", timeout: 60_000 });
-			await page.getByRole("link", { name: "Agent 管理" }).click();
+			// 侧栏里的条目名（mock 的分组导航：Agent 组的第一项）
+			await page.getByRole("link", { name: "Agent 总览" }).click();
 			await expect(page.getByRole("button", { name: "创建员工" }).first()).toBeVisible({ timeout: 30_000 });
 			await page.screenshot({ path: `${SHOTS}/1-agents-list.png` });
 

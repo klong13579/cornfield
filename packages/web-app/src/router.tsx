@@ -40,14 +40,18 @@ import { WorkspaceView } from "./pages/workspace/WorkspaceView";
 // ── Panel 注册（唯一元数据源）────────────────────────────────────────
 // 注册进 panelRegistry 后：侧栏、路由表、外壳都从它派生。加一个面板 = 这里加一项。
 // 本文件是这张表唯一的消费者入口，所以注册必须在建表之前完成（模块求值顺序）。
+//
+// group/order 是**侧栏的事实**：分组名与顺序见 panel-registry 的 PANEL_GROUPS（工作 / Agent /
+// 能力 / 系统），条目名对齐 docs/proma-comparison/mock.html 的左侧导航。以下按组分段登记。
 
 /** 注册所有 panel */
 function registerAllPanels(): void {
+	// ── 工作 ──
 	registerPanel({
 		id: "home",
-		title: "Home",
+		title: "首页",
 		icon: House,
-		group: "primary",
+		group: "work",
 		order: 1,
 		path: "/",
 		mount: () => HomeView,
@@ -59,7 +63,7 @@ function registerAllPanels(): void {
 		id: "workspace",
 		title: "会话工作台",
 		icon: MessagesSquare,
-		group: "primary",
+		group: "work",
 		order: 2,
 		path: "/workspace",
 		mount: () => WorkspaceView,
@@ -67,41 +71,58 @@ function registerAllPanels(): void {
 	});
 
 	registerPanel({
-		id: "agents",
-		title: "Agent 管理",
-		icon: Bot,
-		group: "primary",
-		order: 3,
-		path: "/agents",
-		mount: () => AgentsView,
-	});
-
-	registerPanel({
 		id: "records",
 		title: "会话记录",
 		icon: Clock,
-		group: "primary",
-		order: 4,
+		group: "work",
+		order: 3,
 		path: "/records",
 		mount: () => RecordsView,
 	});
 
+	// ── Agent ──
+	// mock 的「项目」「会话树」在这一组里没有对应页面：Project 不是一级页面（UX.md §6：它是当前
+	// Agent 的服务对象与上下文切换器），会话树活在 /workspace 与 Agent 详情的 tab 里。不凭空造页，
+	// 也不为它们在这个组里摆占位。
 	registerPanel({
-		id: "voice",
-		title: "语音",
-		icon: Mic,
-		group: "primary",
-		order: 5,
-		path: "/voice",
-		mount: () => VoiceView,
+		id: "agents",
+		title: "Agent 总览",
+		icon: Bot,
+		group: "agent",
+		order: 1,
+		path: "/agents",
+		mount: () => AgentsView,
+	});
+
+	// ── 能力 ──
+	// W3 D5：技能面板（get_skills 只读列表；启停 toggle 等 B3 协议）。
+	registerPanel({
+		id: "skills",
+		title: "Skills",
+		icon: Lightbulb,
+		group: "capability",
+		order: 1,
+		path: "/skills",
+		mount: () => SkillsView,
+	});
+
+	// W3 D3：记忆面板（serve get_memory 三分区投影）。
+	registerPanel({
+		id: "memory",
+		title: "Memory",
+		icon: Brain,
+		group: "capability",
+		order: 2,
+		path: "/memory",
+		mount: () => MemoryView,
 	});
 
 	registerPanel({
 		id: "todo",
-		title: "Todo 面板",
+		title: "Todo",
 		icon: ListChecks,
-		group: "primary",
-		order: 6,
+		group: "capability",
+		order: 3,
 		path: "/todo",
 		mount: () => TodoView,
 	});
@@ -111,10 +132,10 @@ function registerAllPanels(): void {
 	// 深链可达，侧栏仍指向 /models。
 	registerPanel({
 		id: "models",
-		title: "模型控制中心",
+		title: "模型",
 		icon: Cpu,
-		group: "primary",
-		order: 7,
+		group: "capability",
+		order: 4,
 		path: "/models",
 		mount: () => ModelsView,
 		children: [
@@ -125,56 +146,45 @@ function registerAllPanels(): void {
 		],
 	});
 
-	// W3 D2：用量面板（serve get_stats）。
 	registerPanel({
-		id: "insights",
-		title: "用量",
-		icon: BarChart3,
-		group: "primary",
-		order: 8,
-		path: "/insights",
-		mount: () => InsightsView,
+		id: "voice",
+		title: "语音",
+		icon: Mic,
+		group: "capability",
+		order: 5,
+		path: "/voice",
+		mount: () => VoiceView,
 	});
 
-	// W3 D3：记忆面板（serve get_memory 三分区投影）。
-	registerPanel({
-		id: "memory",
-		title: "记忆",
-		icon: Brain,
-		group: "primary",
-		order: 9,
-		path: "/memory",
-		mount: () => MemoryView,
-	});
-
+	// ── 系统 ──
 	// W3 D4：定时任务面板壳（cron 配置预览；数据等 B6 gateway cron 代理命令）。
 	registerPanel({
 		id: "tasks",
 		title: "定时任务",
 		icon: CalendarClock,
-		group: "primary",
-		order: 10,
+		group: "system",
+		order: 1,
 		path: "/tasks",
 		mount: () => TasksView,
 	});
 
-	// W3 D5：技能面板（get_skills 只读列表；启停 toggle 等 B3 协议）。
+	// W3 D2：用量面板（serve get_stats）。
 	registerPanel({
-		id: "skills",
-		title: "技能",
-		icon: Lightbulb,
-		group: "primary",
-		order: 11,
-		path: "/skills",
-		mount: () => SkillsView,
+		id: "insights",
+		title: "用量",
+		icon: BarChart3,
+		group: "system",
+		order: 2,
+		path: "/insights",
+		mount: () => InsightsView,
 	});
 
 	registerPanel({
 		id: "settings",
 		title: "设置",
 		icon: SlidersHorizontal,
-		group: "bottom",
-		order: 1,
+		group: "system",
+		order: 3,
 		path: "/settings",
 		mount: () => SettingsView,
 	});

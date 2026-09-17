@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { AgentInfoDto, TodoPhaseDto } from "@cornfield/wire";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { ProjectList } from "../src/components/ProjectContext";
 import { AgentSwitcher } from "../src/layout/AgentSwitcher";
 import { AppShell } from "../src/layout/AppShell";
+import { SidebarAgentContext, SidebarNav } from "../src/layout/AppSidebar";
 import { NotFoundView } from "../src/layout/NotFoundView";
 import {
 	EMPTY_PROJECT_DRAFT,
@@ -13,7 +14,7 @@ import {
 	ProjectSwitcher,
 	projectDraftToRecord,
 } from "../src/layout/ProjectSwitcher";
-import { activePanelOf, getPanels, panelHandle } from "../src/layout/panel-registry";
+import { activePanelOf, getPanelGroups, getPanels, panelHandle } from "../src/layout/panel-registry";
 import type { ChildSessionNodeDto, ProjectRecordDto } from "../src/lib/pi-client-api";
 import { projectFieldState, projectLabelOf } from "../src/lib/project-read-model";
 import {
@@ -42,8 +43,10 @@ import { SessionStore, type SessionView } from "../src/state/session-store";
  * 3. **上下文控件**：Agent / Project 两个控件各自只读自己的来源，三种「没有」
  *      （未连接 / 空集 / 不属于任何 Project、读不到）不会被说成同一件事；外壳不代管工作台操作。
  *
- * 本文件不 mock 任何模块：两个 Switcher 的面板是无 hook 的纯函数组件（直接调用即可拿到元素树、
- * 触发 onChange/onClick），AppShell 只读路由匹配链与注册表，不需要会话 store；Project 写面那一段
+ * 本文件只 mock 一处：use-session 的 SSR 替身（侧栏要读「当前 Agent / 工作上下文」，而
+ * renderToStaticMarkup 下 useSyncExternalStore 缺 getServerSnapshot 会直接抛错，真 store 在没有
+ * init() 的测试里也没有快照可读）。两个 Switcher 的面板仍是无 hook 的纯函数组件（直接调用即可
+ * 拿到元素树、触发 onChange/onClick），AppShell 只读路由匹配链与注册表；Project 写面那一段
  * 用真 store + 假 socket（只替掉网络层）。
  */
 
@@ -73,11 +76,23 @@ const noop = (): void => {};
 	reload: noop,
 };
 
-const { renderToStaticMarkup } = await import("react-dom/server");
-const { createMemoryRouter, matchRoutes, RouterProvider } = await import("react-router-dom");
-const { appRoutes } = await import("../src/router");
+// ── 测试替身 ────────────────────────────────────────────────────────
 
-// ── 测试替身 ─────────────────────────────────────────────────────────
+/**
+ * 侧栏要读会话视图（当前 Agent / 工作上下文），而这里不连真 socket：
+ * 直渲外壳时把 use-session 换成一份固定视图 —— renderToStaticMarkup 下 useSyncExternalStore 缺
+ * getServerSnapshot 会抛错，真 store 在没 init() 的测试里也拿不出快照。
+ *
+ * 必须在下面的 import 之前注册：外壳模块在那一刻才被求值，替身得先到位。
+ */
+mock.module("../src/state/use-session", () => ({ useSession: () => shellView }));
+
+/** 外壳的空态：未连接、无 Agent、无 Project（viewOf 是函数声明，可以先用后置）。 */
+const shellView: SessionView = viewOf({ connected: false });
+
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { createMemoryRouter, matchRoutes, NavLink, RouterProvider } = await import("react-router-dom");
+const { appRoutes } = await import("../src/router");
 
 function viewOf(patch: Partial<SessionView>): SessionView {
 	return {
@@ -186,11 +201,13 @@ describe("面板元数据只有一份（注册表即路由表）", () => {
 		}
 	});
 
-	it("侧栏分组来自注册表（primary 若干 + bottom 设置）", () => {
-		const primary = getPanels().filter(p => p.group === "primary");
-		const bottom = getPanels().filter(p => p.group === "bottom");
-		expect(primary.length).toBeGreaterThan(5);
-		expect(bottom.map(p => p.id)).toEqual(["settings"]);
+	it("侧栏分组来自注册表：四个组、每组都有条目、没有面板落在未声明的组里", () => {
+		const groups = getPanelGroups();
+		expect(groups.map(group => group.title)).toEqual(["工作", "Agent", "能力", "系统"]);
+		expect(groups.reduce((n, group) => n + group.panels.length, 0)).toBe(getPanels().length);
+		for (const group of groups) {
+			expect(group.panels.length, `组「${group.title}」一个条目都没有`).toBeGreaterThan(0);
+		}
 	});
 
 	it("旧元数据（PAGE_META / findPageMeta / PageMeta）已经删掉，没有第二份路径→标题表", async () => {
@@ -200,7 +217,103 @@ describe("面板元数据只有一份（注册表即路由表）", () => {
 	});
 });
 
-// ── 2. 路由上下文：深链、刷新、子路由归属 ─────────────────────────────
+// ── 1b. 侧栏渲染：组标题与组内条目顺序 ────────────────────────────────
+
+/**
+ * mock（docs/proma-comparison/mock.html）的左侧导航，逐项拄平。
+ *
+ * 这份字面量故意不按 PANEL_GROUPS / order 算：从注册表算出来的期望值永远等于自己，
+ * 什么都钉不住 —— 要发现的正是「注册表被改了顺序/mock 名没对齐」这类漂移。
+ */
+const MOCK_SIDEBAR = [
+	"组：工作",
+	"项：首页",
+	"项：会话工作台",
+	"项：会话记录",
+	"组：Agent",
+	"项：Agent 总览",
+	"组：能力",
+	"项：Skills",
+	"项：Memory",
+	"项：Todo",
+	"项：模型",
+	"项：语音",
+	"组：系统",
+	"项：定时任务",
+	"项：用量",
+	"项：设置",
+];
+
+/** 侧栏渲染出来的一行：组标题（<h2>）与条目（NavLink）的屏幕文字。 */
+function sidebarLines(root: ReactNode): string[] {
+	return collect(root)
+		.map(el => {
+			if (el.type === "h2") return `组：${textOf((el.props as { children?: ReactNode }).children)}`;
+			if (el.type === NavLink) return `项：${String((el.props as { "aria-label"?: string })["aria-label"])}`;
+			return null;
+		})
+		.filter((line): line is string => line !== null);
+}
+
+describe("侧栏按组分段渲染", () => {
+	it("四个组标题 + 组内条目顺序与 mock 一致", () => {
+		expect(sidebarLines(SidebarNav({ groups: getPanelGroups() }))).toEqual(MOCK_SIDEBAR);
+	});
+
+	it("条目标题对应现有的路由（本次只改导航分组，路由一个都没动）", () => {
+		const links = collect(SidebarNav({ groups: getPanelGroups() })).filter(el => el.type === NavLink);
+		expect(
+			links.map(el => [
+				String((el.props as { "aria-label"?: string })["aria-label"]),
+				(el.props as { to?: string }).to,
+			]),
+		).toEqual([
+			["首页", "/"],
+			["会话工作台", "/workspace"],
+			["会话记录", "/records"],
+			["Agent 总览", "/agents"],
+			["Skills", "/skills"],
+			["Memory", "/memory"],
+			["Todo", "/todo"],
+			["模型", "/models"],
+			["语音", "/voice"],
+			["定时任务", "/tasks"],
+			["用量", "/insights"],
+			["设置", "/settings"],
+		]);
+	});
+});
+
+// ── 1c. 侧栏顶块：当前 Agent 与工作上下文 ────────────────────────────
+
+describe("SidebarAgentContext", () => {
+	it("没有焦点 Agent：mock 的两行文案（未选择 Agent / 先选择 Agent）", () => {
+		const html = renderToStaticMarkup(createElement(SidebarAgentContext, { view: viewOf({ agents: [] }) }));
+		expect(html).toContain("当前 Agent");
+		expect(html).toContain("未选择 Agent");
+		expect(html).toContain("先选择 Agent");
+	});
+
+	it("未连接：说未连接，不说「先选择 Agent」（那时候没得选）", () => {
+		const html = renderToStaticMarkup(
+			createElement(SidebarAgentContext, { view: viewOf({ connected: false, agents: AGENTS }) }),
+		);
+		expect(html).toContain("未连接");
+		expect(html).not.toContain("先选择 Agent");
+	});
+
+	it("有焦点：名字是那个 Agent，提示行是工作上下文（与顶栏 chip 同一份读模型）", () => {
+		const html = renderToStaticMarkup(
+			createElement(SidebarAgentContext, {
+				view: viewOf({ activeAgentId: "hr", agents: AGENTS, projects: PROJECTS, workingProjectId: "dtc" }),
+			}),
+		);
+		expect(html).toContain(">HR</div>");
+		expect(html).toContain(">DTC</div>");
+	});
+});
+
+// ── 2. 路由上下文：当前面板由匹配链决定 ─────────────────────────────
 
 describe("路由上下文：当前面板由匹配链决定", () => {
 	it("刷新（冷启动）：注册表与路由表在模块求值时就绪，不依赖任何一次导航", () => {
@@ -273,7 +386,7 @@ describe("AppShell：外壳只画导航，不画工作台操作", () => {
 	it("能力页：通用顶栏画出「当前位置」，内容区是能力页本体", () => {
 		const html = renderShellAt("/skills");
 		// 断言到顶栏自己的标记 —— 侧栏也含「技能」两个字，只测子串会被侧栏满足。
-		expect(html).toContain('CornField 多端前端 <span class="text-ink">技能</span>');
+		expect(html).toContain('CornField 多端前端 <span class="text-ink">Skills</span>');
 		expect(html).toContain("能力页主体");
 	});
 

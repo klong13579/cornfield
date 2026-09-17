@@ -488,6 +488,36 @@ test("#/agents 的「创建员工」入口开得出表单", async ({ page }) => 
 		// 就绪信号 = server_snapshot 到位（头行从 0 agent 变为 1 个 default agent）
 		await expect(page.getByText(/1 工作区/)).toBeVisible({ timeout: 60_000 });
 		await page.waitForTimeout(1000);
+
+		// ── 侧栏分组（mock 的四段）：真浏览器里组标题与组内顺序就是注册表那份 ──
+		// 取法用 DOM 顺序而不是 innerText：断言的就是「谁在谁前面」，不依赖换行怎么断。
+		const sidebar = page.getByRole("navigation", { name: "主导航" });
+		await expect(sidebar.getByRole("heading", { name: "能力" })).toBeVisible();
+		// 宽度也是验收项（UX.md §1：桌面左侧导航 240px），不是「看着像」。
+		const sidebarBox = await sidebar.boundingBox();
+		expect(sidebarBox && Math.round(sidebarBox.width)).toBe(240);
+		const sidebarOrder = await sidebar.evaluate(el =>
+			Array.from(el.querySelectorAll("h2, a")).map(node => (node.textContent ?? "").trim()),
+		);
+		expect(sidebarOrder).toEqual([
+			"工作",
+			"首页",
+			"会话工作台",
+			"会话记录",
+			"Agent",
+			"Agent 总览",
+			"能力",
+			"Skills",
+			"Memory",
+			"Todo",
+			"模型",
+			"语音",
+			"系统",
+			"定时任务",
+			"用量",
+			"设置",
+		]);
+		await page.screenshot({ path: path.join(SHOT_DIR, "sidebar-groups.png"), fullPage: true });
 		const buttons = await page.evaluate(() =>
 			Array.from(document.querySelectorAll("button")).map(b => (b.textContent ?? "").trim()),
 		);

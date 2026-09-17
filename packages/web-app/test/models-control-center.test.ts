@@ -197,12 +197,14 @@ describe("模型控制中心：路由骨架", () => {
 		}
 	});
 
-	it("panel 注册表更新为「模型控制中心」，子路径由路由上下文回落到 /models 面板", () => {
-		expect(getPanels().find(p => p.id === "models")?.title).toBe("模型控制中心");
+	it("panel 注册表里 /models 只注册一项（导航名「模型」），子路径由路由上下文回落到 /models 面板", () => {
+		// 导航名对齐 mock（侧栏条目叫「模型」）：一处标题 = 侧栏 label + 顶栏的「当前位置」，
+		// 不为了侧栏短名再开第二个字段。页面里的正文标题（模型目录 / Provider / 运行时配置）不受影响。
+		expect(getPanels().find(p => p.id === "models")?.title).toBe("模型");
 		// 子路由的面板归属来自路由匹配链上的 handle，不再按 pathname 前缀猜。
 		const handles = (matchRoutes(appRoutes, "/models/catalog") ?? []).map(m => ({ handle: m.route.handle }));
 		expect(activePanelOf(handles)?.id).toBe("models");
-		expect(activePanelOf(handles)?.title).toBe("模型控制中心");
+		expect(activePanelOf(handles)?.title).toBe("模型");
 	});
 });
 
