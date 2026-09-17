@@ -2,6 +2,7 @@ import type {
 	AgentCreateDto,
 	AgentCreateInput,
 	AgentInfoDto,
+	AgentPromptSourceDto,
 	AvailableModelsDto,
 	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
@@ -1626,6 +1627,16 @@ export class SessionStore {
 	/** 技能工作台数据（get_skills，代理到 pi-client；sessionId 定向 agent）。 */
 	fetchSkills(sessionId?: string): Promise<SkillsResultDto> {
 		return this.#client.getSkills(sessionId);
+	}
+
+	/**
+	 * 一个 agent 的 prompt 源清单（get_agent_prompt_sources，代理到 pi-client）。
+	 *
+	 * `agentId` 是定向身份（= agentDir），不是展示用的名字：换来换去的时候，谁问就答谁。
+	 * 清单里包含 `exists:false` 的项（缺的文件也在），这是事实，不是读了半份。
+	 */
+	fetchAgentPromptSources(agentId: string): Promise<AgentPromptSourceDto[]> {
+		return this.#client.getAgentPromptSources(agentId);
 	}
 
 	/**

@@ -4,6 +4,7 @@ import type {
 	AgentCreateDto,
 	AgentCreateInput,
 	AgentInfoDto,
+	AgentPromptSourceDto,
 	AvailableModelsDto,
 	BroughtBackChildResultDto,
 	ConfigInheritanceRestoreDto,
@@ -174,6 +175,14 @@ export class PiClientAdapter implements PiClient {
 	#connListeners = new Set<(conn: ConnectionInfoDto) => void>();
 	/** 测试注入的 WebSocket 构造器（recordTranscribe 独立短连接共用）。 */
 	#wsCtor?: PiWebSocketCtor;
+	/**
+	 * serve 在 hello_ack 里上报的 gateway wire 端口（serve 自己解析的那个）。
+	 *
+	 * 浏览器猜不了端口（没有 process.env），猜错就是打到**本机真实运营中的 gateway**（隔离
+	 * 环境里看到的会是别的进程的数据）。所以：要么拿到 serve 报的那个，要么明说拿不到 ——
+	 * `null` 就是「还没上报」，绝不当成 7892。
+	 */
+	#gatewayWirePort: number | null = null;
 
 	constructor(config: ServeConnectionConfig = loadServeConfig(), webSocketCtor?: PiWebSocketCtor) {
 		this.#connection = { connected: false, wsUrl: config.wsUrl, protocolVersion: 1 };
@@ -194,6 +203,8 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	disconnect(): void {
+		// 端口是**当前这条连接**的事实，断开就不知道了（重连后 serve 会再报一次）。
+		this.#gatewayWirePort = null;
 		this.#client.close("client disconnect");
 	}
 
@@ -728,6 +739,24 @@ export class PiClientAdapter implements PiClient {
 		} as never);
 	}
 
+	/**
+	 * agentDir 的 prompt 源清单（get_agent_prompt_sources；逐项报 exists，缺的那项也在清单里）。
+	 *
+	 * 清单是 serve 侧的事实（skeleton/agent-dir-files.ts 的 prompt 面），本层不重排、不过滤：
+	 * 「该建哪个 / 哪个没了」正是这份视图要看的东西。答复里没有 sources 数组 = 协议违约，
+	 * 就抛错 —— 返回空清单会被渲染成「这个 agent 没有任何 prompt 源」，那是一句假话。
+	 */
+	async getAgentPromptSources(agentId: string): Promise<AgentPromptSourceDto[]> {
+		const result = await this.#req<{ sources?: AgentPromptSourceDto[] | null }>({
+			type: "get_agent_prompt_sources",
+			sessionId: agentId,
+		});
+		if (!Array.isArray(result.sources)) {
+			throw new Error("get_agent_prompt_sources 响应里没有 sources 清单");
+		}
+		return result.sources;
+	}
+
 	/** 列出 agent workspace 目录（fs_list；name/type/size，目录在前）。 */
 	async fsList(sessionId: string, path?: string): Promise<{ entries: FsEntryDto[] }> {
 		const result = await this.#req<{ entries?: FsEntryDto[] | null }>({
@@ -1195,13 +1224,20 @@ export class PiClientAdapter implements PiClient {
 	}
 
 	/**
-	 * P2-4：cron/gateway 命令直连 gateway 生产端点（POST /wire，127.0.0.1:7892）。
-	 * 不再经 serve 中转。gateway 未运行（端点不可达）→ fetch 抛错（调用方错误态）。
-	 * 端口写死 7892：浏览器无 process.env；与 gateway #startWireEndpoint 默认一致，
-	 * 当地址调整时随 gateway 侧改动同步（serve 转发侧用 CORNFIELD_GATEWAY_WIRE_PORT 覆盖）。
+	 * gateway 命令直连 gateway 生产端点（POST /wire，host:port = serve 在 hello_ack 里报的
+	 * `gatewayWirePort`）。
+	 *
+	 * **端口由 serve 给**：浏览器侧没有 process.env，以前写死 7892，于是隔离 HOME 跑 e2e 时，
+	 * 前端仍然连着本机真实运营中的 gateway（页面上出现的是别的进程的数据）。未上报（未连接 /
+	 * 握手前）时就地下抛错 —— 快、且说得出原因；不许静默回退到 7892。
+	 * gateway 未运行（端点不可达）→ fetch 抛错（调用方错误态）。
 	 */
 	async #gatewayWire<T>(command: Record<string, unknown>): Promise<T> {
-		const res = await fetch(`http://127.0.0.1:7892/wire`, {
+		const port = this.#gatewayWirePort;
+		if (port === null) {
+			throw new Error("gateway 端口未知：待 serve 上报 gateway 端口（hello_ack.gatewayWirePort）");
+		}
+		const res = await fetch(`http://127.0.0.1:${port}/wire`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(command),
@@ -1255,6 +1291,8 @@ export class PiClientAdapter implements PiClient {
 				this.#applyStatus(event.status, event.attempt);
 				break;
 			case "hello_ack":
+				// serve 上报 gateway wire 端口 → gateway 类命令打那个端口（见 #gatewayWire）。
+				this.#gatewayWirePort = gatewayWirePortOf(event);
 				this.#connection = {
 					...this.#connection,
 					connectionId: event.connectionId,
@@ -1281,6 +1319,8 @@ export class PiClientAdapter implements PiClient {
 	#applyStatus(status: string, attempt: number | undefined): void {
 		const connected = status === "open";
 		const reconnecting = status === "connecting" && (attempt ?? 0) > 0;
+		// 断开就不再知道 serve 报的是哪个端口：清掉，重连后由新的 hello_ack 重新报。
+		if (!connected) this.#gatewayWirePort = null;
 		if (connected === this.#connection.connected && reconnecting === (this.#connection.reconnecting ?? false)) return;
 		this.#connection = { ...this.#connection, connected, reconnecting };
 		this.#notifyConnection();
@@ -1455,6 +1495,19 @@ function conflictDetailOf(err: unknown): string | null {
 	if (!(err instanceof PiServerError)) return null;
 	const detail = typeof err.serverError === "string" ? err.serverError : err.serverError.message;
 	return detail.startsWith(FS_CONFLICT_PREFIX) ? detail : null;
+}
+
+/**
+ * 从 hello_ack 上读 serve 上报的 gateway wire 端口。
+ *
+ * 读的是**帧上的字段**（不是常量）：serve 侧把它解析自 CORNFIELD_GATEWAY_WIRE_PORT，所以
+ * 隔离 HOME 跑出来的那套 serve 报的就是它自己的端口。没报 / 报的不是一个正经端口号 → null，
+ * 调用方据此报「还没上报」，而不是回落 7892。
+ */
+function gatewayWirePortOf(event: PiClientEventKind): number | null {
+	if (event.type !== "hello_ack") return null;
+	const raw: unknown = event.gatewayWirePort;
+	return typeof raw === "number" && Number.isInteger(raw) && raw > 0 && raw <= 65535 ? raw : null;
 }
 
 function prettyArgs(args: Record<string, unknown>): string {

@@ -2,6 +2,7 @@ import type {
 	AgentCreateDto,
 	AgentCreateInput,
 	AgentInfoDto,
+	AgentPromptSourceDto,
 	AgentTodoDeleteDto,
 	AgentTodoDto,
 	AgentTodoListDto,
@@ -57,6 +58,7 @@ import type {
 export type {
 	AgentCreateDto,
 	AgentCreateInput,
+	AgentPromptSourceDto,
 	AgentTodoDeleteDto,
 	AgentTodoDto,
 	AgentTodoListDto,
@@ -697,6 +699,17 @@ export interface PiClient {
 	 * sessionId 定向 agent（缺省 = 本连接焦点 agent）。
 	 */
 	getEvolvedSkills(sessionId?: string): Promise<EvolvedSkillsDto>;
+
+	// ── agentDir 的 prompt 源清单（Agent 详情页 Prompts tab）──
+	/**
+	 * 一个 agent 的 prompt 源清单（get_agent_prompt_sources，只读）。
+	 *
+	 * 清单来自 serve 侧的单一真相（`skeleton/agent-dir-files.ts` 的 prompt 面），**逐项必报**
+	 * `exists`：缺的文件也在这份清单里 —— 这个视图的用处正是看出「该建哪个 / 哪个没了」，
+	 * 调用方不许把它过滤成「存在的那些」。
+	 * `agentId` 是 wire 定向身份（agent 注册名 = agentDir）；未知 agent 抛错，不是空清单。
+	 */
+	getAgentPromptSources(agentId: string): Promise<AgentPromptSourceDto[]>;
 
 	// ── 队列（协议批 B-2）──
 	/** 排队文本（get_state 的 queued 字段；快照只有计数）。 */

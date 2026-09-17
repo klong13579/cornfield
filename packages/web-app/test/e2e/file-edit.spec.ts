@@ -33,6 +33,14 @@ import { expect, test } from "@playwright/test";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const FILE = "hello.txt";
 const BIG_FILE = "big.txt";
+
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
 const BIG_FILE_BYTES = 200 * 1024;
 /** 多字节文本：45000 个汉字 = 135000 字节（超 128KiB），但字符数只有 45000（不到 128K）。 */
 const CJK_FILE = "cjk.txt";
@@ -124,7 +132,15 @@ test.describe("文件编辑闭环（真实 serve + 真实文件系统）", () =>
 				"127.0.0.1",
 				"--no-extensions",
 			],
-			{ cwd: projectDir, env: { ...process.env, HOME: homeDir, PI_NO_TITLE: "1" } },
+			{
+				cwd: projectDir,
+				env: {
+					...process.env,
+					HOME: homeDir,
+					PI_NO_TITLE: "1",
+					CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT,
+				},
+			},
 		);
 		const preview = spawn(
 			"bun",

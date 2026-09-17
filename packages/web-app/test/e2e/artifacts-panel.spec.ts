@@ -45,6 +45,14 @@ import { expect, test } from "@playwright/test";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const SHOTS = "test-results/panel";
 
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
+
 /** 三个 tab 的标签（RightPanel 的三 tab 定义）。 */
 const TAB_FILES = "文件";
 const TAB_ARTIFACTS = "产物";
@@ -104,7 +112,15 @@ function spawnServe(input: { homeDir: string; cwd: string; port: number }): Serv
 			"127.0.0.1",
 			"--no-extensions",
 		],
-		{ cwd: input.cwd, env: { ...process.env, HOME: input.homeDir, PI_NO_TITLE: "1" } },
+		{
+			cwd: input.cwd,
+			env: {
+				...process.env,
+				HOME: input.homeDir,
+				PI_NO_TITLE: "1",
+				CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT,
+			},
+		},
 	);
 	proc.stdout?.on("data", (buf: Buffer) => chunks.push(buf.toString()));
 	proc.stderr?.on("data", (buf: Buffer) => chunks.push(buf.toString()));

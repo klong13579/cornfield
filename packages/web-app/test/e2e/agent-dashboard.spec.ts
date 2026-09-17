@@ -25,8 +25,35 @@ const CLI = path.join(repoRoot, "packages/coding-agent/src/cli.ts");
 const SHOT_DIR = path.join(repoRoot, "packages/web-app/test-results/agent-dashboard");
 const AGENT = "verify-bot";
 
+/**
+ * 隔离：交给 serve 的 gateway wire 端口是个**没人监听**的口。
+ *
+ * 前端不再自己写死 7892（F7：端口由 serve 在 hello_ack 里报），所以隔离 HOME 下的页面只会去
+ * 问这个死端口并快速失败 —— 不会连上本机真实运营中的 gateway（那会让页面上出现别的进程的数据）。
+ */
+const DEAD_GATEWAY_WIRE_PORT = "47831";
+
 /** 7 个 tab 的按钮文案（与 AgentDetailView 的 TABS 一致）。 */
 const TAB_LABELS = ["Skills", "钉钉", "模型配置", "工具开关", "用户画像", "文件", "Prompts"] as const;
+
+/**
+ * agentDir 的 prompt 面（= serve 侧 `skeleton/agent-dir-files.ts` 的 `AGENT_DIR_PROMPT_FILES`，
+ * 顺序就是它的声明顺序）。
+ *
+ * 这里另一份字面量是故意的：探针要拿**独立的**一份清单去核对屏幕上的那一份 —— 从前端 import
+ * 就没法发现「前端少列了/多列了」（上一版就是这样漂移掉的：`.omp/SYSTEM.md` 是旧路径，
+ * `AGENTS-personal.md` / `CONTEXT.md` 全仓库只有它提过）。
+ */
+const PROMPT_PATHS = [
+	"AGENTS.md",
+	"mission.md",
+	"TOOLS.md",
+	"TODO.md",
+	"user.md",
+	"prompt-includes.json",
+	".cornfield/SYSTEM.md",
+	"knowledge/external-workspaces.md",
+] as const;
 
 function freePort(): Promise<number> {
 	return new Promise(resolve => {
@@ -140,7 +167,12 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 		execFileSync("git", ["init", "-q"], { cwd: projectDir });
 		await fsp.mkdir(SHOT_DIR, { recursive: true });
 
-		const env = { ...process.env, HOME: homeDir, PI_NO_TITLE: "1" };
+		const env = {
+			...process.env,
+			HOME: homeDir,
+			PI_NO_TITLE: "1",
+			CORNFIELD_GATEWAY_WIRE_PORT: DEAD_GATEWAY_WIRE_PORT,
+		};
 		// ── 第一部分：真 CLI 建 agent（隔离 HOME）──
 		const initOut = execFileSync("bun", [CLI, "agent", "init", AGENT], {
 			cwd: projectDir,
@@ -178,6 +210,12 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 			if (m.type() === "error") errors.push(m.text());
 		});
 		page.on("pageerror", e => errors.push(`pageerror: ${e.message}`));
+		// F7：浏览器侧对 gateway 的请求到底打哪个端口（下面用两个断言钉住：只打 serve 报的那个，不打 7892）
+		const gatewayWireRequests: string[] = [];
+		page.on("request", req => {
+			const url = req.url();
+			if (url.includes("127.0.0.1") && url.includes("/wire")) gatewayWireRequests.push(url);
+		});
 
 		const observations: TabObservation[] = [];
 		try {
@@ -281,23 +319,61 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 			const modelWriteProbe = { modelOptions, beforeWrite, afterModelWrite, afterThinkingWrite };
 			await page.screenshot({ path: path.join(SHOT_DIR, "模型配置-after-write.png"), fullPage: true });
 
-			// ── 4b. Prompts tab 实际打开几个源（只记录）：.omp/SYSTEM.md 预期不存在（skeleton 写的是 .cornfield/SYSTEM.md）──
+			// ── 4b. Prompts tab：清单来自 serve（agentDir 的 prompt 面单一真相），逐项与磁盘对照 ──
+			//     上一版探针存证的是前端自己硬编码的那份清单（已经漂移成 `.omp/SYSTEM.md` 这种旧路径），
+			//     于是只能把「该文件读不出来」当成现状。现在钉住的是真源的四件事：
+			//       1. 清单就是 agentDir 的 8 项 prompt 面（一项不多、一项不少）；
+			//       2. 每一项的存在性判断与**磁盘**一致（磁盘上有的不许报「不存在」）；
+			//       3. 磁盘上被删掉的那项**仍留在清单里**并如实报「不存在」（缺的文件才是这个视图的用处）；
+			//       4. 正文真的按 path 读了磁盘上那份内容。
+			const removedPromptPath = "knowledge/external-workspaces.md";
+			await fsp.rm(path.join(agentDir, removedPromptPath), { force: true });
 			await page
 				.getByRole("button", { name: /^Prompts/ })
 				.first()
 				.click();
+			await expect(page.locator(`button[data-prompt-path="${removedPromptPath}"]`)).toBeVisible({
+				timeout: 20_000,
+			});
+			const promptRowCount = await page.locator("button[data-prompt-path]").count();
+			expect(promptRowCount, "Prompts 清单应与 agentDir 的 prompt 面逐项对应").toBe(PROMPT_PATHS.length);
 			const promptProbe: Record<string, string> = {};
-			for (const src of ["mission.md", "user.md", ".omp/SYSTEM.md", "prompt-includes.json"]) {
-				await page
-					.getByRole("button", { name: new RegExp(`^${src.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) })
-					.click();
+			for (const rel of PROMPT_PATHS) {
+				const onDisk = await fsp.access(path.join(agentDir, rel)).then(
+					() => true,
+					() => false,
+				);
+				await page.locator(`button[data-prompt-path="${rel}"]`).click();
 				await page.waitForTimeout(300);
 				const body = await page.evaluate(() => (document.querySelector("main") ?? document.body).innerText);
-				promptProbe[src] = /该文件不存在或不可读/.test(body) ? "missing" : "opened";
+				const ui = /该文件不存在/.test(body) ? "missing" : /读取失败/.test(body) ? "read-failed" : "opened";
+				promptProbe[rel] = `${onDisk ? "on-disk" : "absent"}:${ui}`;
+				// 磁盘上有的应读出正文（不是「不存在」也不是「读失败」），没有的应报「不存在」
+				expect(ui, `${rel}（磁盘上${onDisk ? "有" : "没有"}）在页面上报的是「${ui}」`).toBe(
+					onDisk ? "opened" : "missing",
+				);
+			}
+			// 正文确实来自磁盘那份（真源读得到）：拿文件自己的第一行非空行对屏幕上的文字
+			const agentsMdText = await fsp.readFile(path.join(agentDir, "AGENTS.md"), "utf8");
+			const agentsMdProbe =
+				agentsMdText
+					.split("\n")
+					.find(line => line.trim().length > 0)
+					?.trim()
+					.slice(0, 24) ?? "";
+			expect(agentsMdProbe, "AGENTS.md 不该是空文件，否则这条断言退化成空断言").not.toBe("");
+			await page.locator('button[data-prompt-path="AGENTS.md"]').click();
+			await page.waitForTimeout(300);
+			const agentsMdBody = await page.evaluate(() => (document.querySelector("main") ?? document.body).innerText);
+			expect(agentsMdBody, `AGENTS.md 的正文（首行 ${agentsMdProbe}）应出现在右侧`).toContain(agentsMdProbe);
+			// 旧硬编码里那三个不该再出现：`.omp/SYSTEM.md` 是旧路径，另两个全仓库只有它提过
+			for (const stale of [".omp/SYSTEM.md", "AGENTS-personal.md", "CONTEXT.md"]) {
+				expect(await page.locator(`button[data-prompt-path="${stale}"]`).count(), `${stale} 不该再出现`).toBe(0);
 			}
 			await page.screenshot({ path: path.join(SHOT_DIR, "Prompts-sources.png"), fullPage: true });
 
 			// ── 4c. 作用域证据：预置的 <agentDir>/config.yml glob.enabled=false 是否被 UI 读到 ──
+			// 读的是**这个 agent 自己**的合并视图（project 压 global），不是 default 的那份。
 			await page
 				.getByRole("button", { name: /^工具开关/ })
 				.first()
@@ -306,15 +382,42 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 			const switches = await readToolSwitches(page);
 			const glob = switches.find(s => s.label === "glob");
 			expect(glob, "工具开关列表里应有 glob 一行的开关").toBeTruthy();
-			expect(glob?.checked, "glob 的开关应反射 <agentDir>/config.yml 的 glob.enabled=false").toBe("false");
+			expect(
+				glob?.checked,
+				"glob 的开关应反射这个 agent 自己的配置（预置在 <agentDir>/config.yml 的 glob.enabled=false）",
+			).toBe("false");
 
-			// ── 5. 写入作用域证据：切开关 → 落盘到 <agentDir>/config.yml ──
+			// ── 5. 写入落点证据：切开关 → 落盘到**生效的那一层** ──
+			// 这个 agentDir 自带 `<agentDir>/.cornfield/config.yml`（骨架写的），而 F6 起写侧跟随读侧
+			// 优先级：set_config 不带 scope 就写那一层（写进读侧不看的那层就是「写进去、读不到」），
+			// 而 <agentDir>/config.yml 一字节都不动 —— 同一个 agent 的一份配置不再被劈成两半。
+			const perAgentConfigBeforeWrite = await fsp.readFile(perAgentConfig, "utf8");
 			const globIndex = switches.findIndex(s => s.label === "glob");
 			await page.locator('button[role="switch"]').nth(globIndex).click();
 			await expect
-				.poll(async () => fsp.readFile(perAgentConfig, "utf8"), { timeout: 15_000 })
+				.poll(async () => fsp.readFile(projectConfig, "utf8"), { timeout: 15_000 })
 				.toContain("enabled: true");
+			expect(
+				await fsp.readFile(perAgentConfig, "utf8"),
+				"写入不该再落到 <agentDir>/config.yml（那一层被 <agentDir>/.cornfield/config.yml 压着）",
+			).toBe(perAgentConfigBeforeWrite);
 			await page.screenshot({ path: path.join(SHOT_DIR, "tools-after-write.png"), fullPage: true });
+
+			// ── 5b. F7：gateway 请求打在 serve 报的端口上（这里是隔离 HOME 的 CORNFIELD_GATEWAY_WIRE_PORT），
+			//        而不是浏览器自己猜的 7892 —— 猜错就是打到本机真实运营中的 gateway（别的进程的数据）。
+			//        放在最后断言：这条跟前四条是正交的，不该因为它红了就把 tab/清单那几组证据摞下不提。──
+			await expect
+				.poll(
+					() => gatewayWireRequests.some(u => u.startsWith(`http://127.0.0.1:${DEAD_GATEWAY_WIRE_PORT}/wire`)),
+					{
+						timeout: 20_000,
+					},
+				)
+				.toBe(true);
+			expect(
+				gatewayWireRequests.filter(u => u.includes(":7892")),
+				`不该再有请求打到硬编码的 7892：${JSON.stringify(gatewayWireRequests)}`,
+			).toEqual([]);
 
 			// 证据落盘（供人工复核，不参与断言）
 			await fsp.writeFile(
@@ -326,9 +429,13 @@ test.describe("Agent 看板（真实 serve + 真实前端）", () => {
 						agentDir,
 						initOut: initOut.trim(),
 						perAgentConfigAfter: await fsp.readFile(perAgentConfig, "utf8"),
+						perAgentProjectConfigAfter: await fsp.readFile(projectConfig, "utf8"),
 						modelScopeProbe,
 						modelWriteProbe,
 						promptProbe,
+						promptRowCount,
+						promptPaths: PROMPT_PATHS,
+						gatewayWireRequests,
 						observations,
 						allConsoleErrors: errors,
 					},
