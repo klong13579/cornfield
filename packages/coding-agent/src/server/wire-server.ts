@@ -22,7 +22,7 @@ import { YAML } from "bun";
 import { runAgentInit } from "../cli/agent-cli";
 import { withFileLock } from "../config/file-lock";
 import { parseModelString } from "../config/model-resolver";
-import { getDefault, SETTINGS_SCHEMA, type SettingPath, Settings } from "../config/settings";
+import { getDefault, SETTINGS_SCHEMA, type SettingPath } from "../config/settings";
 import {
 	DEFAULT_EDIT_MODE,
 	type EditMode,
@@ -1141,7 +1141,9 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 								group: "自定义命令",
 							});
 						}
-						if (Settings.instance.get("skills.enableSkillCommands")) {
+						// 命令表属于这个会话：开关读会话自己那份 settings。读全局单例会让一个 agent 的
+						// `skills.enableSkillCommands` 决定另一个 agent 的命令表（与配置面同一类缺陷）。
+						if (s.settings.get("skills.enableSkillCommands")) {
 							for (const skill of s.skills) {
 								extra.push({ name: `skill:${skill.name}`, description: skill.description, group: "技能命令" });
 							}
