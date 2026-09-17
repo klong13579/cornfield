@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { ensureNotifyPermission, loadNotifyPrefs, type NotifyPrefs, saveNotifyPrefs } from "../../lib/notifications";
 import type { McpServerDto } from "../../lib/pi-client-api";
-import { DEFAULT_SERVE_CONFIG } from "../../state/pi-client-adapter";
+import { DEFAULT_SERVE_CONFIG, loadServeConfig } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
+import { resolveNextToken } from "./connection-config";
 
 /** Electron 壳 preload bridge（T1 desktop 壳暴露的最小面：window.api.sidecar.setWorkspaceDir + app.getVersion）。
  * 网页直开（无 window.api）时工作目录降级存 localStorage，版本显示「—」，不 crash。
@@ -39,8 +40,9 @@ export function SettingsView(): React.JSX.Element {
 	const store = useSessionStore();
 	const ui = useUiState();
 	const [wsUrl, setWsUrl] = useState(view.wsUrl);
-	const [token, setToken] = useState("");
+	const [token, setToken] = useState(() => loadServeConfig().token);
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [saveSuccess, setSaveSuccess] = useState(false);
 	/** 工作目录（desktop 壳 sidecar 的工作区；默认 ~/workspace）。 */
 	const [workspaceDir, setWorkspaceDir] = useState(() => {
 		const stored = localStorage.getItem("cornfield.desktop.workspace")?.trim();
@@ -75,13 +77,17 @@ export function SettingsView(): React.JSX.Element {
 		};
 	const saveConnection = async (): Promise<void> => {
 		setSaveError(null);
+		setSaveSuccess(false);
 		try {
 			const url = wsUrl.trim() || DEFAULT_SERVE_CONFIG.wsUrl;
 			if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
 				setSaveError("WS URL 需以 ws:// 或 wss:// 开头");
 				return;
 			}
-			await store.reconfigure({ wsUrl: url, token: token.trim() });
+			// 空 token 不覆盖已存凭据（曾用空串清掉 token，断连后失去鉴权）。
+			const nextToken = resolveNextToken(token, loadServeConfig().token);
+			await store.reconfigure({ wsUrl: url, token: nextToken });
+			setSaveSuccess(true);
 		} catch (err) {
 			setSaveError(err instanceof Error ? err.message : String(err));
 		}
@@ -187,6 +193,10 @@ export function SettingsView(): React.JSX.Element {
 		};
 	}, []);
 
+	// 无桌面壳（网页直开无 window.api）时「检查更新」禁用并在正文说明原因。
+	const desktopShellApi = (window as typeof window & { api?: DesktopBridgeApi }).api;
+	const canCheckUpdate = desktopShellApi?.app?.checkUpdate != null;
+
 	return (
 		<div className="px-10 pt-8 pb-12">
 			<div className="mx-auto page-narrow">
@@ -196,10 +206,22 @@ export function SettingsView(): React.JSX.Element {
 					<GroupTitle title="连接" />
 					<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
 						<Row k="状态">
-							<span className="flex items-center gap-1.5 text-[13px] text-success">
-								<span className={`conn-dot ${view.reconnecting ? "reconnecting" : ""}`} />
-								{view.reconnecting ? "重连中（指数退避）" : "connected"}
-							</span>
+							{view.connected ? (
+								<span className="flex items-center gap-1.5 text-[13px] text-success">
+									<span className="conn-dot" />
+									已连接
+								</span>
+							) : view.reconnecting ? (
+								<span className="flex items-center gap-1.5 text-[13px] text-warning">
+									<span className="conn-dot reconnecting" />
+									重连中（指数退避）
+								</span>
+							) : (
+								<span className="flex items-center gap-1.5 text-[13px] text-warning">
+									<span className="conn-dot warn" />
+									已断开
+								</span>
+							)}
 						</Row>
 						<Row k="连接 ID">
 							<span className="font-mono text-[11px] text-ink">{view.connectionId ?? "—"}</span>
@@ -212,16 +234,25 @@ export function SettingsView(): React.JSX.Element {
 						</Row>
 						{(updateState === "idle" || updateState === "checking" || updateState === "uptodate") && (
 							<Row k="更新">
-								<span className="flex items-center gap-2">
-									<button
-										type="button"
-										onClick={() => void checkUpdateNow()}
-										disabled={updateState === "checking"}
-										className="rounded border border-hairline px-2 py-0.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-2 disabled:opacity-50"
-									>
-										{updateState === "checking" ? "检查中…" : "检查更新"}
-									</button>
-									{updateState === "uptodate" && <span className="text-[11px] text-ink-subtle">已是最新</span>}
+								<span className="flex flex-col items-end gap-1">
+									<span className="flex items-center gap-2">
+										<button
+											type="button"
+											onClick={() => void checkUpdateNow()}
+											disabled={updateState === "checking" || !canCheckUpdate}
+											className="rounded border border-hairline px-2 py-0.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-2 disabled:opacity-50"
+										>
+											{updateState === "checking" ? "检查中…" : "检查更新"}
+										</button>
+										{updateState === "uptodate" && (
+											<span className="text-[11px] text-ink-subtle">已是最新</span>
+										)}
+									</span>
+									{!canCheckUpdate && (
+										<span className="text-right text-[11px] text-ink-faint">
+											网页直开无桌面壳，检查更新仅桌面客户端可用
+										</span>
+									)}
 								</span>
 							</Row>
 						)}
@@ -273,7 +304,10 @@ export function SettingsView(): React.JSX.Element {
 								<input
 									id="conn-wsurl"
 									value={wsUrl}
-									onChange={e => setWsUrl(e.target.value)}
+									onChange={e => {
+										setWsUrl(e.target.value);
+										setSaveSuccess(false);
+									}}
 									placeholder={DEFAULT_SERVE_CONFIG.wsUrl}
 									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
@@ -288,7 +322,10 @@ export function SettingsView(): React.JSX.Element {
 									id="conn-token"
 									type="password"
 									value={token}
-									onChange={e => setToken(e.target.value)}
+									onChange={e => {
+										setToken(e.target.value);
+										setSaveSuccess(false);
+									}}
 									placeholder="serve 启动时打印的 token"
 									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
 								/>
@@ -301,6 +338,7 @@ export function SettingsView(): React.JSX.Element {
 								</button>
 							</div>
 							{saveError !== null && <div className="mt-1 text-[11px] text-danger">{saveError}</div>}
+							{saveSuccess && <div className="mt-1 text-[11px] text-success">已保存并重连</div>}
 						</div>
 						<div className="px-4 py-2.5">
 							<label className="block text-[12px] text-ink-subtle" htmlFor="conn-workspace">
@@ -337,14 +375,12 @@ export function SettingsView(): React.JSX.Element {
 					<GroupTitle title="主题" />
 					<div className="divide-y divide-hairline rounded-lg border border-hairline bg-surface">
 						<Row k="颜色主题">
-							<span className="flex gap-1.5">
+							<span className="flex items-center gap-2">
 								<span className="rounded bg-accent px-2.5 py-1 text-[12px] font-medium text-on-accent">
 									亮色（V6）
 								</span>
+								<span className="text-[11px] text-ink-faint">当前唯一主题，深色未实现</span>
 							</span>
-						</Row>
-						<Row k="消息密度">
-							<span className="text-[13px] text-ink">紧凑</span>
 						</Row>
 					</div>
 				</section>
@@ -356,7 +392,6 @@ export function SettingsView(): React.JSX.Element {
 							["Enter", "发送"],
 							["Shift+Enter", "换行"],
 							["Esc", "中止（streaming 时）"],
-							["Cmd+M", "切换模型（TODO）"],
 						].map(([keys, desc]) => (
 							<div key={keys} className="flex items-center justify-between px-4 py-2.5">
 								<span className="text-[13px] text-ink-subtle">{desc}</span>
@@ -460,14 +495,12 @@ export function SettingsView(): React.JSX.Element {
 									/>
 								</label>
 							</div>
-							<button
-								type="button"
-								className="btn btn-secondary btn-sm mt-3"
-								disabled
-								title="P3 gateway 只读状态代理接入"
-							>
+							<button type="button" className="btn btn-secondary btn-sm mt-3" disabled>
 								测试连接（TODO）
 							</button>
+							<p className="mt-2 text-[11px] text-ink-faint">
+								P3 gateway 当前为只读状态代理：连接器配置存于本地 gateway.json（编辑待接入），测试连接尚未接入。
+							</p>
 						</div>
 					</div>
 				</section>
@@ -488,15 +521,11 @@ export function SettingsView(): React.JSX.Element {
 						>
 							新建会话
 						</button>
-						<button
-							type="button"
-							className="btn btn-secondary btn-sm"
-							disabled
-							title="重置逻辑待定（曾为空动作，已禁用防误导）"
-						>
+						<button type="button" className="btn btn-secondary btn-sm" disabled>
 							重置设置
 						</button>
 					</div>
+					<p className="mt-2 text-[11px] text-ink-faint">重置设置暂未实现（曾为空动作，已禁用防误导）。</p>
 				</section>
 			</div>
 		</div>

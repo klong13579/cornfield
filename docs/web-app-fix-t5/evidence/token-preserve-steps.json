@@ -1,0 +1,20 @@
+[
+	{
+		"eval": "localStorage.setItem('cornfield.serve.connection', JSON.stringify({ wsUrl: 'ws://127.0.0.1:7891/ws', token: 't' + 'x'.repeat(31) })); 'seeded 32-char synthetic token'"
+	},
+	{
+		"eval": "JSON.parse(localStorage.getItem('cornfield.serve.connection')).token.length"
+	},
+	{
+		"mark": "点「保存并重连」（Token 输入框保持空）——修复后不应把已存 token 清成空串"
+	},
+	{
+		"click": "@button=保存并重连"
+	},
+	{
+		"wait": 2000
+	},
+	{
+		"eval": "(() => { const c = JSON.parse(localStorage.getItem('cornfield.serve.connection')); return { tokenExists: typeof c.token === 'string' && c.token.length > 0, tokenLength: (c.token ?? '').length }; })()"
+	}
+]
