@@ -1,0 +1,12 @@
+
+──── 断连态（--ws 指向不可达端口）点「重试」前后反馈与失败原因 ────
+step 2 eval ([...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('重试') || (b.textContent||'').includes('连接中'))?.textContent || '').trim() → "重试"
+step 3 shot → home-disconnected-retry-before.png
+step 4 click @button=重试 → ok
+step 5 wait 800ms
+step 6 eval ([...document.querySelectorAll('button')].find(b => (b.textContent||'').includes('重试') || (b.textContent||'').includes('连接中'))?.textContent || '').trim() → "连接中…"
+step 7 shot → home-disconnected-retry-connecting.png
+step 8 wait 5000ms
+step 9 wait 5000ms
+step 10 eval ([...document.querySelectorAll('span')].map(s => (s.textContent||'').trim()).find(t => t && t.includes('超时')) || '') → "连接超时：serve 未响应，请确认它已启动后重试"
+step 11 shot → home-disconnected-retry-timeout.png
