@@ -563,7 +563,7 @@ export class CronService {
 				executeAgentFailed = { reason: stderr };
 				addDiag("agent-run", "error", `Agent RPC failed: ${stderr}`);
 				exitCode = 1;
-				log.warn("executeAgent failed, falling back to omp --print", {
+				log.warn("executeAgent failed, falling back to cornfield --print", {
 					taskName: task.name,
 					error: stderr,
 				});

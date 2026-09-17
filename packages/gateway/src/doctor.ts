@@ -174,7 +174,10 @@ async function checkCredentialsSection(config?: GatewayConfig): Promise<Section>
 	}
 	if (!cred.agentDbFound) {
 		findings.push(
-			warn("~/.cornfield/agent/agent.db not found", "Stored credentials cannot be resolved; run `cornfield login`."),
+			warn(
+				"~/.cornfield/agent/agent.db not found",
+				"Stored credentials cannot be resolved; run `/login` in a cornfield session.",
+			),
 		);
 	}
 	if (cred.providers.length === 0) {

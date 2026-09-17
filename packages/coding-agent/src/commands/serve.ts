@@ -30,7 +30,7 @@ import { SessionStore } from "../session/session-store";
 import { repo } from "../utils/git";
 
 export default class Serve extends Command {
-	static description = "Run omp as a multidevice host: share sessions with TUI/web/pc/mobile over WS";
+	static description = "Run cornfield as a multidevice host: share sessions with TUI/web/pc/mobile over WS";
 
 	static flags = {
 		port: Flags.integer({ description: "WS server port", default: 7891 }),
