@@ -324,6 +324,14 @@ async function handleConfigurationRequest(client: LspClient, message: LspJsonRpc
 		return client.config.settings?.[section] ?? {};
 	});
 	await sendResponse(client, message.id, result, "workspace/configuration");
+	// 记「哪个服务端、问了哪些 section」，取在**应答之后**：这条出现即表示答案已经上线。
+	// 只记 section 名、不记值（settings 里可能有凭据）。用途：像 rust-analyzer 的
+	// cachePriming 那样靠 workspace/configuration 下发的配置，能不能判断「服务端在做出
+	// 决定之前到底问没问到」就靠这条 —— 默认 info 级看不到，`PI_LOG_LEVEL=debug` 打开。
+	logger.debug("LSP configuration request answered", {
+		server: client.name,
+		sections: items.map(item => item.section ?? ""),
+	});
 }
 
 /**

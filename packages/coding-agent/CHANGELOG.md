@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **LSP `workspace/configuration` 的应答落一行通用 debug**（`src/lsp/client.ts`）：`logger.debug("LSP configuration request answered", { server, sections })`，取在 `sendResponse` **之后**（这条出现即表示答案已经上线），**只记 section 名不记值**（`settings` 里可能有凭据）。
+  - 为什么需要它：语言服务通过 `workspace/configuration` **向客户端拉配置**（不是客户端推），所以「服务端在做出某个决定之前到底问没问到配置」在客户端侧是个可观测点 —— 而此前 `client.ts` 里**一条 logger 调用都没有**，这个点取不到。第一个用例是验证 `lsp/defaults.json` 里那条 rust-analyzer `cachePriming.enable=false` 到底有没生效：如果 RA 是在决定要不要预热**之后**才拉配置，那条就是「配置在那儿、从不生效」的死配置，而它连降级都没有，靠读代码看不出来。
+  - 默认 info 级看不到，需 `PI_LOG_LEVEL=debug`。
+
 ### Changed
 
 - **LSP 预热不再默认开启：新设置 `lsp.warmupOnStart`（默认 `false`），服务在首次用到该语言的文件时才起**（`src/config/settings-schema.ts`, `src/sdk.ts`, `src/lsp/index.ts`, `src/modes/components/welcome.ts`, `src/modes/controllers/command-controller.ts`）：此前每个会话启动都对 cwd 上 **全部**探测到的语言服务开一次预热，与这个会话要不要碰那种语言无关。实测代价（2026-09-18，squad 多 worker 场景）：每个 workspace root 各起一份 rust-analyzer（lspmux 按 `(server,args,cwd)` 复用，worktree 之间不复用），而 RA 一打开 workspace 就跑 `cargo check --workspace --all-targets`（本仓 **464 个 crate**）——5 个 root = 5 份 RA ≈ **10.5GB phys_footprint**，构建波峰值 27 个 rustc/clang 进程 / 2.7GB。现默认改为「探测但不启动」：`discoverStartupLspServers()` 仍列出这个 cwd 能用哪些服务（无需进程），状态记为新增的 `on-demand`；真正起进程的路径（写文件/编辑/lsp 工具）本来就存在且未改动，只是不再提前发生。预热仍可用 `lsp.warmupOnStart: true` 打开（打开时行为与之前一致，含 TUI 的 `connecting` → `ready/error` 流转）。
@@ -11,8 +17,10 @@
 - **LSP 空闲超时默认 10 分钟，不再是「关闭」**（`src/lsp/config.ts`, `src/lsp/client.ts`）：`idleTimeoutMs` 此前只在 lsp 配置文件里显式给出时生效，否则客户端永不回收——一个只碰过一个 `.ts` 文件的长会话会把 TypeScript 的整套服务进程（`typescript-language-server` + 2×tsserver + typingsInstaller ≈ 150MB）留到进程结束。现加 `DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000`，无配置时生效；配置文件里的显式值（含 `0` = 关闭）仍然优先。
   - 同批修掉一个会被这个默认值放大的隐患：**空闲检查的 `setInterval` 没有 `unref()`**，而它只在 `setIdleTimeout` 里被清。带 ref 的定时器会把 Bun 的事件循环吊住——默认打开等于给 print mode / 一次性运行的「跑完了不退出」装了一个 10 分钟的引信（同类型事故见 `packages/gateway` 的 `runCommand` 超时定时器）。现在 `unref()`。
 
-- **rust-analyzer 的两个默认值**（`src/lsp/defaults.json`）：① `cachePriming.enable = false`——RA 打开 workspace 时的后台 `cargo check` 预热（实测 464 个 crate 一波）由它控制；② `warmupTimeoutMs: 30000`——此前沿用全局 `WARMUP_TIMEOUT_MS = 2000`，而实测 RA 的 `initialize` 在本仓这类工作区上**必然超过 2 秒**（`~/.cornfield/logs/cornfield.*.log` 里 09-03 / 09-11 / 09-16 / 09-17 都有 `rust-analyzer: initialize timed out after 2000ms`），于是预热被判定失败并 kill 掉客户端，而服务端进程（经 lspmux）仍在跑：成本照付、连接不保留。该字段是 `ServerConfig` 既有的 per-server 覆盖（`markdown` 已在用）。
-  - **未验到**：`cachePriming` 是否在被 RA 读取时**早于**预热动作（cornfield 走 `workspace/configuration` 应答，RA 何时拉取未经实测）——如果晚于，这一项不生效；RA 侧确定生效的入口是工作区里的 `rust-analyzer.toml`（RA 启动时读文件）。
+- **rust-analyzer 的两个默认值**（`src/lsp/defaults.json`）：① `cachePriming.enable = false`——**已删除**（本想在 `settings` 里关掉 RA 打开 workspace 时的后台 `cargo check` 预热；实测证明这条送不到 RA，见下）。**另外：`defaults.json` 是纯 JSON、写不了注释，所以这类“能配但不会生效”的旋钮不要留在里面 —— 留着比没有更贵**（下一个人会照着配，然后花一晚上）；② `warmupTimeoutMs: 30000`——此前沿用全局 `WARMUP_TIMEOUT_MS = 2000`，而实测 RA 的 `initialize` 在本仓这类工作区上**必然超过 2 秒**（`~/.cornfield/logs/cornfield.*.log` 里 09-03 / 09-11 / 09-16 / 09-17 都有 `rust-analyzer: initialize timed out after 2000ms`），于是预热被判定失败并 kill 掉客户端，而服务端进程（经 lspmux）仍在跑：成本照付、连接不保留。该字段是 `ServerConfig` 既有的 per-server 覆盖（`markdown` 已在用）。
+  - **① 实测无效（2026-09-18）**：RA **从不**向 cornfield 请求配置 —— 初始化期不问、`didOpen` 之后也不问、**绕开 lspmux 直连**（`CORNFIELD_DISABLE_LSPMUX=1`）同样不问。同仪器下 `typescript-language-server` 在 `didOpen` 之后**会**请求（section `formattingOptions`）——所以「零命中」是**真否定**，不是仪器没装（仪器自证：同一进程自己打的两行 start / didOpen sent 把那个 pid 的负结果夹在中间）。
+  - **边界**：该否定在**这个 RA 版本 + 这种拉起形态**下成立；RA 换版或换拉起方式（不经 lspmux）要重看。另外 cornfield 侧**从不主动推**配置（唯一发 `workspace/didChangeConfiguration` 的地方是重启辅助函数，且发的是空 settings），这是静态可查的另一半。
+  - **本轮唯一的正结论（可复用）：RA 认配置的通道是「文件」，不是 `settings`** —— 工作区根的 `rust-analyzer.toml` / 全局 RA config（启动时读）。两个后果：① 要压那波 464 crate，落点在文件（机器级那份全局 config 实测有效）；② 以后看到 `lsp.json`/`defaults.json` 里写给 RA 的 `settings`，默认它不会生效。
 
 ## [1.2.5] - 2026-09-16
 
