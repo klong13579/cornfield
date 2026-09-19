@@ -3,11 +3,20 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModelPriceCatalog, getDashboardStats, syncAllSessions } from "@cornfield/stats";
-import { getClientDir, getDefaultAgentHome, isEnoent, logger, pathIsWithin, prompt } from "@cornfield/utils";
+import {
+	formatBytes,
+	getClientDir,
+	getDefaultAgentHome,
+	isEnoent,
+	logger,
+	pathIsWithin,
+	prompt,
+} from "@cornfield/utils";
 import type {
 	AgentMessageDto,
 	ClientFrame,
 	ConfigScope,
+	ImageContentDto,
 	ModelSelectionDto,
 	PermissionRequestPush,
 	ServerFrame,
@@ -78,6 +87,7 @@ import type { ToolSession } from "../tools";
 import { invalidateFsScanAfterWrite } from "../tools/fs-cache-invalidation";
 import type { TodoPhase } from "../tools/todo-write";
 import * as git from "../utils/git";
+import { ensureSupportedImageInput } from "../utils/image-loading";
 import { resolveAgentScope } from "./agent-scope";
 import { dropAgentTodo, listAgentTodos, writeAgentTodo } from "./agent-todos-wire";
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
@@ -1657,14 +1667,16 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			switch (command.type) {
 				// ── Prompting ──
 				case "prompt": {
-					session.prompt(command.message, { images: command.images }).catch((err: Error) => {
+					const message = await materializePromptImages(session, command.message, command.images);
+					session.prompt(message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);
 					});
 					done();
 					break;
 				}
 				case "steer": {
-					await session.steer(command.message, command.images);
+					const message = await materializePromptImages(session, command.message, command.images);
+					await session.steer(message, command.images);
 					// 协议批 B-1：steer 事件回显——转发后向订阅连接推 progress 帧（steer 标记 + 文本摘要），
 					// W2 的 SteerIndicator 以此为数据源（web-app 端归一到 ProgressEventDto steer）。
 					ctx.sendPush({
@@ -1679,7 +1691,10 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					break;
 				}
 				case "follow_up": {
-					await session.followUp(command.message, command.images);
+					await session.followUp(
+						await materializePromptImages(session, command.message, command.images),
+						command.images,
+					);
 					done();
 					break;
 				}
@@ -1690,7 +1705,8 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "abort_and_prompt": {
 					await session.abort();
-					session.prompt(command.message, { images: command.images }).catch((err: Error) => {
+					const message = await materializePromptImages(session, command.message, command.images);
+					session.prompt(message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);
 					});
 					done();
@@ -2276,7 +2292,11 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 						done({ cancelled: true });
 						return;
 					}
-					const message = command.message ?? result.editorText ?? "";
+					const message = await materializePromptImages(
+						session,
+						command.message ?? result.editorText ?? "",
+						command.images,
+					);
 					session.prompt(message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);
 					});
@@ -3424,6 +3444,69 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
 	".ico": "image/x-icon",
 	".avif": "image/avif",
 };
+
+/**
+ * MIME → 扩展名（`IMAGE_MIME_BY_EXT` 的反向派生，不再维护第二份清单）。
+ * 扩展名只为人眼和模型服务：真正的格式由 `loadImageInput` 按内容字节判定，不靠文件名。
+ */
+const IMAGE_EXT_BY_MIME: Record<string, string> = Object.fromEntries(
+	Object.entries(IMAGE_MIME_BY_EXT).map(([ext, mime]) => [mime, ext.slice(1)]),
+);
+
+/** 上传图在会话 artifacts 目录下的落点（`<artifactsDir>/uploads/`）。 */
+function uploadImagePath(artifactsDir: string, bytes: Buffer, mimeType: string): string {
+	const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, ""); // YYYYMMDDHHMMSS (UTC)
+	const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex").slice(0, 8);
+	const ext = IMAGE_EXT_BY_MIME[mimeType.toLowerCase()] ?? "bin";
+	return path.join(artifactsDir, "uploads", `uploaded-${stamp}-${digest}.${ext}`);
+}
+
+/**
+ * 把 `prompt.images` 的每张图落盘，并把路径追加进消息文本。
+ *
+ * 为什么必须有这一步：`prompt.images` 只是 inline base64 —— 它能不能到模型取决于 provider
+ * 有没有透传（实测 `narwal-plan/deepseek-v4-flash` 没透传，模型回的是「没收到图」）；而
+ * `inspect_image` / `read` 只认磁盘路径（`tools/inspect-image.ts`）。图不落盘、消息里没有
+ * 路径，agent 就永远读不到用户贴的图。落盘之后，模型既能自己看，也能走 `inspect_image`。
+ *
+ * 失败不静默：落盘不成、格式转不了、会话没有 artifacts 目录，都写进文本告诉模型这张图它
+ * 读不到 —— 不然它会对着一个不存在的附件硬编。
+ */
+async function materializePromptImages(
+	session: AgentSession,
+	message: string,
+	images: ImageContentDto[] | undefined,
+): Promise<string> {
+	if (!images || images.length === 0) return message;
+	const artifactsDir = session.sessionManager.getArtifactsDir();
+	const lines = await Promise.all(images.map(image => describePromptImage(image, artifactsDir)));
+	return [message, ...lines].filter(Boolean).join("\n\n");
+}
+
+/** 单张图的落盘结果，渲染成追加给模型的那一行。 */
+async function describePromptImage(image: ImageContentDto, artifactsDir: string | null): Promise<string> {
+	const unreadable = (detail: string): string =>
+		`[image: ${detail} (${image.mimeType}) — inspect_image cannot read this attachment]`;
+	if (!artifactsDir) return unreadable("not saved: session has no artifacts directory");
+	try {
+		// 客户端发的是裸 base64；容忍带 `data:` 前缀的写法，别把前缀当成图片数据存下来。
+		const commaAt = image.data.indexOf(",");
+		const raw = image.data.startsWith("data:") && commaAt !== -1 ? image.data.slice(commaAt + 1) : image.data;
+		// 归一成 inspect_image 认得的格式（BMP/SVG 等一律转 PNG）—— 图能不能被读懂就差在这一步。
+		const normalized = await ensureSupportedImageInput({ type: "image", data: raw, mimeType: image.mimeType });
+		if (!normalized) return unreadable("unsupported format");
+		const bytes = Buffer.from(normalized.data, "base64");
+		const filePath = uploadImagePath(artifactsDir, bytes, normalized.mimeType);
+		await Bun.write(filePath, bytes);
+		return `[image: ${filePath} (${normalized.mimeType}, ${formatBytes(bytes.byteLength)})]`;
+	} catch (err) {
+		logger.warn("uploaded image could not be materialized", {
+			error: err instanceof Error ? err.message : String(err),
+			mimeType: image.mimeType,
+		});
+		return unreadable("could not be prepared");
+	}
+}
 
 /** /preview 静态预览 Content-Type（html/md 走文本，图片复用 IMAGE_MIME_BY_EXT）。 */
 const PREVIEW_MIME_BY_EXT: Record<string, string> = {

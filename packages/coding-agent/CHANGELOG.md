@@ -10,6 +10,10 @@
 
 ### Changed
 
+- **附件图片落盘：`prompt.images` 之外给 agent 一个可读的路径**（`src/server/wire-server.ts`, `test/wire-server-prompt-images.integration.test.ts`）：带图的消息此前只把图片当 inline base64 发出去——它能不能到模型取决于 provider 有没有透传（实测某 provider 没透传，模型回的是「没收到图，给我个本地路径」，见 `docs/web-app-agents-t3/after.dom.txt`），而 `inspect_image` / `read` 只认磁盘路径（`tools/inspect-image.ts` 的 `loadImageInput({ path })`）。现在 5 个带 `images` 的命令（`prompt` / `steer` / `follow_up` / `abort_and_prompt` / `retry_from`）统一经过一个 helper：每张图先归一成 `inspect_image` 认得的格式（BMP/SVG 等转 PNG），写进会话 artifacts 目录的 `uploads/uploaded-<UTC 秒>-<内容 hash 前 8 位>.<ext>`，再把 `[image: <绝对路径> (mime, 字节)]` 追加进消息文本（与 gateway 的 `[file: <路径> (mime, 大小)]` 同一形态）。inline base64 保留，视觉模型那条路不回退。
+  - **落盘失败不静默**：转不了 / 存不下 / 会话没有 artifacts 目录，都在消息里写明「inspect_image cannot read this attachment」——不然模型会对着一个不存在的附件硬编。
+  - 修在 wire-server 而不是 `AgentSession`：`SessionManager` 是整个执行图的枢纽（impact 报 457 个依赖 / 9 条执行流），而落点只需要它已经公开的 `getArtifactsDir()`。TUI / gateway 的粘贴路径按本轮范围**未改**（TUI 粘贴的图仍只能靠会话模型自己看，`inspect_image` 拿不到它）。
+
 - **LSP 预热不再默认开启：新设置 `lsp.warmupOnStart`（默认 `false`），服务在首次用到该语言的文件时才起**（`src/config/settings-schema.ts`, `src/sdk.ts`, `src/lsp/index.ts`, `src/modes/components/welcome.ts`, `src/modes/controllers/command-controller.ts`）：此前每个会话启动都对 cwd 上 **全部**探测到的语言服务开一次预热，与这个会话要不要碰那种语言无关。实测代价（2026-09-18，squad 多 worker 场景）：每个 workspace root 各起一份 rust-analyzer（lspmux 按 `(server,args,cwd)` 复用，worktree 之间不复用），而 RA 一打开 workspace 就跑 `cargo check --workspace --all-targets`（本仓 **464 个 crate**）——5 个 root = 5 份 RA ≈ **10.5GB phys_footprint**，构建波峰值 27 个 rustc/clang 进程 / 2.7GB。现默认改为「探测但不启动」：`discoverStartupLspServers()` 仍列出这个 cwd 能用哪些服务（无需进程），状态记为新增的 `on-demand`；真正起进程的路径（写文件/编辑/lsp 工具）本来就存在且未改动，只是不再提前发生。预热仍可用 `lsp.warmupOnStart: true` 打开（打开时行为与之前一致，含 TUI 的 `connecting` → `ready/error` 流转）。
   - 两处配套：**预热不再受 `lsp.diagnosticsOnWrite` 约束**（两个开关各管各的：前者管启动时机，后者管写后诊断），且 `lsp.enabled: false` 时依旧不做任何探测。存活面板与 `/status` 认识 `on-demand`：`welcome.ts` 用中性圆点（不再把「没启动」画成待启动转圈或错误叉），`command-controller.ts` 用 muted 色而不是 error。
   - **未验到的部分**：真集结（herdr + 真 worker）那段编排没跑；已验证的是单会话层面（新会话启动后 LSP 面板显示 `on-demand`、无任何语言服务子进程）。

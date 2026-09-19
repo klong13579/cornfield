@@ -1,6 +1,7 @@
 import { Files, Maximize2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { fmtSize } from "../../lib/format-size";
 import type { ArtifactDto } from "../../lib/pi-client-api";
 import { Markdown } from "../../render/Markdown";
 import { useSessionStore } from "../../state/session-store";
@@ -62,12 +63,6 @@ function fmtTime(ts: number): string {
 		hour: "2-digit",
 		minute: "2-digit",
 	});
-}
-
-function fmtSize(n: number): string {
-	if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}M`;
-	if (n >= 1024) return `${(n / 1024).toFixed(0)}K`;
-	return String(n);
 }
 
 /**

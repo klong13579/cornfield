@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fmtSize } from "../../lib/format-size";
 import { getFileWorkflow } from "../../state/file-workflow-store";
 import { useSessionStore } from "../../state/session-store";
 import { FilePreviewPane } from "./FilePreviewPane";
@@ -31,12 +32,6 @@ interface FsTreeNode {
 	path: string;
 	children?: FsTreeNode[];
 	loaded?: boolean;
-}
-
-function fmtSize(n: number): string {
-	if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}M`;
-	if (n >= 1024) return `${(n / 1024).toFixed(0)}K`;
-	return String(n);
 }
 
 /** 图片预览（二进制，不进编辑器：它不是可编辑文本）。 */

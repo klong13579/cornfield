@@ -6,6 +6,7 @@ import { ContextRing } from "../../components/ContextRing";
 import { ProviderLogo } from "../../components/ProviderLogo";
 import type { ContextItem } from "../../lib/context-items";
 import { composePrompt, hasFileVersion } from "../../lib/context-items";
+import { fmtSize } from "../../lib/format-size";
 import type { GatewayStatusDto } from "../../lib/pi-client-api";
 import { SCOPE_LABELS } from "../../lib/scope-display";
 import { getFileWorkflow, useFileWorkflow } from "../../state/file-workflow-store";
@@ -218,6 +219,59 @@ export function ContextItemChip({ item, onRemove }: { item: ContextItem; onRemov
 	);
 }
 
+/** 附件图的 data URL —— `attachments` 里存的已经是裸 base64，不必再读一次剪贴板/文件。 */
+export function attachmentDataUrl(image: ImageContentDto): string {
+	return `data:${image.mimeType};base64,${image.data}`;
+}
+
+/**
+ * base64 的**精确**字节数（按 3/4 折算后减掉末尾 padding）。
+ * 约数写进 title 会被当成事实读，所以不猜。
+ */
+export function attachmentBytes(image: ImageContentDto): number {
+	if (image.data.length === 0) return 0;
+	const padding = image.data.endsWith("==") ? 2 : image.data.endsWith("=") ? 1 : 0;
+	return Math.max(0, Math.floor((image.data.length * 3) / 4) - padding);
+}
+
+/**
+ * 附件缩略图（输入区）。
+ *
+ * 发出前必须看得见贴进来的是哪张图：此前只有回形针按钮上一个数字角标，用户既认不出内容、
+ * 也撤不掉贴错的那一张。缩略图就是这条凭据，48px 够用——看图不在这里（右栏产物/文件预览才是）。
+ */
+export function AttachmentThumb({
+	image,
+	index,
+	onRemove,
+}: {
+	image: ImageContentDto;
+	/** 展示序号（从 0 起）：title 与移除按钮靠它指认是哪一张。 */
+	index: number;
+	onRemove: () => void;
+}): React.JSX.Element {
+	return (
+		<div
+			className="relative shrink-0"
+			title={`附件 ${index + 1} · ${image.mimeType} · ${fmtSize(attachmentBytes(image))}`}
+		>
+			<img
+				src={attachmentDataUrl(image)}
+				alt={`附件 ${index + 1}（${image.mimeType}）`}
+				className="block h-12 w-12 rounded-md border border-hairline object-cover"
+			/>
+			<button
+				type="button"
+				className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-hairline bg-surface text-[10px] leading-none text-ink-subtle transition-colors hover:border-danger hover:text-danger"
+				title={`移除附件 ${index + 1}`}
+				onClick={onRemove}
+			>
+				×
+			</button>
+		</div>
+	);
+}
+
 function statusDot(s: string): string {
 	if (s === "online") return "bg-success";
 	if (s === "busy") return "bg-warning animate-pulse";
@@ -288,7 +342,8 @@ export function AgentMenuItem({
 /**
  * 工作台输入区（assistant-ui Composer 就绪前的原生实现，两行：textarea + 工具栏）。
  * - Enter 发送 / Shift+Enter 换行 / Esc 中止（streaming 时）；中文输入法组合态按 Enter 不发送
- * - 草稿自动保留（localStorage）；粘贴图片转为附件随 prompt 发出（纯文本粘贴不被吞）
+ * - 草稿自动保留（localStorage）；粘贴/选中图片转为附件随 prompt 发出，发出前在输入区显示缩略图
+ *   （可单张移除；纯文本粘贴不被吞）
  * - 工具栏：Agent 选择器（按工作区分组 + CODING/WORKER + 钉钉角标）、附件、语音、
  *   模型/thinking 下拉（模型列表可过滤、当前 provider 置顶）、发送/停止
  * - autoFocusDraft 仅约定聚焦（?q= 直达种子文本由 WorkspaceView 写入草稿 store）
@@ -318,18 +373,26 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 	// 上下文条目（文件/选区）挂在文件工作流上并与会话同归属：换会话即清空（引用会失效）
 	const contextItems = useFileWorkflow().contextItems;
 	const [attachments, setAttachments] = useState<ImageContentDto[]>([]);
+	/** 附件读取失败的原因（读失败静默吞掉时，角标不涨等于什么都没发生）。 */
+	const [attachError, setAttachError] = useState<string | null>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
 
 	// 附件：文件选择 / 粘贴图片 → base64 读入 → prompt.images 通道（真命令已支持）
 	const readImageFiles = (files: File[]) => {
+		setAttachError(null);
 		for (const file of files) {
+			const label = file.name || file.type || "图片";
 			const reader = new FileReader();
 			reader.onload = () => {
 				const data = String(reader.result ?? "").split(",")[1] ?? "";
-				if (data) {
-					setAttachments(prev => [...prev, { type: "image", data, mimeType: file.type || "image/png" }]);
+				if (!data) {
+					setAttachError(`${label} 读出来是空的，没有加进附件`);
+					return;
 				}
+				setAttachments(prev => [...prev, { type: "image", data, mimeType: file.type || "image/png" }]);
 			};
+			// 读失败必须说出来：不报的话用户只看到附件没增加，会以为是自己没贴上去。
+			reader.onerror = () => setAttachError(`${label} 读取失败，没有加进附件`);
 			reader.readAsDataURL(file);
 		}
 	};
@@ -482,6 +545,7 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 			return;
 		}
 		setBlockedMsg(null);
+		setAttachError(null);
 		getUiStore().setDraft("");
 		// 第二个入参是 wire 的定向身份（`prompt.sessionId`）—— 见 promptTargetOf：会话身份，不是 agentId。
 		store.prompt(text, promptTargetOf(view), attachments.length > 0 ? attachments : undefined);
@@ -563,6 +627,24 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 								/>
 							))}
 							<button type="button" className="link" onClick={() => getFileWorkflow().clearContextItems()}>
+								清空
+							</button>
+						</div>
+					)}
+					{attachments.length > 0 && (
+						<div className="flex flex-wrap items-center gap-2 border-b border-hairline px-3 py-2">
+							<span className="text-[10px] font-semibold tracking-[0.08em] text-ink-faint uppercase">附件</span>
+							{attachments.map((image, index) => (
+								<AttachmentThumb
+									// 附件是位置化的（wire 的 ImageContentDto 只有 data/mimeType，没有 id），
+									// index 当 key 在这里是安全的：子组件无状态，整份视图都由 props 推导。
+									key={index}
+									image={image}
+									index={index}
+									onRemove={() => setAttachments(prev => prev.filter((_, i) => i !== index))}
+								/>
+							))}
+							<button type="button" className="link" onClick={() => setAttachments([])}>
 								清空
 							</button>
 						</div>
@@ -665,11 +747,6 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 						>
 							<Paperclip size={15} strokeWidth={1.5} />
 							<span className="hidden sm:inline">附件</span>
-							{attachments.length > 0 && (
-								<span className="rounded bg-accent px-1 font-mono text-[10px] text-on-accent">
-									{attachments.length}
-								</span>
-							)}
 						</button>
 						<button type="button" className="cbtn" title="语音输入" onClick={() => navigate("/voice")}>
 							<Mic size={15} strokeWidth={1.5} />
@@ -771,6 +848,12 @@ export function ComposerBar({ autoFocusDraft = "" }: { autoFocusDraft?: string }
 					<div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11px] text-danger">
 						<span className="shrink-0 font-medium">无法发送：</span>
 						<span className="min-w-0">{blockedMsg}</span>
+					</div>
+				)}
+				{attachError && (
+					<div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger/5 px-2.5 py-1.5 text-[11px] text-danger">
+						<span className="shrink-0 font-medium">附件没读进来：</span>
+						<span className="min-w-0">{attachError}</span>
 					</div>
 				)}
 				<div className="mt-1.5 flex gap-3.5 text-[11px] text-ink-faint">
