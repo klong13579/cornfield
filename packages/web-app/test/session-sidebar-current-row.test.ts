@@ -57,12 +57,13 @@ describe("sessionRowAction：哪种行做哪件事", () => {
 });
 
 describe("SessionRow 文案：回放态那一行要看得出来能点回去", () => {
-	function render(row: SidebarRow): string {
+	function render(row: SidebarRow, projectLabel?: string): string {
 		return renderToStaticMarkup(
 			createElement(SessionRow, {
 				row,
 				pinned: false,
 				active: false,
+				...(projectLabel !== undefined ? { projectLabel } : {}),
 				onTogglePin: () => undefined,
 				onClick: sessionRowAction(row, {
 					openHistorySession: () => undefined,
@@ -90,7 +91,23 @@ describe("SessionRow 文案：回放态那一行要看得出来能点回去", ()
 	it("历史会话：照旧说「打开会话」，不掺回放字样", () => {
 		const html = render(HISTORY_ROW);
 		expect(html).toContain("打开会话");
-		expect(html).toContain("hr");
 		expect(html).not.toContain("回放中");
+	});
+
+	it("历史行的副标题不写 Agent 名 —— 它就是那一条所在组的组头，行里再写一遍是同一个事实说两次", () => {
+		const html = render(HISTORY_ROW);
+		// 副标题就这两个字：条数。agent（hr）没有第二个入口
+		expect(html).toContain('class="block truncate text-[11px] text-ink-faint">3 条</span>');
+	});
+
+	it("记过归属：副标题是「Project 名字 · N 条」（归属从分组轴退到行上，不是丢了）", () => {
+		const html = render(HISTORY_ROW, "米克原子 DTC");
+		expect(html).toContain("米克原子 DTC · 3 条");
+	});
+
+	it("没记过归属：只写条数，不拿「未记录归属」这种占位冒充一个 Project", () => {
+		const html = render(HISTORY_ROW);
+		expect(html).toContain("3 条");
+		expect(html).not.toContain("未记录");
 	});
 });

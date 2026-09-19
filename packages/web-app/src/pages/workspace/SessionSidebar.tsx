@@ -10,26 +10,24 @@ import { SessionTree } from "./SessionTree";
 /**
  * 会话侧栏（S3，FR-1 会话工作区）—— 300px 会话列表：
  * - 新会话按钮 + 搜索过滤
- * - 双源 tab：WebUI 会话（source=agent，按 agent 分组）/ CLI 会话（source=cli，按会话记下的归属分组）
- * - 会话按 agent 分组（session.agent → agent 显示名映射）
+ * - 会话按 Agent 分组（session.agent → agent 显示名映射）
  * - pin 收藏（localStorage 本地持久化，组内置顶）
  *
- * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引，
- * 按 source 字段分源）。无 mock——任一源无数据不伪造，显示空态。
+ * 分组只有一根轴：**谁在服务这条会话**。曾经按 `source`（cli / agent）分成两个 tab，而 serve 侧的
+ * source 是按 agentId 判的（default 恒等于 cli，`wire-server.ts` 的 `list_sessions`）——于是
+ * default 这个正常注册的 Agent 在「WebUI 会话」tab 里一个组头都没有，它的会话全躺在另一个 tab 里。
+ * 来源是**会话的事实**，不是组织列表的方式：读它的消费者（用量页的「来源」行）继续读它，
+ * 侧栏不再拿它分类。会话自己记下的归属（`projectId`）同理不是分组轴，它落在行副标题上。
+ *
+ * 数据源：当前会话（view.sessionId/sessionName）+ 历史会话（serve list_sessions 真索引）。
+ * 无 mock——任一源无数据不伪造，显示空态。
  *
  * 两个「新会话」钮（折叠薄栏与展开态）是**同一个动作**，且与顶栏表单走**同一条创建路径**
  * （`SessionStore.newSession`：先等目标 Agent 切过去，再带显式目标建）。它们与表单的唯一区别是
  * 不选项：直建就是「当前焦点 Agent 上建一个」——所以它们传空入参，由那条路径自己解析焦点。
  */
 
-type SourceId = "webui" | "cli";
-
 const PINNED_KEY = "cornfield.session-sidebar.pinned";
-
-const SOURCES: [SourceId, string][] = [
-	["webui", "WebUI 会话"],
-	["cli", "CLI 会话"],
-];
 
 function loadPinned(): Set<string> {
 	try {
@@ -81,45 +79,8 @@ export function sessionRowAction(
 	return undefined;
 }
 
-/**
- * 会话列表的分组键。两个轴各自是自己的东西，不合成一个字符串再拆：
- *   - `cli` 源按**会话自己记下的**归属（`list_sessions[].projectId`）；
- *   - `webui` 源按服务它的 Agent（那是另一个问题：谁干的）；
- *   - 当前会话（不落 list_sessions 的那一行）单独置顶。
- *
- * CLI 源曾经拿 sessionFile 里的 encoded-cwd 当分组键 —— 那是**按路径猜**归属：同一个目录下的
- * 会话被合成一组，而它们各自声明过的 Project 可能不同（也可能根本没声明过）。权威在会话记录里，
- * 不在文件路径里。没记过归属的落到一个**明说出来的**桶里，不拿目录名冒充一个 Project。
- */
-type SessionGroupKey =
-	| { kind: "current" }
-	| { kind: "unrecorded" }
-	| { kind: "project"; projectId: string }
-	| { kind: "agent"; agent: string };
-
-function groupKeyOf(row: SidebarRow, source: SourceId): SessionGroupKey {
-	if (isCurrent(row)) return { kind: "current" };
-	if (source === "cli") {
-		const projectId = "projectId" in row ? row.projectId : undefined;
-		return projectId === undefined ? { kind: "unrecorded" } : { kind: "project", projectId };
-	}
-	return { kind: "agent", agent: row.agent };
-}
-
-/** Map 用的稳定键：不同轴上的同一个 id 不会撞（`project:x` ≠ `agent:x`）。 */
-function groupIdOf(key: SessionGroupKey): string {
-	switch (key.kind) {
-		case "project":
-			return `project:${key.projectId}`;
-		case "agent":
-			return `agent:${key.agent}`;
-		default:
-			return key.kind;
-	}
-}
-
 export interface SessionGroup {
-	/** Map 用的稳定键（`project:x` / `agent:x` / `current` / `unrecorded`）。 */
+	/** Map 用的稳定键（`agent:<id>` / `current`）。 */
 	key: string;
 	/** 组头的人读标签。 */
 	label: string;
@@ -128,57 +89,39 @@ export interface SessionGroup {
 
 /**
  * 分组（纯函数：无 React、无 store）：行的顺序就是组的顺序 —— Map 保留插入顺序，
- * 而行已经按「pin 置顶 → startedAt 倒序」排过，分组不该把它重排一遍。
+ * 而行已经按「pin 置顶 → startedAt 倒序」排过，分组不该把它重排一遍。于是组头跟着组内最新
+ * 那一行走：最近活跃的 Agent 排在前面。
+ *
+ * 一根轴：谁在服务这条会话（`session.agent` → 显示名）。当前会话（不落 list_sessions 的那一行）
+ * 单独置顶，不并进任何 Agent 组。
  */
 export function groupSessions(
 	rows: readonly SidebarRow[],
 	options: {
-		source: SourceId;
-		/** Agent id/name → 显示名（webui 源的组头用）。 */
+		/** Agent id/name → 显示名。 */
 		agentLabel: (agent: string) => string;
-		/** 已声明的 Project（只用于把 projectId 显示成名字）；缺省 = 注册表未读到。 */
-		projects?: readonly { projectId: string; name: string }[];
 	},
 ): SessionGroup[] {
-	/**
-	 * 分组键 → 人读标签。
-	 *
-	 * Project 名字取自注册表；注册表没读到 / 里边没有这个 id 就显示 id —— id 是会话里记下的事实，
-	 * 名字只是好看。没记过归属的聚到「未记录归属」，不拿目录名冒充一个 Project。
-	 */
-	const labelOf = (key: SessionGroupKey): string => {
-		switch (key.kind) {
-			case "current":
-				return "当前会话";
-			case "unrecorded":
-				return "未记录归属";
-			case "project":
-				return options.projects?.find(project => project.projectId === key.projectId)?.name ?? key.projectId;
-			case "agent":
-				return options.agentLabel(key.agent);
-		}
-	};
 	const map = new Map<string, SessionGroup>();
 	for (const row of rows) {
-		const key = groupKeyOf(row, options.source);
-		const id = groupIdOf(key);
-		const bucket = map.get(id);
-		if (bucket) bucket.rows.push(row);
-		else map.set(id, { key: id, label: labelOf(key), rows: [row] });
+		const key = isCurrent(row) ? "current" : `agent:${row.agent}`;
+		const bucket = map.get(key);
+		if (bucket) {
+			bucket.rows.push(row);
+			continue;
+		}
+		map.set(key, { key, label: isCurrent(row) ? "当前会话" : options.agentLabel(row.agent), rows: [row] });
 	}
 	return [...map.values()];
 }
 
-export function SessionSidebar({
-	elementRef,
-}: { elementRef?: React.Ref<HTMLElement> } = {}): React.JSX.Element {
+export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElement> } = {}): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const ui = useUiState();
 	const isLg = useMediaQuery("(min-width: 1024px)");
 	// 折叠只在桌面静态形态生效；移动抽屉（<lg）恒为完整 300px 形态。
 	const collapsed = ui.sessionSidebarCollapsed && isLg;
-	const [source, setSource] = useState<SourceId>("webui");
 	const [treeView, setTreeView] = useState(false);
 	const [query, setQuery] = useState("");
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
@@ -207,7 +150,18 @@ export function SessionSidebar({
 		});
 	};
 
-	// agent → 显示名映射（历史会话按 agent 分组；id 与 name 双键兼容）
+	// 行副标题的归属：会话自己记下的 projectId（没记过 = 不显示，不拿目录名冒充一个 Project）。
+	// 名字取自 Project 注册表；注册表没读到 / 里没有这个 id 就显示 id —— id 是事实，名字只是好看。
+	const projectNameOf = useMemo(() => {
+		const byId = new Map((view.projects ?? []).map(p => [p.projectId, p.name]));
+		return (row: SessionRecordSummary): string | undefined => {
+			const id = row.projectId;
+			if (id === undefined) return undefined;
+			return byId.get(id) ?? id;
+		};
+	}, [view.projects]);
+
+	// agent → 显示名映射（组头用；id 与 name 双键兼容）
 	const agentLabel = useMemo(() => {
 		const byId = new Map(view.agents.map(a => [a.id, a.name]));
 		const byName = new Map(view.agents.map(a => [a.name, a.name]));
@@ -215,23 +169,19 @@ export function SessionSidebar({
 	}, [view.agents]);
 
 	const rows = useMemo(() => {
-		// 当前会话（attached）只在 WebUI 源展示
-		const current: SidebarRow[] =
-			source === "webui" && view.sessionId
-				? [
-						{
-							id: view.sessionId,
-							name: view.sessionName ?? "当前会话",
-							agent: "attached",
-							current: true,
-							...(view.historySessionFile !== undefined ? { playback: true } : {}),
-						},
-					]
-				: [];
-		// 按 list_sessions source 字段分源：webui = agent 源；cli = default agent 的本地交互会话
-		const history = sessions.filter(
-			s => s.id !== view.sessionId && (source === "cli" ? s.source === "cli" : s.source === "agent"),
-		);
+		// 当前会话（attached）不落 list_sessions，单独置顶
+		const current: SidebarRow[] = view.sessionId
+			? [
+					{
+						id: view.sessionId,
+						name: view.sessionName ?? "当前会话",
+						agent: "attached",
+						current: true,
+						...(view.historySessionFile !== undefined ? { playback: true } : {}),
+					},
+				]
+			: [];
+		const history = sessions.filter(s => s.id !== view.sessionId);
 		const q = query.trim().toLowerCase();
 		const filtered = q ? history.filter(s => s.name.toLowerCase().includes(q)) : history;
 		// pin 置顶：pinned 先，其余按 startedAt desc
@@ -242,13 +192,10 @@ export function SessionSidebar({
 			return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
 		});
 		return [...current.filter(c => !q || c.name.toLowerCase().includes(q)), ...sorted];
-	}, [source, sessions, view.sessionId, view.sessionName, view.historySessionFile, query, pinned]);
+	}, [sessions, view.sessionId, view.sessionName, view.historySessionFile, query, pinned]);
 
-	// 按 agent 分组（webui 源：谁干的）；CLI 源按会话**记下的归属**分组（不再猜路径）
-	const groups = useMemo(
-		() => groupSessions(rows, { source, agentLabel, ...(view.projects ? { projects: view.projects } : {}) }),
-		[rows, agentLabel, source, view.projects],
-	);
+	// 按 Agent 分组（谁在服务这条会话）；组序跟着组内最新一行走
+	const groups = useMemo(() => groupSessions(rows, { agentLabel }), [rows, agentLabel]);
 
 	return (
 		<aside
@@ -329,20 +276,6 @@ export function SessionSidebar({
 								</div>
 							</div>
 
-							{/* 双源 tab */}
-							<div className="flex gap-1 px-3 pb-2">
-								{SOURCES.map(([id, label]) => (
-									<button
-										key={id}
-										type="button"
-										className={`rounded-full border px-3 py-1 text-[11.5px] transition-colors ${source === id ? "border-hairline-strong bg-accent-dim text-ink font-medium" : "border-hairline text-ink-subtle hover:text-ink"}`}
-										onClick={() => setSource(id)}
-									>
-										{label}
-									</button>
-								))}
-							</div>
-
 							{view.historyLoading && (
 								<div className="mx-3 mb-1 rounded-md bg-surface-2 px-3 py-2 text-[12px] text-ink-subtle">
 									加载会话记录中…
@@ -357,11 +290,7 @@ export function SessionSidebar({
 							<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
 								{groups.length === 0 && (
 									<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
-										{view.connected
-											? source === "cli"
-												? "暂无 CLI 会话——本地交互会话索引（list_sessions source=cli）"
-												: "暂无历史会话"
-											: "未连接——会话索引不可用"}
+										{view.connected ? "暂无历史会话" : "未连接——会话索引不可用"}
 									</div>
 								)}
 								{groups.map(g => (
@@ -377,6 +306,7 @@ export function SessionSidebar({
 												row={row}
 												pinned={pinned.has(row.id)}
 												active={!isCurrent(row) && row.id === view.sessionId}
+												projectLabel={isCurrent(row) ? undefined : projectNameOf(row)}
 												onTogglePin={() => togglePin(row.id)}
 												onClick={sessionRowAction(row, store)}
 											/>
@@ -417,18 +347,31 @@ export function SessionSidebar({
 }
 
 /**
+ * 历史行的副标题：会话记下的 Project 显示名（没记过就不写）+ 条数。
+ *
+ * 不再写 Agent 名 —— 它就是这条记录所在组的**组头**，行里再写一遍是把同一个事实说两次。
+ * 归属则相反：它没有别的入口（侧栏不再按它分组），退到这一行才不丢。
+ */
+function rowSubtitle(row: SessionRecordSummary, projectLabel: string | undefined): string {
+	return [projectLabel, `${row.messageCount} 条`].filter((part): part is string => part !== undefined).join(" · ");
+}
+
+/**
  * 会话列表的一行（纯展示，导出供静态渲染断言）。
  */
 export function SessionRow({
 	row,
 	pinned,
 	active,
+	projectLabel,
 	onTogglePin,
 	onClick,
 }: {
 	row: SidebarRow;
 	pinned: boolean;
 	active: boolean;
+	/** 会话自己记下的 Project 显示名；未记录 = undefined（不显示，也不拿目录名冒充）。 */
+	projectLabel?: string;
 	onTogglePin: () => void;
 	onClick?: () => void;
 }): React.JSX.Element {
@@ -455,8 +398,11 @@ export function SessionRow({
 			>
 				<span className="block truncate text-[13px] text-ink">{row.name}</span>
 				<span className="block truncate text-[11px] text-ink-faint">
-					{isCurrent(row) ? (row.playback ? "回放中 · 点这里回到实时" : "当前会话") : row.agent}
-					{"messageCount" in row ? ` · ${row.messageCount} 条` : ""}
+					{isCurrent(row)
+						? row.playback
+							? "回放中 · 点这里回到实时"
+							: "当前会话"
+						: rowSubtitle(row, projectLabel)}
 				</span>
 			</button>
 		</div>

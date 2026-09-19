@@ -4,6 +4,8 @@
 
 ### Changed
 
+- **会话工作台去掉「WebUI 会话 / CLI 会话」双源 tab，统一按 Agent 分组**（`src/pages/workspace/SessionSidebar.tsx`, `src/lib/records.ts`, `test/session-sidebar-groups.test.ts`, `test/session-sidebar-current-row.test.ts`）：那两个 tab 是按 `list_sessions[].source` 分的，而 serve 侧这个字段是按 agentId 判的（`source: m.id === "default" ? "cli" : "agent"`）—— 于是 `default` 这个正常注册、还能被 WebUI 聚焦建会话的 Agent，在**默认打开的**「WebUI 会话」tab 里一个组头都没有，它的会话全躺在另一个 tab 里；CLI 那个 tab 又按 `projectId` 分组，所以整个工作台里没有任何一个组头写着 default，用户看到的现象就是「default 的会话不显示」。现在只有一根轴：**谁在服务这条会话**（组头跟着组内最新一行，pin 置顶/时间倒序排过的行序不被重排；当前会话仍单独置顶，key 为 `current`，Agent 叫 current 也不会撞组）。行的副标题不再重复 Agent 名（它就是该行的组头），改放会话自己记下的 Project 显示名 + 条数 —— 归属没有丢，只是从分组轴退到行上（没记过就不写，不拿目录名冒充一个 Project）。`source` 字段与 serve 侧一行未改：用量页的「来源」行仍在读它。
+
 - **工作台「当前计划」默认折叠，且几何与会话框对齐**（`src/pages/workspace/WorkspaceView.tsx`）：计划条此前恒展开，本会话跑出 14 条任务就一直占着输入区上方约 200px；现在默认折叠，表头留「完成 x/y · 放弃 n」的读数与展开入口（`aria-expanded` + `aria-controls`），折叠态由工作台持有、**不持久化**（每次进工作台都从折叠开始）。`phases` 之外的三种态（未连接 / 快照未到 / 确实没有计划）本来就只有一行文案，不给它们画折叠控件 —— 一个点了没用的箭头比没有它更坏。同时它的宽度从自成一档的 `max-w-[760px]` 收到与转录列同一段（外层 `px-6` + 内层 `max-w-[1100px]`）：1440 视口下左边缘曾比会话框窄 170px。回归：`src/pages/workspace/WorkspaceView.plan-strip.render.test.ts`（默认折叠那一眼 + 与 Transcript 同款几何）、`test/app-shell-nav.test.ts` 的「当前计划区域」（折叠/展开两态、表头是唯一入口、三种无计划态不画控件）。
 
 - **Prompts 源不再列 `TODO.md`**（`src/pages/agents/AgentDetailView.tsx`, `test/e2e/agent-dashboard.spec.ts`）：serve 侧 `AGENT_DIR_PROMPT_FILES` 把 `TODO.md` 移出 prompt 面（它退出注入流程，改为历史留档），清单随真源从 8 项变 7 项。前端照渲染 serve 给的清单，只改了一份独立核对用的字面量与一处已过时的注释。

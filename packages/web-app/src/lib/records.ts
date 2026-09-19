@@ -28,7 +28,12 @@ export interface SessionRecordSummary {
 	 * （byFolder 那一路），不要拿这个字段去回答它，也不要用 cwd 反推一个出来。
 	 */
 	projectId?: string;
-	/** 会话来源（SessionSidebar 双源 tab 按此区分）。 */
+	/**
+	 * 会话来源（`list_sessions[].source`）：cli = 本地 CLI 交互会话，agent = registry/gateway agent 会话。
+	 *
+	 * 侧栏不再用它分类（双源 tab 已撤，改按 Agent 分组）—— 消费者只剩用量页的「来源」行，
+	 * 那里要的是「这条会话是怎么起的」，与「谁在服务它」不是同一件事。
+	 */
 	source: SessionSource;
 }
 

@@ -3,14 +3,17 @@ import type { SessionRecordSummary } from "../src/lib/records";
 import { type CurrentRow, groupSessions, type SidebarRow } from "../src/pages/workspace/SessionSidebar";
 
 /**
- * 会话侧栏的分组键。
+ * 会话侧栏的分组 —— 只有一根轴：**谁在服务这条会话**。
  *
- * T28 把 CLI 源的分组键从「sessionFile 里的 encoded-cwd」换成**会话自己记下的归属**
- * （`list_sessions[].projectId`）：目录只是会话文件摆在哪，归属是会话记录里写下的事实，
- * 两者不是一回事。这组用例钉的就是这条替换的两个方向：
- *   - 同一个目录下的会话，记了不同归属 → **不同组**（旧行为会把它们合成一组）；
- *   - 不同目录下的会话，记了同一个归属 → **同一组**（旧行为会把它们拆开）；
- *   - 没记过归属的 → 一个明说出来的桶，不拿目录名冒充一个 Project。
+ * 曾经是两根轴、两个 tab：「WebUI 会话」按 Agent 分组，「CLI 会话」按会话自己记下的归属分组。
+ * 而 tab 的划分用的是 `source`，serve 侧那是按 agentId 判的（default 恒等于 cli，见
+ * `wire-server.ts` 的 `list_sessions`）—— 于是 default 这个正常注册的 Agent 在默认打开的
+ * 「WebUI 会话」tab 里一个组头都没有，它的会话全在另一个 tab 里。既有用例钉的是那根被撤掉的轴，
+ * 这组用例钉收口后的语义：
+ *   - 分组只看 Agent：同一个 Agent 的会话，来自不同目录、记了不同归属，都是**同一组**；
+ *   - 组序 = 行的顺序（pin 置顶 / 时间倒序不被重排），组头跟着组内最新那一行走；
+ *   - 当前会话单独置顶，不并进任何 Agent 组；
+ *   - key 的形状稳定（`agent:<id>` / `current`），React 列表不会因为 Agent 名里带冒号而串组。
  */
 
 function session(patch: Partial<SessionRecordSummary> & { id: string }): SessionRecordSummary {
@@ -25,108 +28,102 @@ function session(patch: Partial<SessionRecordSummary> & { id: string }): Session
 	};
 }
 
-const CLI_DIR_A = "/Users/me/.cornfield/agent/sessions/--Users--me--a/by-date/2026-09-15/100000__a1.jsonl";
-const CLI_DIR_B = "/Users/me/.cornfield/agent/sessions/--Users--me--b/by-date/2026-09-15/100000__b1.jsonl";
+const DIR_A = "/Users/me/.cornfield/agents/default/sessions/--Users--me--a/by-date/2026-09-15/100000__a1.jsonl";
+const DIR_B = "/Users/me/.cornfield/agents/default/sessions/--Users--me--b/by-date/2026-09-15/100000__b1.jsonl";
 
 const NO_AGENTS = (agent: string): string => agent;
 
-const PROJECTS = [
-	{ projectId: "dtc", name: "米克原子 DTC" },
-	{ projectId: "mkt", name: "市场部" },
-];
+describe("groupSessions：按 Agent 分组（谁在服务这条会话）", () => {
+	it("同一个 Agent 的会话，来自不同目录 → 同一组（目录只是文件摆在哪）", () => {
+		const rows: SidebarRow[] = [session({ id: "s1", sessionFile: DIR_A }), session({ id: "s2", sessionFile: DIR_B })];
 
-describe("groupSessions：按会话记下的归属分组（不再猜路径）", () => {
-	it("同一目录下的会话记了不同归属 → 不同组（旧行为会把它们合成一组）", () => {
-		const rows: SidebarRow[] = [
-			session({ id: "s1", sessionFile: CLI_DIR_A, projectId: "dtc" }),
-			session({ id: "s2", sessionFile: CLI_DIR_A, projectId: "mkt" }),
-		];
-
-		const groups = groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS });
-
-		expect(groups.map(g => g.label)).toEqual(["米克原子 DTC", "市场部"]);
-		expect(groups.map(g => g.rows.map(r => r.id))).toEqual([["s1"], ["s2"]]);
-	});
-
-	it("不同目录下的会话记了同一个归属 → 同一组（旧行为会把它们拆开）", () => {
-		const rows: SidebarRow[] = [
-			session({ id: "s1", sessionFile: CLI_DIR_A, projectId: "dtc" }),
-			session({ id: "s2", sessionFile: CLI_DIR_B, projectId: "dtc" }),
-		];
-
-		const groups = groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS });
+		const groups = groupSessions(rows, { agentLabel: NO_AGENTS });
 
 		expect(groups).toHaveLength(1);
+		expect(groups[0]?.key).toBe("agent:default");
 		expect(groups[0]?.rows.map(r => r.id)).toEqual(["s1", "s2"]);
 	});
 
-	it("没记过归属 → 「未记录归属」桶，不拿目录名冒充一个 Project，也不藏起来", () => {
+	it("同一个 Agent 的会话，记了不同 Project → 仍是同一组（归属不是分组轴）", () => {
 		const rows: SidebarRow[] = [
-			session({ id: "s1", sessionFile: CLI_DIR_A }),
-			session({ id: "s2", sessionFile: CLI_DIR_B }),
+			session({ id: "s1", projectId: "dtc" }),
+			session({ id: "s2", projectId: "mkt" }),
+			session({ id: "s3" }),
 		];
 
-		const groups = groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS });
+		const groups = groupSessions(rows, { agentLabel: NO_AGENTS });
 
 		expect(groups).toHaveLength(1);
-		expect(groups[0]?.label).toBe("未记录归属");
-		expect(groups[0]?.rows.map(r => r.id)).toEqual(["s1", "s2"]);
-		// 目录名一个都不许出现在组标签里
-		expect(groups.map(g => g.label)).not.toContain("/Users/me/a");
+		expect(groups[0]?.label).toBe("default");
+		expect(groups[0]?.rows.map(r => r.id)).toEqual(["s1", "s2", "s3"]);
+		// Project 的 id / 名字一个都不许出现在组标签里 —— 它退到了行副标题
+		expect(groups.map(g => g.label)).not.toContain("dtc");
+		expect(groups.map(g => g.label)).not.toContain("米克原子 DTC");
 	});
 
-	it("Project 名字取自注册表；注册表没读到 / 里没有这个 id → 显示 id（id 是事实，名字不是必须的）", () => {
-		const rows: SidebarRow[] = [session({ id: "s1", projectId: "dtc" }), session({ id: "s2", projectId: "ghost" })];
+	it("不同 Agent → 不同组，组头用显示名（未登记的 Agent 用 id）", () => {
+		const rows: SidebarRow[] = [
+			session({ id: "s1", agent: "hr" }),
+			session({ id: "s2", agent: "default" }),
+			session({ id: "s3", agent: "ghost" }),
+		];
+		const agentLabel = (agent: string): string => (agent === "hr" ? "HR 助理" : agent);
 
-		expect(
-			groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS }).map(g => g.label),
-		).toEqual(["米克原子 DTC", "ghost"]);
-		expect(groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS }).map(g => g.label)).toEqual(["dtc", "ghost"]);
+		const groups = groupSessions(rows, { agentLabel });
+
+		expect(groups.map(g => g.label)).toEqual(["HR 助理", "default", "ghost"]);
+		expect(groups.map(g => g.key)).toEqual(["agent:hr", "agent:default", "agent:ghost"]);
 	});
 
-	it("当前会话单独置顶，且不并进任何 Project 组", () => {
+	it("挂进来的哪一行的副标题都不变：agent 是组头的事", () => {
+		// 断言的是分组不吞行、不改行（行的副标题由 SessionRow 渲染，另有用例）
+		const rows: SidebarRow[] = [
+			session({ id: "s1", agent: "hr" }),
+			session({ id: "s2", agent: "hr" }),
+			session({ id: "s3", agent: "oracle" }),
+		];
+
+		const groups = groupSessions(rows, { agentLabel: NO_AGENTS });
+
+		expect(groups.map(g => g.rows.length)).toEqual([2, 1]);
+		expect(groups.flatMap(g => g.rows)).toHaveLength(rows.length);
+	});
+
+	it("当前会话单独置顶，且不并进任何 Agent 组", () => {
 		const current: CurrentRow = { id: "live", name: "当前会话", agent: "attached", current: true };
-		const rows: SidebarRow[] = [current, session({ id: "s1", projectId: "dtc" })];
+		const rows: SidebarRow[] = [current, session({ id: "s1", agent: "attached" })];
 
-		const groups = groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS });
+		const groups = groupSessions(rows, { agentLabel: NO_AGENTS });
 
-		expect(groups.map(g => g.label)).toEqual(["当前会话", "米克原子 DTC"]);
+		// 当前会话那行的 agent 字面量是 "attached"，不许拿它和真 Agent 组撞在一起
+		expect(groups.map(g => g.label)).toEqual(["当前会话", "attached"]);
+		expect(groups.map(g => g.key)).toEqual(["current", "agent:attached"]);
+		expect(groups[0]?.rows.map(r => r.id)).toEqual(["live"]);
+		expect(groups[1]?.rows.map(r => r.id)).toEqual(["s1"]);
 	});
 
 	it("组的顺序 = 行的顺序（pin 置顶 / 时间倒序排过的顺序不被重排）", () => {
 		const rows: SidebarRow[] = [
-			session({ id: "s1", projectId: "mkt" }),
-			session({ id: "s2", projectId: "dtc" }),
-			session({ id: "s3", projectId: "mkt" }),
+			session({ id: "s1", agent: "hr" }),
+			session({ id: "s2", agent: "default" }),
+			session({ id: "s3", agent: "hr" }),
 		];
 
-		const groups = groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS });
+		const groups = groupSessions(rows, { agentLabel: NO_AGENTS });
 
-		expect(groups.map(g => g.label)).toEqual(["市场部", "米克原子 DTC"]);
+		expect(groups.map(g => g.label)).toEqual(["hr", "default"]);
 		expect(groups[0]?.rows.map(r => r.id)).toEqual(["s1", "s3"]);
+		// 组头的位置跟着组内**最新**那一行：default 的会话比 hr 的第二条新，所以它排前面
+		expect(groups[1]?.rows.map(r => r.id)).toEqual(["s2"]);
 	});
 
-	it("webui 源照旧按 Agent 分组：Project 不参与那一个轴（谁干的是另一个问题）", () => {
-		const rows: SidebarRow[] = [
-			session({ id: "s1", agent: "hr", source: "agent", projectId: "dtc" }),
-			session({ id: "s2", agent: "default", source: "agent", projectId: "dtc" }),
-		];
-		const agentLabel = (agent: string): string => (agent === "hr" ? "HR 助理" : "Default");
+	it("Agent 叫 current 也不会和「当前会话」组撞", () => {
+		const current: CurrentRow = { id: "live", name: "当前会话", agent: "attached", current: true };
+		const rows: SidebarRow[] = [current, session({ id: "s1", agent: "current" })];
 
-		const groups = groupSessions(rows, { source: "webui", agentLabel, projects: PROJECTS });
+		const groups = groupSessions(rows, { agentLabel: NO_AGENTS });
 
-		expect(groups.map(g => g.label)).toEqual(["HR 助理", "Default"]);
-	});
-
-	it("两个轴上的同一个 id 不会撞组（`project:x` ≠ `agent:x`）", () => {
-		const rows: SidebarRow[] = [
-			session({ id: "s1", agent: "dtc", source: "agent" }),
-			session({ id: "s2", source: "cli", projectId: "dtc", agent: "dtc" }),
-		];
-
-		expect(groupSessions(rows, { source: "webui", agentLabel: NO_AGENTS, projects: PROJECTS })).toHaveLength(1);
-		const cliGroups = groupSessions(rows, { source: "cli", agentLabel: NO_AGENTS, projects: PROJECTS });
-		expect(cliGroups.map(g => g.key)).toEqual(["unrecorded", "project:dtc"]);
-		expect(cliGroups.map(g => g.label)).toEqual(["未记录归属", "米克原子 DTC"]);
+		expect(groups.map(g => g.key)).toEqual(["current", "agent:current"]);
+		expect(groups.map(g => g.rows.length)).toEqual([1, 1]);
 	});
 });

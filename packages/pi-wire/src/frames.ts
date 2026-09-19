@@ -144,7 +144,7 @@ export interface WireSessionIndexEntry {
 	agentId: string;
 	/** 所属 agent 显示名。 */
 	agentName: string;
-	/** 会话来源（session-index 按源根判定；SessionSidebar 双源 tab 按此区分）。 */
+	/** 会话来源（session-index 按源根判定；与 `agentId` 不是同一件事 —— default 恒为 cli）。 */
 	source: WireSessionSource;
 	/** 会话标题（header.title；无则 undefined）。 */
 	title?: string;
