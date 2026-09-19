@@ -151,6 +151,17 @@ export interface SessionView {
 	/** 历史会话回放：失败错误文本（非空 = 加载失败，UI 可见）。 */
 	historyError?: string;
 	/**
+	 * 正在回放的历史会话文件；`undefined` = 看的是**实时会话**。
+	 *
+	 * 回放态在别的字段里看不出来：`sessionId` / `sessionName` 一直是**实时**那条（侧栏顶上那行就是
+	 * 拿它画的），`sessionFile` 两种态下都非空。没有这个字段，「现在看的是谁的会话」在类型里就不存在
+	 * —— 侧栏那一行也就无从知道「点它意味着回到哪」，于是当年干脆没接点击。
+	 *
+	 * 它**只由实时快照清空**（`#buildBaseView` 恒为 undefined）：serve 推来一份快照，就是权威宣告
+	 * 「焦点已经回到实时会话」。
+	 */
+	historySessionFile?: string;
+	/**
 	 * 当前会话直接委派出去的子会话（get_session_tree）。
 	 * `undefined` = 还没查过；`[]` = 查了，确实没有委派 —— 两者不能当成同一件事。
 	 */
@@ -1106,6 +1117,8 @@ export class SessionStore {
 			next.historyError = undefined;
 			// 产物 panel 定向到被回放会话（而非 live 快照的 sessionFile，后者可能未落盘）
 			next.sessionFile = record.sessionFile;
+			// 回放态的唯一标记：视图得能说出「我看的不是实时会话」，否则没有「回到实时」可回
+			next.historySessionFile = record.sessionFile;
 			this.#view = next;
 			this.#notify();
 		} catch (err) {
@@ -1115,6 +1128,38 @@ export class SessionStore {
 			this.#view = next;
 			this.#notify();
 		}
+	}
+
+	/**
+	 * 退出历史会话回放，回到实时会话（侧栏顶上「当前会话」那一行的点击动作）。
+	 *
+	 * 只做一件事：让 serve 再推一份**实时**快照 —— 视图整份由 `#applySnapshot` 重建
+	 * （messages / sessionId / sessionFile 全量覆盖，`historySessionFile` 随之清空）。不另写一套
+	 * 「擦掉回放态」的逻辑，就不会出现两处擦除对不上。
+	 *
+	 * 不在回放态时是 **no-op**：`focusAgent` 会先清空转录再等快照填回（`#setActiveAgent` 切到
+	 * 另一个身份时先清空），实时态点一下就是白闪一次。
+	 *
+	 * 失败把原文写进 `historyError`（侧栏正在渲染它）：点了没反应必须说得出为什么，
+	 * 不能让人以为这个按钮坏了。
+	 */
+	async returnToLiveSession(): Promise<void> {
+		if (this.getSnapshot().historySessionFile === undefined) return;
+		const agentId = this.#activeAgentId;
+		if (!agentId) {
+			this.#setHistoryError("回到实时会话失败：还不知道本连接的焦点 Agent");
+			return;
+		}
+		const result = await this.focusAgent(agentId);
+		if (!result.ok) this.#setHistoryError(`回到实时会话失败：${result.error}`);
+	}
+
+	/** 回放相关错误上屏（侧栏的红色横幅）；实时快照到达时 `#buildBaseView` 会把它清掉。 */
+	#setHistoryError(message: string): void {
+		const next = cloneView(this.getSnapshot());
+		next.historyError = message;
+		this.#view = next;
+		this.#notify();
 	}
 
 	#clearHistoryLoading(): void {
@@ -2069,6 +2114,8 @@ export class SessionStore {
 				modelProvider: null,
 				thinkingLevel: null,
 				sessionId: "",
+				// 无快照 = 还没有焦点会话，不可能在回放态
+				historySessionFile: undefined,
 				attachmentAddress: this.#attachmentAddress,
 				messages: [],
 				messageEntryIds: {},
@@ -2112,6 +2159,8 @@ export class SessionStore {
 			modelProvider: snapshot.model?.provider ?? null,
 			thinkingLevel: snapshot.thinkingLevel ?? null,
 			sessionId: snapshot.sessionId,
+			// 实时快照是回放态的终结：serve 推来它，就是宣告焦点回到实时会话
+			historySessionFile: undefined,
 			attachmentAddress: this.#attachmentAddress,
 			sessionName: snapshot.sessionName,
 			sessionFile: snapshot.sessionFile,

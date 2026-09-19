@@ -47,6 +47,11 @@ export interface CurrentRow {
 	name: string;
 	agent: string;
 	current: true;
+	/**
+	 * 正在回放历史会话（`view.historySessionFile` 非空）。此时这一行是**回实时的入口**，
+	 * 不是一句说明 —— 侧栏必须把它画成可点的样子，否则用户切进历史之后就找不到回去的路。
+	 */
+	playback?: boolean;
 }
 
 /** 列表行：当前会话那一行，或 list_sessions 里的一条。 */
@@ -54,6 +59,26 @@ export type SidebarRow = CurrentRow | SessionRecordSummary;
 
 function isCurrent(row: SidebarRow): row is CurrentRow {
 	return "current" in row;
+}
+
+/**
+ * 一行被点时的动作（纯函数：无 React、无 store，只是把「哪种行做哪件事」写在一处）。
+ *
+ * 三种行三件事，不拿一个 `onClick` 糊过去：
+ *   - 历史会话 → 打开回放；
+ *   - 当前会话（实时）→ **没有动作** —— 点它就是「我本来就在这」，不给白闪留口子；
+ *   - 当前会话（回放中）→ 回到实时。少了这一支，用户切进历史会话之后就没有回去的路。
+ */
+export function sessionRowAction(
+	row: SidebarRow,
+	actions: {
+		openHistorySession: (record: SessionRecordSummary) => unknown;
+		returnToLiveSession: () => unknown;
+	},
+): (() => void) | undefined {
+	if (!isCurrent(row)) return () => void actions.openHistorySession(row);
+	if (row.playback) return () => void actions.returnToLiveSession();
+	return undefined;
 }
 
 /**
@@ -191,7 +216,15 @@ export function SessionSidebar(): React.JSX.Element {
 		// 当前会话（attached）只在 WebUI 源展示
 		const current: SidebarRow[] =
 			source === "webui" && view.sessionId
-				? [{ id: view.sessionId, name: view.sessionName ?? "当前会话", agent: "attached", current: true }]
+				? [
+						{
+							id: view.sessionId,
+							name: view.sessionName ?? "当前会话",
+							agent: "attached",
+							current: true,
+							...(view.historySessionFile !== undefined ? { playback: true } : {}),
+						},
+					]
 				: [];
 		// 按 list_sessions source 字段分源：webui = agent 源；cli = default agent 的本地交互会话
 		const history = sessions.filter(
@@ -207,7 +240,7 @@ export function SessionSidebar(): React.JSX.Element {
 			return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
 		});
 		return [...current.filter(c => !q || c.name.toLowerCase().includes(q)), ...sorted];
-	}, [source, sessions, view.sessionId, view.sessionName, query, pinned]);
+	}, [source, sessions, view.sessionId, view.sessionName, view.historySessionFile, query, pinned]);
 
 	// 按 agent 分组（webui 源：谁干的）；CLI 源按会话**记下的归属**分组（不再猜路径）
 	const groups = useMemo(
@@ -342,7 +375,7 @@ export function SessionSidebar(): React.JSX.Element {
 												pinned={pinned.has(row.id)}
 												active={!isCurrent(row) && row.id === view.sessionId}
 												onTogglePin={() => togglePin(row.id)}
-												onClick={isCurrent(row) ? undefined : () => store.openHistorySession(row)}
+												onClick={sessionRowAction(row, store)}
 											/>
 										))}
 									</div>
@@ -380,7 +413,10 @@ export function SessionSidebar(): React.JSX.Element {
 	);
 }
 
-function SessionRow({
+/**
+ * 会话列表的一行（纯展示，导出供静态渲染断言）。
+ */
+export function SessionRow({
 	row,
 	pinned,
 	active,
@@ -412,11 +448,11 @@ function SessionRow({
 				type="button"
 				className="min-w-0 flex-1 text-left"
 				onClick={onClick}
-				title={isCurrent(row) ? "当前会话" : "打开会话"}
+				title={isCurrent(row) ? (row.playback ? "回到实时会话" : "当前会话") : "打开会话"}
 			>
 				<span className="block truncate text-[13px] text-ink">{row.name}</span>
 				<span className="block truncate text-[11px] text-ink-faint">
-					{isCurrent(row) ? "当前会话" : row.agent}
+					{isCurrent(row) ? (row.playback ? "回放中 · 点这里回到实时" : "当前会话") : row.agent}
 					{"messageCount" in row ? ` · ${row.messageCount} 条` : ""}
 				</span>
 			</button>
