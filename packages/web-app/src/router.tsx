@@ -17,6 +17,7 @@ import { createHashRouter, Navigate, type RouteObject, useNavigate, useParams } 
 import { AppShell } from "./layout/AppShell";
 import { NotFoundView } from "./layout/NotFoundView";
 import { getPanels, type PanelDef, panelHandle, registerPanel } from "./layout/panel-registry";
+import { MockGalleryView } from "./pages/mock/MockGalleryView";
 import { AgentDetailView } from "./pages/agents/AgentDetailView";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
@@ -243,12 +244,13 @@ const EXTRA_ROUTES: RouteObject[] = [
  */
 const FALLBACK_ROUTES: RouteObject[] = [{ path: "*", element: <NotFoundView /> }];
 
-/** 完整路由树（AppShell 为根）。测试以 memory router 复用这棵树。 */
+/** 完整路由树：/mock 是独立顶层预览，其余页面挂在 AppShell。 */
 export const appRoutes: RouteObject[] = [
 	{
 		element: <AppShell />,
 		children: [...PANEL_ROUTES.values(), ...EXTRA_ROUTES, ...FALLBACK_ROUTES],
 	},
+	{ path: "/mock", element: <MockGalleryView /> },
 ];
 
 /**
