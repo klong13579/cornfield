@@ -74,7 +74,9 @@ export default class Serve extends Command {
 			await initTheme();
 			const authStorage = await discoverAuthStorage();
 			const modelRegistry = new ModelRegistry(authStorage);
-			Bun.env.PI_NO_TITLE = "1";
+			// 这里**不设** `PI_NO_TITLE`：serve / WebUI 起的会话也要有名字（规则见 `../session/auto-title.ts`）。
+			// 曾经设成 1，于是从网页上开的会话在列表里只能靠首条消息前 40 字或文件名兜底。机器面
+			// （`--mode rpc` / acp / `--no-title`）照旧关着——那些调用方不要这个成本。
 			// 初始化全局 settings（default agent 的配置：项目根 = 它的家 → project 层 = 家里那份
 			// `.cornfield/config.yml`；global 层 = 客户端目录那份，`Settings#globalConfigPathFor` 一处解析。
 			// registry agent 各自 `Settings.create({ cwd: 工作根, agentDir })` 在 sessionFactory 内惰性创建）。

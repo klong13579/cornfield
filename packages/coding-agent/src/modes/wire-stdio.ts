@@ -30,6 +30,7 @@ import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibil
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import { applyToolProxy } from "../extensibility/tool-proxy";
 import type { AgentSession } from "../session/agent-session";
+import { maybeAutoTitle } from "../session/auto-title";
 import { type Theme, theme } from "./theme/theme";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -514,6 +515,9 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 					currentModel: session.model ? `${session.model.provider}/${session.model.id}` : "none",
 					messagePreview: command.message?.slice(0, 50),
 				});
+				// 首条消息自动起名：gateway 是另一个驱动方，自己触发一次，规则与 CLI/serve 共用
+				// session/auto-title.ts 的那一份。子进程没有终端标题可设，所以忽略返回值。
+				void maybeAutoTitle(session, command.message);
 				session
 					.prompt(command.message, {
 						images: command.images,

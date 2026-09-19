@@ -67,7 +67,8 @@ import { normalizeHostToolDefinitions } from "../modes/rpc/rpc-mode";
 import diagnoseSessionPrompt from "../prompts/diagnose-session.md" with { type: "text" };
 import { discoverSkills } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
-import { getDefaultSessionDirName } from "../session/session-manager";
+import { maybeAutoTitle } from "../session/auto-title";
+import { getDefaultSessionDirName, SessionManager } from "../session/session-manager";
 import type { SessionStore } from "../session/session-store";
 import { type ResolvedSessionWorkspace, resolveSessionWorkspace } from "../session/session-workspace";
 import { AGENT_DIR_PROMPT_FILES } from "../skeleton/agent-dir-files";
@@ -1667,6 +1668,10 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 			switch (command.type) {
 				// ── Prompting ──
 				case "prompt": {
+					// 首条消息自动起名（规则在 `../session/auto-title.ts`）：serve/WebUI 起的会话也要有名字。
+					// fire-and-forget：起名要一次模型调用，阻塞这条 prompt 就是拿用户的等待换一个名字；
+					// 而且必须在 prompt **之前**调 —— 守卫在调用那一刻判「是不是首条消息」。
+					void maybeAutoTitle(session, command.message);
 					const message = await materializePromptImages(session, command.message, command.images);
 					session.prompt(message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);
@@ -1705,6 +1710,8 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				}
 				case "abort_and_prompt": {
 					await session.abort();
+					// 与 prompt 同一处规则：中断后补发的也可能是这个会话的第一条消息
+					void maybeAutoTitle(session, command.message);
 					const message = await materializePromptImages(session, command.message, command.images);
 					session.prompt(message, { images: command.images }).catch((err: Error) => {
 						fail(err.message);

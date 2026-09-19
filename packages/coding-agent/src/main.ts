@@ -682,7 +682,9 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	if (parsedArgs.noPty) {
 		Bun.env.PI_NO_PTY = "1";
 	}
-	if (parsedArgs.noTitle || parsedArgs.mode === "rpc" || parsedArgs.mode === "wire-stdio") {
+	// rpc / --no-title 是机器面，不给它们多挂一次模型调用的成本；wire-stdio 不再关——gateway 就是
+	// `cornfield --mode wire-stdio`，关掉等于所有 IM 会话都没了标题（规则见 session/auto-title.ts）。
+	if (parsedArgs.noTitle || parsedArgs.mode === "rpc") {
 		Bun.env.PI_NO_TITLE = "1";
 	}
 	const { pipedInput, fileText, fileImages } = await logger.time("prepareInitialMessage", async () => {

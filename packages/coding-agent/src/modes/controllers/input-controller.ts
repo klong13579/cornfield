@@ -1,20 +1,20 @@
 import * as fs from "node:fs/promises";
-import { type AgentMessage, ThinkingLevel } from "@cornfield/agent";
+import { ThinkingLevel } from "@cornfield/agent";
 import { sanitizeText } from "@cornfield/natives";
 import type { AutocompleteProvider, SlashCommand } from "@cornfield/tui";
-import { $env } from "@cornfield/utils";
 import { settings } from "../../config/settings";
 import { createPromptActionAutocompleteProvider } from "../../modes/prompt-action-autocomplete";
 import { theme } from "../../modes/theme/theme";
 import type { InteractiveModeContext } from "../../modes/types";
 import type { AgentSessionEvent } from "../../session/agent-session";
+import { maybeAutoTitle } from "../../session/auto-title";
 import { SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import { copyToClipboard, readImageFromClipboard } from "../../utils/clipboard";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { ensureSupportedImageInput } from "../../utils/image-loading";
 import { resizeImage } from "../../utils/image-resize";
-import { generateSessionTitle, setSessionTerminalTitle } from "../../utils/title-generator";
+import { setSessionTerminalTitle } from "../../utils/title-generator";
 
 interface Expandable {
 	setExpanded(expanded: boolean): void;
@@ -364,26 +364,13 @@ export class InputController {
 			// First, move any pending bash components to chat
 			this.ctx.flushPendingBashComponents();
 
-			// Generate session title on first message
-			const hasUserMessages = this.ctx.session.messages.some((m: AgentMessage) => m.role === "user");
-			if (!hasUserMessages && !this.ctx.sessionManager.getSessionName() && !$env.PI_NO_TITLE) {
-				const registry = this.ctx.session.modelRegistry;
-				generateSessionTitle(text, registry, this.ctx.settings, this.ctx.session.sessionId, this.ctx.session.model)
-					.then(async title => {
-						if (title) {
-							const applied = await this.ctx.sessionManager.setSessionName(title, "auto");
-							if (applied) {
-								setSessionTerminalTitle(
-									this.ctx.sessionManager.getSessionName()!,
-									this.ctx.sessionManager.getCwd(),
-									this.ctx.sessionManager.titleSource,
-								);
-								this.ctx.updateEditorBorderColor();
-							}
-						}
-					})
-					.catch(() => {});
-			}
+			// 首条消息自动起名：规则在 session/auto-title.ts，CLI 这边只负责落地后的终端副作用。
+			// 起名要一次模型调用，所以不 await——阻塞首条消息就是拿用户的等待换一个名字。
+			void maybeAutoTitle(this.ctx.session, text).then(name => {
+				if (!name) return;
+				setSessionTerminalTitle(name, this.ctx.sessionManager.getCwd(), this.ctx.sessionManager.titleSource);
+				this.ctx.updateEditorBorderColor();
+			});
 
 			if (this.ctx.onInputCallback) {
 				// Include any pending images from clipboard paste
