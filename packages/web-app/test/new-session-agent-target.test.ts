@@ -64,9 +64,10 @@ class FakeServe implements PiWebSocketLike {
 	cancelNextCreate = false;
 	/**
 	 * `list_projects` 的名单。`undefined` = 照旧回一个空 result（模拟「还没读到名单」）；
-	 * 非 undefined = 真回一份名单，`SessionStore` 据此校验恢复出来的工作上下文。
+	 * 非 undefined = 真回一份名单：`SessionStore` 据此校验恢复出来的工作上下文，并用
+	 * `defaultAgentId` 算「这个 Agent 的默认 Project」（§10 第 2 级）。
 	 */
-	declaredProjects: string[] | undefined = undefined;
+	declaredProjects: Array<{ projectId: string; defaultAgentId?: string }> | undefined = undefined;
 	/** 让 `list_projects` 报错（存储损坏）—— 用来钉「读失败不校验」。 */
 	listProjectsError: string | undefined = undefined;
 	#seq = 0;
@@ -160,10 +161,11 @@ class FakeServe implements PiWebSocketLike {
 				if (this.listProjectsError !== undefined) return this.#fail(id, this.listProjectsError);
 				if (this.declaredProjects === undefined) return this.#ok(id, {});
 				return this.#ok(id, {
-					projects: this.declaredProjects.map(projectId => ({
-						projectId,
-						name: projectId,
-						root: `/repos/${projectId}`,
+					projects: this.declaredProjects.map(project => ({
+						projectId: project.projectId,
+						name: project.projectId,
+						root: `/repos/${project.projectId}`,
+						...(project.defaultAgentId === undefined ? {} : { defaultAgentId: project.defaultAgentId }),
 					})),
 				});
 			}
@@ -560,17 +562,32 @@ describe("新建会话带 Project：落到 new_session.projectId，未知 id 原
 		expect(outcome.notApplied).toEqual([]);
 	});
 
-	it("工作上下文不随会话变：开新会话作废的是**归属**，不是我的选择", async () => {
+	it("开新会话作废的是**归属**，不是我的选择（同一个 Agent）", async () => {
 		const { store, serve } = await createConnectedStore();
 		serve.projects.add("dtc");
 		store.setWorkingProject("dtc");
 
-		await store.newSession({ agentId: "hr" });
+		await store.newSession();
 
-		// 新会话的归属被作废了（新会话还没声明过归属），但工作上下文还是我选的那个
+		// 新会话的归属被作废了（它还没声明过归属），但工作上下文还是我选的那个
 		const view = store.getSnapshot();
 		expect(view.currentProjectId).toBeUndefined();
 		expect(view.workingProjectId).toBe("dtc");
+		// 而且真的带上去了：不是只有界面这么写
+		expect(serve.projectArrivals).toEqual(["dtc"]);
+	});
+
+	it("跨 Agent 新建：用目标 Agent 那条工作上下文，不带焦点的那个 Agent 的项目", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.projects.add("dtc");
+		serve.projects.add("mkt");
+		store.setWorkingProject("dtc"); // 焦点 default 选的项目
+		await store.focusAgent("hr");
+		store.setWorkingProject("mkt"); // hr 自己那条
+		await store.focusAgent("default");
+
+		expect(await store.newSession({ agentId: "hr" })).toEqual({ kind: "created", notApplied: [] });
+		expect(serve.projectArrivals).toEqual(["mkt"]);
 	});
 });
 
@@ -602,16 +619,20 @@ function makeMemoryStorage(): Storage {
 }
 
 /**
- * 工作上下文落盘：刷新之后它还在，而**恢复到的那一个**要在第一次真的读到名单时校验一次。
+ * 工作上下文**按 Agent**：每个 Agent 各自记自己的 Project，落盘、恢复校验、没手选过时用注册表兜底。
  *
- * 四件事在这里被钉住：
- *   1. **刷新的表现**：选过之后重建 store（= 重开页面）仍然带着那个选择，不再悄悄退回「不指定」；
- *   2. **校验只对恢复到的那一个做一次**，而且只在真的读到一份名单时做 —— 名单没读到 / 读失败
- *      都不是「名单里没有它」（读不到 ≠ 没有）；
- *   3. **用户自己刚做的选择不校验**：那是决定，不是恢复；
- *   4. **选回「不指定」= 忘掉存储里那条**，不留一条永远不再成立的记录。
+ * 六件事在这里被钉住：
+ *   1. **按 Agent 分**：给一个 Agent 选不会改到别的 Agent（就是「改一个 Project，所有 Agent 都
+ *      跟着变」的反面）；
+ *   2. **刷新的表现**：重建 store（= 重开页面）后每个 Agent 还是自己那条；
+ *   3. **恢复校验**：恢复到的那条不在名单里 → 丢掉（连同存储）；读失败不校验（读不到 ≠ 没有），
+ *      用户自己刚做的选择也不校验（那是决定，不是恢复）；
+ *   4. **兜底**：没手选过时用「`defaultAgentId` = 这个 Agent」的 Project，**恰好一个**才用
+ *      （§10 第 2 级）；兜底是算出来的，**不落盘**；
+ *   5. **多个 → 不指定**：两个 Project 都声明同一个 Agent 时不替用户猜；
+ *   6. **显式「不指定」不被兜底顶掉**：那是用户做的选择，不是「没选过」。
  */
-describe("工作上下文落盘：刷新后还在，恢复时按名单校验一次", () => {
+describe("工作上下文：按 Agent 分，落盘 + 兜底", () => {
 	let storage: Storage;
 
 	beforeEach(() => {
@@ -623,51 +644,83 @@ describe("工作上下文落盘：刷新后还在，恢复时按名单校验一�
 		delete (globalThis as { localStorage?: Storage }).localStorage;
 	});
 
-	it("选过之后重建 store（= 重开页面）仍然带着它", async () => {
-		const before = await createConnectedStore();
-		before.store.setWorkingProject("dtc");
-		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("dtc");
+	const stored = (): string | null => storage.getItem(WORKING_PROJECT_KEY);
+	const seed = (table: Record<string, string>): void => {
+		storage.setItem(WORKING_PROJECT_KEY, JSON.stringify(table));
+	};
 
-		// 重开页面：新 store、新连接，名单还没读到
-		const after = await createConnectedStore();
-		expect(after.store.getSnapshot().workingProjectId).toBe("dtc");
-		// 名单还没读到 ≠ 名单里没有它：此刻不得先把它当成陈旧态
-		expect(after.store.getSnapshot().projects).toBeUndefined();
-	});
-
-	it("恢复出来的那个已经不在名单里：丢掉（连同存储）—— 不把一个不存在的选择带回来", async () => {
-		(await createConnectedStore()).store.setWorkingProject("dtc");
+	it("给一个 Agent 选不会改到别的 Agent", async () => {
 		const { store, serve } = await createConnectedStore();
+		serve.declaredProjects = [{ projectId: "dtc" }, { projectId: "mkt" }];
+
+		store.setWorkingProject("dtc"); // 焦点还是 default
 		expect(store.getSnapshot().workingProjectId).toBe("dtc");
 
-		serve.declaredProjects = ["mkt"];
+		await store.focusAgent("hr");
+		expect(store.getSnapshot().activeAgentId).toBe("hr");
+		expect(store.getSnapshot().workingProjectId).toBeUndefined(); // hr 没选过
+
+		store.setWorkingProject("mkt");
+		expect(store.getSnapshot().workingProjectId).toBe("mkt");
+
+		await store.focusAgent("default");
+		expect(store.getSnapshot().workingProjectId).toBe("dtc"); // 回到 default，它那条没被改掉
+
+		// 落盘的是**一张表**：两个 Agent 各一条
+		expect(JSON.parse(stored() ?? "{}")).toEqual({ default: "dtc", hr: "mkt" });
+	});
+
+	it("重建 store（= 重开页面）后每个 Agent 还是自己那条", async () => {
+		const before = await createConnectedStore();
+		before.store.setWorkingProject("dtc");
+		await before.store.focusAgent("hr");
+		before.store.setWorkingProject("mkt");
+
+		const after = await createConnectedStore();
+		// 焦点还是 default，并且名单还没读到也不是「没有」
+		expect(after.store.getSnapshot().workingProjectId).toBe("dtc");
+		expect(after.store.getSnapshot().projects).toBeUndefined();
+		await after.store.focusAgent("hr");
+		expect(after.store.getSnapshot().workingProjectId).toBe("mkt");
+	});
+
+	it("恢复到的那条已不在名单里：丢掉（连同存储）", async () => {
+		seed({ hr: "ghost" });
+		const { store, serve } = await createConnectedStore();
+		await store.focusAgent("hr");
+		// 名单还没读到：手选那份照用（判不出它还在不在，不先说它没了）
+		expect(store.getSnapshot().workingProjectId).toBe("ghost");
+
+		serve.declaredProjects = [{ projectId: "mkt" }];
 		await store.refreshProjects();
 
 		expect(store.getSnapshot().workingProjectId).toBeUndefined();
-		expect(storage.getItem(WORKING_PROJECT_KEY)).toBeNull();
+		expect(stored()).toBeNull();
 	});
 
-	it("恢复出来的那个还在名单里：留着（校验不是「一律清掉」）", async () => {
-		(await createConnectedStore()).store.setWorkingProject("dtc");
+	it("恢复到的那条还在名单里：留着（校验不是「一律清掉」）", async () => {
+		seed({ hr: "dtc" });
 		const { store, serve } = await createConnectedStore();
+		await store.focusAgent("hr");
 
-		serve.declaredProjects = ["dtc", "mkt"];
+		serve.declaredProjects = [{ projectId: "dtc" }, { projectId: "mkt" }];
 		await store.refreshProjects();
 
 		expect(store.getSnapshot().workingProjectId).toBe("dtc");
-		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("dtc");
+		expect(JSON.parse(stored() ?? "{}")).toEqual({ hr: "dtc" });
 	});
 
 	it("名单读失败：「不知道」不删用户的选择（读不到 ≠ 没有）", async () => {
-		(await createConnectedStore()).store.setWorkingProject("dtc");
+		seed({ hr: "ghost" });
 		const { store, serve } = await createConnectedStore();
+		await store.focusAgent("hr");
 		serve.listProjectsError = "Project store is not valid JSON";
 
 		await store.refreshProjects();
 
 		expect(store.getSnapshot().projectsError).toContain("not valid JSON");
-		expect(store.getSnapshot().workingProjectId).toBe("dtc");
-		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("dtc");
+		expect(store.getSnapshot().workingProjectId).toBe("ghost");
+		expect(JSON.parse(stored() ?? "{}")).toEqual({ hr: "ghost" });
 
 		// 一次读失败不能把校验吃掉：下一次真的读到名单时仍然判一次
 		serve.listProjectsError = undefined;
@@ -677,24 +730,54 @@ describe("工作上下文落盘：刷新后还在，恢复时按名单校验一�
 	});
 
 	it("恢复之后用户自己改过：那道校验不再动他刚做的决定", async () => {
-		(await createConnectedStore()).store.setWorkingProject("dtc");
+		seed({ hr: "ghost" });
 		const { store, serve } = await createConnectedStore();
+		await store.focusAgent("hr");
 		store.setWorkingProject("mkt"); // 他刚选的，名单里此刻还没有它
 
 		serve.declaredProjects = [];
 		await store.refreshProjects();
 
 		expect(store.getSnapshot().workingProjectId).toBe("mkt");
-		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("mkt");
 	});
 
-	it("选回「不指定」：存储里那条被忘掉", async () => {
-		const { store } = await createConnectedStore();
-		store.setWorkingProject("dtc");
+	it("没手选过：用注册表里声明了这个 Agent 的那个 Project（恰好一个），且不落盘", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.declaredProjects = [{ projectId: "dtc", defaultAgentId: "hr" }];
+		await store.focusAgent("hr");
 
-		store.setWorkingProject(undefined);
+		await store.refreshProjects();
+
+		expect(store.getSnapshot().workingProjectId).toBe("dtc");
+		// 兜底是**算出来的**，不落盘 —— 否则「手选过」与「注册表推出来的」就分不开了
+		expect(stored()).toBeNull();
+	});
+
+	it("两个 Project 都声明了这个 Agent：不指定，不替用户猜", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.declaredProjects = [
+			{ projectId: "a", defaultAgentId: "hr" },
+			{ projectId: "b", defaultAgentId: "hr" },
+		];
+		await store.focusAgent("hr");
+
+		await store.refreshProjects();
 
 		expect(store.getSnapshot().workingProjectId).toBeUndefined();
-		expect(storage.getItem(WORKING_PROJECT_KEY)).toBeNull();
+	});
+
+	it("手选优先于兜底；选「不指定」也不会被兜底顶回来", async () => {
+		const { store, serve } = await createConnectedStore();
+		serve.declaredProjects = [{ projectId: "dtc", defaultAgentId: "hr" }];
+		await store.focusAgent("hr");
+		await store.refreshProjects();
+		expect(store.getSnapshot().workingProjectId).toBe("dtc"); // 兜底
+
+		store.setWorkingProject("mkt");
+		expect(store.getSnapshot().workingProjectId).toBe("mkt"); // 手选赢了
+
+		store.setWorkingProject(undefined);
+		expect(store.getSnapshot().workingProjectId).toBeUndefined(); // 显式不指定：不被 dtc 顶回来
+		expect(JSON.parse(stored() ?? "{}")).toEqual({ hr: "" });
 	});
 });

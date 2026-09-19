@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
-import { attributionTextOf, projectLabelOf, sessionAttributionOf } from "../src/lib/project-read-model";
+import {
+	attributionTextOf,
+	declaredDefaultProject,
+	projectLabelOf,
+	sessionAttributionOf,
+} from "../src/lib/project-read-model";
 import { sessionProjectLabel } from "../src/lib/records";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import type { SessionView } from "../src/state/session-store";
@@ -560,6 +565,77 @@ describe("projectLabelOf", () => {
 		const label = projectLabelOf(viewOf({ workingProjectId: "dtc" }));
 		expect(label.label).toBe("…");
 		expect(label.title).toContain("判不出它还在不在");
+	});
+
+	it("两个 Project 声明同一个 Agent：不指定说得清为什么没自动绑", () => {
+		const both = [...PROJECTS, { projectId: "mkt", root: "/Users/me/mkt", name: "MKT", defaultAgentId: "hr" }];
+		const label = projectLabelOf(viewOf({ projects: both, focusAgentId: "hr" }));
+		expect(label.label).toBe("不指定");
+		expect(label.title).toContain("2 个 Project 声明为默认");
+		expect(label.title).toContain("米克原子 DTC");
+		expect(label.title).toContain("MKT");
+	});
+});
+
+/**
+ * 注册表里「这个 Agent 的 Project」—— `ProjectRecord.defaultAgentId`（§10 第 2 级）。
+ *
+ * 这是 Agent ↔ Project 绑定在权威层唯一存在的关系，也是前端兜底的唯一依据，所以三种「说不出来」
+ * 必须分开：`unknown`（名单没读到 / 焦点未知）不能读成 `none`（真的没有）—— 后者是确定的否定。
+ */
+describe("declaredDefaultProject", () => {
+	function factsOf(patch: Partial<SessionView>): SessionView {
+		return {
+			connected: true,
+			reconnecting: false,
+			wsUrl: "ws://127.0.0.1:1/ws",
+			protocolVersion: 1,
+			phase: "idle",
+			model: null,
+			thinkingLevel: null,
+			sessionId: "",
+			messages: [],
+			messageEntryIds: {},
+			isStreaming: false,
+			activeToolNames: [],
+			queued: 0,
+			todo: [],
+			flags: { autoCompaction: false, autoRetry: false },
+			agents: [],
+			env: null,
+			historyLoading: false,
+			sessionTreeLoading: false,
+			...patch,
+		};
+	}
+
+	it("恰好一个 Project 声明了这个 Agent → 用它", () => {
+		const declared = declaredDefaultProject(factsOf({ projects: PROJECTS, focusAgentId: "hr" }));
+		expect(declared.kind).toBe("one");
+		expect(declared.kind === "one" ? declared.project.projectId : "").toBe("dtc");
+	});
+
+	it("没有 Project 声明它 → none（确定的否定）", () => {
+		expect(declaredDefaultProject(factsOf({ projects: PROJECTS, focusAgentId: "coding" })).kind).toBe("none");
+	});
+
+	it("两个 Project 都声明它 → ambiguous（把两个都给出来，不替用户猜）", () => {
+		const both = [...PROJECTS, { projectId: "mkt", root: "/Users/me/mkt", name: "MKT", defaultAgentId: "hr" }];
+		const declared = declaredDefaultProject(factsOf({ projects: both, focusAgentId: "hr" }));
+		expect(declared.kind).toBe("ambiguous");
+		expect(declared.kind === "ambiguous" ? declared.projects.map(project => project.projectId) : []).toEqual([
+			"dtc",
+			"mkt",
+		]);
+	});
+
+	it("说不出来的一律 unknown：名单没读到 / 读失败 / 未连接 / 焦点未知 —— 都不冒充「没有」", () => {
+		expect(declaredDefaultProject(factsOf({ focusAgentId: "hr" })).kind).toBe("unknown");
+		expect(declaredDefaultProject(factsOf({ projectsError: "boom", focusAgentId: "hr" })).kind).toBe("unknown");
+		expect(declaredDefaultProject(factsOf({ connected: false, projects: PROJECTS, focusAgentId: "hr" })).kind).toBe(
+			"unknown",
+		);
+		expect(declaredDefaultProject(factsOf({ projects: PROJECTS })).kind).toBe("unknown");
 	});
 });
 

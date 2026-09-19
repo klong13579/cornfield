@@ -558,6 +558,19 @@ describe("ProjectSwitcher", () => {
 		expect(html).not.toContain("已不在注册表");
 	});
 
+	it("两个 Project 都声明了这个 Agent：说出来，不替用户猜", () => {
+		// 一个 Agent 服务多个项目是合法的；兜底选不出来，界面上的「不指定」必须带得出原因。
+		const both: ProjectRecordDto[] = [
+			...PROJECTS,
+			{ projectId: "mkt", root: "/Users/me/mkt", name: "MKT", defaultAgentId: "hr" },
+		];
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, { view: viewOf({ projects: both, agents: AGENTS, activeAgentId: "hr" }) }),
+		);
+		expect(html).toContain("被 2 个 Project 声明为默认");
+		expect(html).toContain("DTC / MKT");
+	});
+
 	it("当前会话归属：来源分开说（会话记录 / 按目录匹配），两者不是一个可信度", () => {
 		const recorded = renderToStaticMarkup(
 			createElement(ProjectSwitcher, {

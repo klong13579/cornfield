@@ -65,9 +65,10 @@ import type {
 	PiClient,
 	RemoteSkillItemDto,
 } from "../lib/pi-client-api";
+import { declaredDefaultProject } from "../lib/project-read-model";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import { isServeVerdict, serveVerdictOf } from "../lib/serve-verdict";
-import { loadWorkingProjectId, rememberWorkingProjectId } from "../lib/working-project";
+import { loadWorkingProjects, saveWorkingProjects } from "../lib/working-project";
 import { activeAgentIdOf } from "./agent-context";
 import { createClient } from "./client";
 import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
@@ -335,30 +336,33 @@ export class SessionStore {
 	#currentProjectSource: SessionProjectSourceDto | undefined;
 	#projectsPending = true;
 	/**
-	 * 工作上下文（客户端选择）：**不随会话变** —— 换会话不该把我选的工作项目偷偷改掉，
-	 * 它是「下一批活干在哪」这件事，而不是「这个会话在哪」这件事。
+	 * 手选过的工作上下文（**Agent → Project**），从 localStorage 恢复、每次改动即落盘。
 	 *
-	 * 初值从 localStorage 恢复（`lib/working-project`）：刷新页面不该把它悄悄退回「不指定」。
-	 * 恢复出来的这一个还没被名单校验过，见 {@link #unverifiedWorkingProjectId}。
+	 * 按 Agent 存是这件事的定义，不是优化：不同 Agent 服务不同的项目，「我在哪个项目上干活」
+	 * 是每个 Agent 各自的事 —— 共用一格就会出现「改一个 Project，所有 Agent 都跟着变」。
 	 *
-	 * 声明过的 Project 被删时这里不做静默清理：清掉它就是在替用户做一个他没做的选择，
+	 * **有效值不在这里**：它在快照成形时由 {@link #workingProjectIdFor} 解出来（手选 ?? 注册表兜底）。
+	 * 把不落盘的兜底值也混进这张表，「手选过」与「注册表推出来的」就再也分不开了。
+	 *
+	 * 声明过的 Project 被删时这里不做会话内的静默清理：清掉它就是在替用户做一个他没做的选择，
 	 * 而 UI 会把「选过但已不在注册表里」老实说出来（与「未声明」不是同一句话）。
-	 * 唯一的例外是**恢复**那一次（见 `#loadProjects`）：那不是替他做选择，是把一个他上次做的、
-	 * 如今已经不存在的选择丢掉。
+	 * 唯一的例外是**恢复**那一次（见 `#loadProjects`）。
 	 */
-	#workingProjectId: string | undefined = loadWorkingProjectId() || undefined;
+	#workingProjectByAgent: Map<string, string> = loadWorkingProjects();
 
 	/**
-	 * 从存储恢复出来、**还没被名单校验**的那个工作上下文。
+	 * 从存储恢复、**还没被名单校验**的那批 Agent。
 	 *
-	 * 页面关着的那段时间里它可能已经被删了。第一次真的读到一份名单时判一次（见 `#loadProjects`）：
-	 * 还在就留，不在就丢（连同存储）—— 「恢复」不该把一个已经不存在的选择带回来。
+	 * 页面关着的那段时间里它们的 Project 可能已经被删了。第一次真的读到一份名单时逐条判一次
+	 * （见 `#loadProjects`）：还在就留，不在就丢（连同存储）—— 「恢复」不该把一个已经不存在的
+	 * 选择带回来。判过之后这批清空。
 	 *
-	 * 判过之后归 `undefined`。两道不校验的门都是有理由的：
+	 * 两条不校验的界线都有理由：
 	 *   - **读失败不校验**：「读不到」不是「没有」，拿一次失败的读取去删用户的选择是最坏的一种猜；
-	 *   - **用户自己改过选择不校验**：那是他刚做的决定，不是恢复（`setWorkingProject` 会清掉它）。
+	 *   - **用户自己改过选择不校验**：那是他刚做的决定，不是恢复（`setWorkingProject` 会把那个
+	 *     Agent 从这里摘掉）。
 	 */
-	#unverifiedWorkingProjectId: string | undefined = this.#workingProjectId;
+	#unverifiedWorkingAgents: Set<string> = new Set(this.#workingProjectByAgent.keys());
 	/**
 	 * Agent Todo 板属于一个 Agent，**不随会话变**：切会话（同一 Agent 换历史会话）不重读，
 	 * 换 Agent 才作废重读。
@@ -455,12 +459,31 @@ export class SessionStore {
 		this.#notify();
 	}
 
+	/**
+	 * 这一屏的事实（引用稳定：同一个 `#view` 反复取回的是同一个对象）。
+	 *
+	 * 工作上下文在这里**现算**（`#workingProjectIdFor`）而不是存成字段：它是**按 Agent** 的，而
+	 * 「焦点是谁」可以由好几条路变（切 Agent、注册表 / Agent 名单到达、快照换代），任何一处忘了
+	 * 同步都会变成「切了 Agent、chip 还写着上一个 Agent 的项目」。
+	 *
+	 * 但 `getSnapshot` 必须**引用稳定** —— `useSyncExternalStore` 拿它比相等，每次返回新对象就是
+	 * 一个无限渲染循环。所以派生的那份按 `#view` 的对象身份缓存：`#view` 一换就作废重算。
+	 * 有效性依赖的三样东西（焦点、名单、手选那张表）每一次变化都换掉了 `#view`，所以缓存键是齐的。
+	 */
 	getSnapshot(): SessionView {
 		if (!this.#view) {
 			this.#view = this.#buildBaseView();
 		}
-		return this.#view;
+		if (this.#derivedView === undefined || this.#derivedFrom !== this.#view) {
+			this.#derivedView = { ...this.#view, workingProjectId: this.#workingProjectIdFor(this.#view) };
+			this.#derivedFrom = this.#view;
+		}
+		return this.#derivedView;
 	}
+
+	/** 派生过工作上下文的那一份视图（`getSnapshot` 的返回值），与它是从哪一份 `#view` 派生的。 */
+	#derivedView: SessionView | undefined;
+	#derivedFrom: SessionView | undefined;
 
 	subscribe(listener: () => void): () => void {
 		this.#listeners.add(listener);
@@ -581,7 +604,7 @@ export class SessionStore {
 		if (target === undefined) {
 			return this.#creationFailed("还不知道本连接的焦点 Agent（未连接或注册表还没到）——新会话落在谁身上无从确定");
 		}
-		const project = opts?.projectId ?? this.#workingProjectId;
+		const project = opts?.projectId ?? this.#workingProjectIdForAgent(this.getSnapshot(), target);
 		this.#creating = true;
 		try {
 			if (target !== current) {
@@ -1325,30 +1348,69 @@ export class SessionStore {
 	}
 
 	/**
-	 * 切工作上下文（顶栏 Project chip 的选择器）。
+	 * 切工作上下文（顶栏 Project chip 的选择器）—— **只改当前焦点 Agent 的那一条**。
 	 *
-	 * 只是本地记住「下一个新会话落在哪」，**不发任何命令** —— 这正是设计里「切换不重启 serve」
-	 * 的含义："切 Project" 不是一个服务端动作，是下一次 `new_session` 带哪个 `projectId`。
-	 * 已经在跑的会话不动（它是另一个会话的归属，不是我的选择能改的）。
+	 * 只是本地记住「这个 Agent 的下一个新会话落在哪」，**不发任何命令** —— 这正是设计里「切换不重启
+	 * serve」的含义："切 Project" 不是一个服务端动作，是下一次 `new_session` 带哪个 `projectId`。
+	 * 已经在跑的会话不动（那是另一个会话的归属，不是我的选择能改的）。
 	 *
-	 * `undefined` / 空串 = 不指定（新会话不声明归属）。
+	 * `undefined` / 空串 = 这个 Agent 不指定（新会话不声明归属）；它同时抹掉这个 Agent 记住的那条，
+	 * 所以下一次打开它也不会把「不指定」再兜底成别的 Project。
 	 *
 	 * 不在这里捣校验：注册表可能还没读到（此时无法判定 ids 合不合法），而一个「选过、但当前
 	 * 注册表里找不到」的选择必须能被如实说出来 —— 静默换成另一个 Project，或静默降成「未声明」，
 	 * 都是在替用户做一个他没做的选择。已删除的项目由 UI 按陈旧态显示（见 `projectLabelOf`）。
 	 *
-	 * 同时把这条选择记进 localStorage（空串 = 忘掉它）：刷新之后它还在。**校验只对「从存储恢复」
-	 * 的那一个做一次**，不对这里新做的决定做 —— 他刚选的那个必须原样留着，哪怕名单里还没有它。
+	 * 同时把这条选择记进 localStorage：刷新之后它还在。**校验只对「从存储恢复」的那批做一次**，
+	 * 不对这里新做的决定做 —— 他刚选的那个必须原样留着，哪怕名单里还没有它。
 	 */
 	setWorkingProject(projectId?: string): void {
-		// 用户自己做的选择：恢复时那道一次性校验就此作废（见 #unverifiedWorkingProjectId）。
-		this.#unverifiedWorkingProjectId = undefined;
-		this.#workingProjectId = projectId === undefined || projectId === "" ? undefined : projectId;
-		rememberWorkingProjectId(this.#workingProjectId ?? "");
+		const agentId = activeAgentIdOf(this.getSnapshot());
+		// 没有焦点 Agent 就没有可绑的对象（还没连上 / 注册表里一个 Agent 都没有）：落一格「无名」的
+		// 记忆只会让下次恢复时对不上人，所以这里什么都不写。
+		if (agentId !== undefined) {
+			// 空串 = 这个 Agent **显式不指定**（不是「没记过」）：存下去，否则注册表兜底会把它顶掉。
+			this.#workingProjectByAgent.set(agentId, projectId === undefined ? "" : projectId.trim());
+			// 用户自己做的选择：恢复时那道一次性校验不再管它（见 #unverifiedWorkingAgents）。
+			this.#unverifiedWorkingAgents.delete(agentId);
+			saveWorkingProjects(this.#workingProjectByAgent);
+		}
 		const view = cloneView(this.getSnapshot());
-		view.workingProjectId = this.#workingProjectId;
+		view.workingProjectId = this.#workingProjectIdFor(view);
 		this.#view = view;
 		this.#notify();
+	}
+
+	/**
+	 * 当前焦点的有效工作上下文 —— **按 Agent**，由这份快照解出来（不存在字段里）。
+	 *
+	 * 优先**手选**（localStorage 里这个 Agent 的那条）；没手选过就用**注册表兜底**：声明
+	 * `defaultAgentId = 这个 Agent` 的 Project，恰好一个时用它（§10 解析链第 2 级，服务端已经在用
+	 * 同一条关系）。0 个 = 不指定；多个 = 也不指定（不替你猜，见 `declaredDefaultProject`）。
+	 *
+	 * 在手快照成形时解一次，而不是各处同步一个字段：漏一处就会出现「切了 Agent、chip 还写着上一个
+	 * 的项目」—— 而那个 bug 就是用户看到的「改一个 project，所有 Agent 都跟着变」。
+	 *
+	 * 名单没读到时的兜底是「判不出来」，不是「没有」：这时候只能用手选那一份，不先替注册表下结论。
+	 */
+	#workingProjectIdFor(view: SessionView): string | undefined {
+		return this.#workingProjectIdForAgent(view, activeAgentIdOf(view));
+	}
+
+	/**
+	 * 指定 Agent 的有效工作上下文 —— 同一个判据，只是「为谁解」说在参数上。
+	 *
+	 * `newSession` 要的就是这个变体：目标 Agent 与当前焦点可以不是同一个（表单里改了 Agent），
+	 * 而工作上下文按 Agent 分，所以新会话要落的是**目标 Agent** 那条，不是焦点那条 ——
+	 * 拿焦点的项目去建另一个 Agent 的会话，就是把两个 Agent 又缠在一起。
+	 */
+	#workingProjectIdForAgent(view: SessionView, agentId: string | undefined): string | undefined {
+		if (agentId === undefined) return undefined;
+		const chosen = this.#workingProjectByAgent.get(agentId);
+		// 选了「不指定」也是选择：不再往兜底跑（否则注册表一有声明，用户选的不指定就被顶掉）。
+		if (chosen !== undefined) return chosen === "" ? undefined : chosen;
+		const declared = declaredDefaultProject({ ...view, focusAgentId: agentId });
+		return declared.kind === "one" ? declared.project.projectId : undefined;
 	}
 
 	/**
@@ -1432,18 +1494,24 @@ export class SessionStore {
 		view.currentProjectSource = currentProjectSource;
 		view.projectsPending = false;
 		view.projectsError = error;
-		// 从存储恢复的工作上下文在这里校验这一次（见 `#unverifiedWorkingProjectId`）：
+		// 从存储恢复的那批工作上下文在这里校验这一次（见 `#unverifiedWorkingAgents`）：
 		// 只在**真的读到一份名单**时判 —— `projects` 是 `undefined` 表示没读到，那不是「名单里没有它」；
 		// 读失败（`error`）同样不判：「不知道」不能拿来删用户的选择。
-		if (projects !== undefined && this.#unverifiedWorkingProjectId !== undefined) {
-			const candidate = this.#unverifiedWorkingProjectId;
-			this.#unverifiedWorkingProjectId = undefined;
-			if (!projects.some(project => project.projectId === candidate)) {
-				this.#workingProjectId = undefined;
-				rememberWorkingProjectId("");
-				view.workingProjectId = undefined;
+		if (projects !== undefined && this.#unverifiedWorkingAgents.size > 0) {
+			let dropped = false;
+			for (const agentId of this.#unverifiedWorkingAgents) {
+				const candidate = this.#workingProjectByAgent.get(agentId);
+				// 没有记录 / 显式不指定：没有可校验的 id。
+				if (candidate === undefined || candidate === "") continue;
+				if (projects.some(project => project.projectId === candidate)) continue;
+				this.#workingProjectByAgent.delete(agentId);
+				dropped = true;
 			}
+			this.#unverifiedWorkingAgents.clear();
+			if (dropped) saveWorkingProjects(this.#workingProjectByAgent);
 		}
+		// 名单变了，兜底也可能变（某个 Agent 的 Project 刚被删掉／刚被声明）；手选不做二次判断。
+		view.workingProjectId = this.#workingProjectIdFor(view);
 		this.#view = view;
 		this.#notify();
 	}
@@ -2204,7 +2272,6 @@ export class SessionStore {
 				currentProjectSource: this.#currentProjectSource,
 				projectsPending: this.#projectsPending,
 				projectsError: this.#projectsError,
-				workingProjectId: this.#workingProjectId,
 				agentTodos: this.#agentTodos,
 				agentTodoProjectIds: this.#agentTodoProjectIds,
 				agentTodosPending: this.#agentTodosPending,
@@ -2258,7 +2325,6 @@ export class SessionStore {
 			currentProjectSource: this.#currentProjectSource,
 			projectsPending: this.#projectsPending,
 			projectsError: this.#projectsError,
-			workingProjectId: this.#workingProjectId,
 			agentTodos: this.#agentTodos,
 			agentTodoProjectIds: this.#agentTodoProjectIds,
 			agentTodosPending: this.#agentTodosPending,

@@ -35,6 +35,44 @@ export interface ProjectFacts {
 	currentProjectSource?: SessionProjectSourceDto;
 	/** 工作上下文选中的 Project（客户端选择，不是 serve 的读数）。 */
 	workingProjectId?: string;
+	/**
+	 * 焦点 Agent —— 判「这个 Agent 的默认 Project」（{@link declaredDefaultProject}）用的。
+	 *
+	 * 由调用方用 `activeAgentIdOf(view)` 解出来传进来（与全屏其余地方同一个解析）；
+	 * 缺省 = 判不出焦点，那件事就什么都说不出来（与「没有」不是同一句话）。
+	 */
+	focusAgentId?: string;
+}
+
+/**
+ * 注册表里**声明由这个 Agent 服务**的 Project（`ProjectRecord.defaultAgentId`，§10 解析链第 2 级）。
+ *
+ * 这是「Agent ↔ Project 绑定」在权威层**唯一存在**的关系，而且方向是「Project 声明它属于哪个
+ * Agent」，不是「Agent 记着自己的 Project」。前端拿它做两件同一判据的事：
+ *   - **兜底**：某个 Agent 还没手选过工作上下文时，它的 Project 就是这一条（见 `SessionStore`）；
+ *   - **如实说「有多个」**：注册表允许两个 Project 都声明同一个 Agent（一个 Agent 服务多个项目是
+ *     合法的），这时**不替用户猜**，退回「不指定」并把候选说出来。
+ *
+ * `unknown` 与 `none` 必须分开：名单还没读到 / 焦点还不知道，都说不出「没有」—— 把前者读成后者，
+ * 会让兜底在读取期间被误判成「这个 Agent 没有项目」。
+ */
+export type DeclaredDefaultProject =
+	| { kind: "unknown" }
+	| { kind: "none" }
+	| { kind: "one"; project: ProjectRecordDto }
+	| { kind: "ambiguous"; projects: ProjectRecordDto[] };
+
+export function declaredDefaultProject(facts: ProjectFacts): DeclaredDefaultProject {
+	const registry = projectRegistryState(facts);
+	if (registry.kind !== "ready" && registry.kind !== "empty") return { kind: "unknown" };
+	const agentId = facts.focusAgentId;
+	if (agentId === undefined) return { kind: "unknown" };
+	const declared = registry.kind === "ready" ? registry.projects : [];
+	const mine = declared.filter(project => project.defaultAgentId === agentId);
+	if (mine.length === 0) return { kind: "none" };
+	const only = mine[0];
+	if (mine.length === 1 && only !== undefined) return { kind: "one", project: only };
+	return { kind: "ambiguous", projects: mine };
 }
 
 /**
@@ -209,9 +247,16 @@ export function projectLabelOf(facts: ProjectFacts): { label: string; title: str
 		// `projects` 没读到就判不出选中的那个还在不在 —— 绝不先说它没了。
 		return { label: "…", title: `工作上下文选了 ${working.projectId}，但 registry 还没读到——判不出它还在不在` };
 	}
+	const declared = declaredDefaultProject(facts);
 	return {
 		label: "不指定",
-		title: `工作上下文：不指定（新会话不声明归属，落在 serve 的启动根）；已声明 ${registry.projects.length} 个 Project`,
+		// 注册表里有多个 Project 都声明了这个 Agent：说得出为什么没自动绑，而不是干着一个「不指定」。
+		title:
+			declared.kind === "ambiguous"
+				? `工作上下文：不指定。这个 Agent 被 ${declared.projects.length} 个 Project 声明为默认（${declared.projects
+						.map(project => project.name)
+						.join(" / ")}）—— 注册表定不下来，自己选一个`
+				: `工作上下文：不指定（新会话不声明归属，落在 serve 的启动根）；已声明 ${registry.projects.length} 个 Project`,
 	};
 }
 

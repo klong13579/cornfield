@@ -5,7 +5,7 @@ import { PathField } from "../components/PathField";
 import { ProjectAttributionNote, ProjectList } from "../components/ProjectContext";
 import type { DirectoryPicker } from "../lib/path-picker";
 import type { ProjectRecordDto } from "../lib/pi-client-api";
-import { projectLabelOf, projectRegistryState } from "../lib/project-read-model";
+import { declaredDefaultProject, projectLabelOf, projectRegistryState } from "../lib/project-read-model";
 import { loadRecentPaths, RECENT_PATH_KEYS, rememberRecentPath } from "../lib/recent-paths";
 import { activeAgentIdOf } from "../state/agent-context";
 import type { SessionView } from "../state/session-store";
@@ -178,6 +178,13 @@ export function ProjectPanel({
 	const unlistedLabel = registry.kind === "ready" || registry.kind === "empty" ? "已不在注册表" : "名单还没读到";
 	const field =
 		"min-w-0 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink outline-none placeholder:text-ink-faint";
+	/**
+	 * 这个 Agent 有没有「恰好一个」Project 声明它做默认（§10 第 2 级）。
+	 *
+	 * 面板拿它做的一件事：**多个时不替用户猜** —— 报「不指定」是引擎（`SessionStore`）的决定，
+	 * 而这里的提示是那个决定的解释，两处读的是同一条判据。
+	 */
+	const declaredDefault = declaredDefaultProject({ ...view, focusAgentId: activeAgentIdOf(view) });
 
 	return (
 		<div className="absolute right-0 z-menu mt-1 max-h-[calc(100vh-3.5rem)] w-[380px] max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-[12px] border border-hairline-strong bg-surface p-3 shadow-xl">
@@ -224,6 +231,13 @@ export function ProjectPanel({
 				<div className="mt-1 text-[11px] text-ink-faint">
 					切它不重启 serve：只在建**新**会话时带上去，已经在跑的会话不动。
 				</div>
+				{declaredDefault.kind === "ambiguous" && (
+					<div className="mt-1 rounded-md border border-warning/30 bg-warning/5 px-2 py-1 text-[11px] text-warning">
+						这个 Agent 被 {declaredDefault.projects.length} 个 Project 声明为默认（
+						{declaredDefault.projects.map(project => project.name).join(" / ")}）—— 注册表定不下来，没有替你
+						选，自己挑一个。
+					</div>
+				)}
 			</div>
 
 			<ProjectAttributionNote view={view} />
@@ -326,7 +340,8 @@ export function ProjectSwitcher({
 	onRefresh?: () => void;
 }): React.JSX.Element {
 	const store = useSessionStore();
-	const { label, title } = projectLabelOf(view);
+	// 焦点是谁由调用方解出来（与全屏同一处解析）：「这个 Agent 被多个 Project 声明为默认」要靠它才说得出来。
+	const { label, title } = projectLabelOf({ ...view, focusAgentId: activeAgentIdOf(view) });
 	const [state, setState] = useState<ProjectPanelState>({
 		draft: EMPTY_PROJECT_DRAFT,
 		deleteTargetId: "",
