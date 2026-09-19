@@ -43,7 +43,8 @@ export function agentSessionsRoot(meta: AgentMeta): string {
 }
 
 /**
- * 扫描并索引会话。按 startTime 倒序，最多 limit 条（先按 mtime 取每源最新 N 个文件再解析）。
+ * 扫描并索引会话。同一 sessionId 只留一条，按 startTime 倒序，最多 limit 条
+ * （先按 mtime 取每源最新 N 个文件再解析）。
  * 单文件解析失败不影响整体（跳过并记 debug 日志）。
  */
 export async function indexSessions(
@@ -60,9 +61,48 @@ export async function indexSessions(
 			return Promise.all(newest.map(file => indexOne(source, file)));
 		}),
 	);
-	const entries = filesPerSource.flat().filter((e): e is WireSessionIndexEntry => e !== null);
+	// 去重必须发生在截断之前：同一个会话的两份文件若留到 slice 之后合并，limit 会被这份重复
+	// 白吃掉一条，真实会话反而被挤掉。
+	const entries = dedupeBySessionId(filesPerSource.flat().filter((e): e is WireSessionIndexEntry => e !== null));
 	entries.sort((a, b) => (a.startTime < b.startTime ? 1 : -1));
 	return entries.slice(0, cappedLimit);
+}
+
+/**
+ * 按 sessionId 去重，同一个会话只留一条。
+ *
+ * 为什么按 id 合并、而不是按文件名把 `.client-side.jsonl` 排除掉：两份文件不是固定的
+ * 「主文件 + 后缀副本」关系。default agent 的 sessions 目录里
+ * `<HHMMSS>__<8hex>.jsonl` 与其 `.client-side.jsonl` 实测逐字节相同，但 client-side 是旁路
+ * 产物、内容可以与 agent 自己写的那份不同 —— 靠文件名后缀排除等于盲选一份，可能丢掉信息更全的。
+ * id 是会话头里的权威身份（两份文件的 header.id 相同），按它合并再按信息量挑，对两种产物都成立。
+ *
+ * 取舍顺序（确定性，不依赖输入顺序）：
+ * 1. entryCount 大的优先 —— 信息更全的那份；
+ * 2. entryCount 相同则非 `.client-side.jsonl` 的优先 —— 那是 agent 自己写的会话日志；
+ * 3. 仍相同则 sessionFile 字典序取第一个 —— 让结果与扫描顺序无关。
+ */
+function dedupeBySessionId(entries: WireSessionIndexEntry[]): WireSessionIndexEntry[] {
+	const byId = new Map<string, WireSessionIndexEntry>();
+	for (const entry of entries) {
+		const kept = byId.get(entry.sessionId);
+		if (!kept || shouldPreferEntry(entry, kept)) byId.set(entry.sessionId, entry);
+	}
+	return [...byId.values()];
+}
+
+/** candidate 是否比已留的那条更该留（取舍顺序见 dedupeBySessionId）。 */
+function shouldPreferEntry(candidate: WireSessionIndexEntry, kept: WireSessionIndexEntry): boolean {
+	if (candidate.entryCount !== kept.entryCount) return candidate.entryCount > kept.entryCount;
+	const candidateIsClientSide = isClientSideFile(candidate.sessionFile);
+	const keptIsClientSide = isClientSideFile(kept.sessionFile);
+	if (candidateIsClientSide !== keptIsClientSide) return !candidateIsClientSide;
+	return candidate.sessionFile < kept.sessionFile;
+}
+
+/** 旁路产物：`<会话名>.client-side.jsonl`（agent 自己写的那份不带该后缀）。 */
+function isClientSideFile(filePath: string): boolean {
+	return path.basename(filePath).endsWith(".client-side.jsonl");
 }
 
 interface JsonlFile {

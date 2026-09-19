@@ -63,6 +63,8 @@
 
 ### Fixed
 
+- **会话索引按会话 id 去重（同一会话不再被索引两遍）**（`src/server/session-index.ts`, `test/session-index-dedupe.test.ts`）：default agent 的 sessions 目录里存在成对文件——`<HHMMSS>__<8hex>.jsonl` 与其 `.client-side.jsonl` 副本（实测两份逐字节相同、header id 相同），而索引按 `**/*.jsonl` 全扫，于是同一个会话在**会话记录页、用量页、会话侧栏**各出现两次（侧栏还因为 React key 撞上而会留下没被移除的陈旧行：过滤后组头写 3 行、DOM 里 6 行）。现在合并阶段按 `sessionId` 去重，取舍顺序：`entryCount` 大的 → 非 `.client-side.jsonl` 的 → `sessionFile` 字典序（确定性，不依赖扫描顺序）；去重发生在截断**之前**，否则 `limit` 会被重复项白吃一条。为什么按 id 合并而不是按后缀排除：两份文件不是固定的「主 + 副本」关系，后缀排除等于盲选一份。
+
 - **Agent Todo 板的并发写会丢任务**（`src/agent-domain/agent-todo-store.ts`, `test/agent-todo-store.test.ts`）：写一条是读-改-写，而这块板子同时有两个写入者（serve 的 wire 命令 / agent 的 `agent_todo` 工具），且可能不在同一个进程里 —— 两个写入者各读一份旧内容、各写回一份，后写的把先写的整个覆盖掉，用户丢掉一条看起来已经存下的任务。现 `upsertAgentTodo` / `removeAgentTodo` 走 `withFileLock`（锁文件就在板子旁边，跨进程生效）。回归：12 条并发写必须全部落盘；把锁摘掉这条用例会红（实测过）。
 - **Agent Todo 板可能被读到半份 JSON**（同上）：落盘改为「写同目录临时文件 + `rename`」—— 直接 `Bun.write` 是截断再写，并发读者会拿到半份内容，然后把它报成「板子损坏」（一个我们并不拥有的结论）。rename 是原子的：读者要么看见旧的整份、要么新的整份。
 
