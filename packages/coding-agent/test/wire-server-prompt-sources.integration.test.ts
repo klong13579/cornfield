@@ -3,11 +3,11 @@
  *
  * 之前这份清单写在前端（web-app Prompts tab 硬编码 7 项）并且已经漂移：
  * `.omp/SYSTEM.md` 是旧路径（实际是 `.cornfield/SYSTEM.md`）、`AGENTS-personal.md` 与 `CONTEXT.md`
- * 全仓库只有那一处提到（根本不存在），而真正 always-on 的 `TOOLS.md` / `TODO.md` /
+ * 全仓库只有那一处提到（根本不存在），而真正 always-on 的 `TOOLS.md` /
  * `knowledge/external-workspaces.md` 反而没有入口。
  *
  * 真 serve + 隔离 HOME，验证：
- *   1. 清单是那 8 个 prompt 源、按骨架写出顺序，一个不多一个不少；
+ *   1. 清单是那 7 个 prompt 源、按骨架写出顺序，一个不多一个不少（`TODO.md` 已退出 prompt 面）；
  *   2. **逐项报 exists**——缺的那项也在清单里（不是裁成「存在的那些」）；
  *   3. 是活读（补上文件后 exists 变 true），不是启动时快照；
  *   4. 非 prompt 面（.gitignore / .cornfield/config.yml / skills/lint/SKILL.md）不混进来；
@@ -28,7 +28,6 @@ const EXPECTED_PROMPT_PATHS = [
 	"AGENTS.md",
 	"mission.md",
 	"TOOLS.md",
-	"TODO.md",
 	"user.md",
 	"prompt-includes.json",
 	".cornfield/SYSTEM.md",
@@ -141,19 +140,19 @@ describe("get_agent_prompt_sources", () => {
 				expect(source.title.length, source.path).toBeGreaterThan(0);
 				expect(source.description.length, source.path).toBeGreaterThan(0);
 			}
-			// 存在的两个为 true，没建的那 6 个也**在清单里**、报 false。
+			// 存在的两个为 true，没建的那 5 个也**在清单里**、报 false。
 			expect(Object.fromEntries(dto.sources.map(s => [s.path, s.exists]))).toEqual({
 				"AGENTS.md": true,
 				"mission.md": false,
 				"TOOLS.md": false,
-				"TODO.md": false,
 				"user.md": true,
 				"prompt-includes.json": false,
 				".cornfield/SYSTEM.md": false,
 				"knowledge/external-workspaces.md": false,
 			});
-			// 非 prompt 面混进来就是回归（.gitignore 已在盘上，也不该出现）。
+			// 非 prompt 面混进来就是回归（.gitignore 已在盘上，也不该出现；TODO.md 已退出 prompt 面）。
 			const paths = dto.sources.map(source => source.path);
+			expect(paths).not.toContain("TODO.md");
 			expect(paths).not.toContain(".gitignore");
 			expect(paths).not.toContain(".cornfield/config.yml");
 			expect(paths).not.toContain(".cornfield/skills/lint/SKILL.md");

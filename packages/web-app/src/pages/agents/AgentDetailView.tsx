@@ -919,7 +919,8 @@ function ProfileView({ agentId }: { agentId: string }): React.JSX.Element {
 // 这份清单的真源是 `get_agent_prompt_sources`（serve 侧 `skeleton/agent-dir-files.ts` 的
 // prompt 面）。这里曾经硬编码 7 项并且已经漂移：`.omp/SYSTEM.md` 是旧路径、
 // `AGENTS-personal.md` / `CONTEXT.md` 全仓只有它提过；真正 always-on 的
-// `TOOLS.md` / `TODO.md` / `knowledge/external-workspaces.md` 反而没有入口。
+// `TOOLS.md` / `knowledge/external-workspaces.md` 反而没有入口。
+// （`TODO.md` 曾在这份清单里，2026-09-19 退出 prompt 面 —— 它是历史任务留档，不再注入。）
 // 现在只渲染 serve 给的（`title` + `description`），正文按 `path` 用 fs_read 读。
 //
 // 三种「没有正文」不许互相顶替（与右栏 Artifacts/Changes 同一套写法）：

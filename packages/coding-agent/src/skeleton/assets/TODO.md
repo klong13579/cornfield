@@ -1,19 +1,11 @@
 # TODO
 
-> Current task state. **Always-on** via `prompt-includes.json`.
-> The agent updates this file as work progresses; an empty TODO is a valid state.
-> Rows may carry a topic link: `- [ ] <text> → topics/<slug>.md`
-> (topic file = goal/design/references/progress/resume point; see `project-todo` skill).
-
-## 当前任务
-
-> Describe what the agent is currently doing, any blockers, and the next step.
-
-## 待办
-
-- [ ] 任务 1
-- [ ] 任务 2
-
-## 进度记录
-
-- YYYY-MM-DD HH:MM — 任务起点
+> 本文件**不进自动注入**（已从 `prompt-includes.json` 摘除）：Agent 会话默认不带它。
+> 这个 Agent 的任务在那个 Agent 的任务板里：`<agentDir>/.cornfield/agent-todos.json`
+> （结构化：status / priority / dueAt / notes），由 serve 的 `list_agent_todos` /
+> `set_agent_todo` / `delete_agent_todo` 读写，Todo 页是它的界面。
+>
+> **不要手改任务板 JSON**：`createdAt` / `updatedAt` 由存储盖章，终态不可重开，
+> `sessionRefs` 记的是哪些会话推进过它 —— 手改会绕过这三条。
+>
+> 本文件保留为历史记录（旧的任务清单与 `→ topics/<slug>.md` 链接在这里），只读。

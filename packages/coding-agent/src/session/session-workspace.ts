@@ -34,7 +34,7 @@
  *     root to work in; answering "unbound" would hand it the agentDir and let it run somewhere
  *     nobody declared.
  *   - An `agentDir/.cornfield/workspace.json` that exists but cannot be interpreted fails instead of
- *     silently dropping the roots it declares — the same rule `../server/agent-todos-wire` applies
+ *     silently dropping the roots it declares — the same rule `../agent-domain/agent-todo-board` applies
  *     to the same file, for the same reason: a declaration that cannot be read may well be declaring
  *     something, and reading it as "nothing" widens what the session may touch.
  *

@@ -76,13 +76,14 @@ function findLines(text: string, predicate: (line: string) => boolean): { line: 
 // R1: no-skeleton-placeholder
 // ────────────────────────────────────────────────────────────────────────────
 
-const PLACEHOLDER_PATTERNS: RegExp[] = [
-	/⚠️\s*\*\*请编辑本文件/,
-	/<机器人名>/,
-	/> Append project-specific tools here/i,
-	/-\s*\[.\]\s*任务\s*[12]/,
-	/YYYY-MM-DD\s+HH:MM\s*—\s*任务起点/,
-];
+/**
+ * 骨架占位符残留（prompt 面文件里不该留模板原文）。
+ *
+ * 原来还有两条专指旧 `TODO.md` 模板的行（`- [ ] 任务 1/2`、`YYYY-MM-DD HH:MM — 任务起点`）：
+ * 2026-09-19 TODO.md 退出 prompt 面（历史留档，模板不再含这两行），它们已无匹配对象，
+ * 一并删掉 —— 留着只会让读者以为那个模板还在。
+ */
+const PLACEHOLDER_PATTERNS: RegExp[] = [/⚠️\s*\*\*请编辑本文件/, /<机器人名>/, /> Append project-specific tools here/i];
 
 const noSkeletonPlaceholder: MeceRule = {
 	id: "no-skeleton-placeholder",
@@ -543,12 +544,16 @@ export const MECE_RULES: MeceRule[] = [
 	noDeprecatedAgentDir,
 ];
 
-/** Files that MECE rules need to read (rel paths from agentDir root). */
+/**
+ * Files that MECE rules need to read (rel paths from agentDir root).
+ *
+ * `TODO.md` 不在里面：它是历史留档，不是 prompt 面（见 `skeleton/agent-dir-files.ts` 的
+ * `surface`）—— MECE 查的是 prompt 文件的职责边界，拿一份不再注入的存档去查只会产生噪声。
+ */
 export const MECE_FILES: ReadonlyArray<string> = [
 	"AGENTS.md",
 	"mission.md",
 	"TOOLS.md",
-	"TODO.md",
 	"knowledge/external-workspaces.md",
 	".cornfield/SYSTEM.md",
 ];

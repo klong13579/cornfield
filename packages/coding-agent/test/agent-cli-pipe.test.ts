@@ -61,7 +61,7 @@ beforeEach(async () => {
 	await writeSkeleton(fatDir, `# AGENTS.md\n\n${constraints.join("\n")}\n`, "# mission\n");
 	const placeholders = Array.from(
 		{ length: PLACEHOLDERS },
-		() => "- [ ] 任务 1 占位符残留内容用于触发 no-skeleton-placeholder 规则，行要足够长以撑大输出",
+		() => "<机器人名> 占位符残留内容用于触发 no-skeleton-placeholder 规则，行要足够长以撑大输出",
 	);
 	await writeSkeleton(meceDir, "# AGENTS.md\n", `# mission\n\n${placeholders.join("\n")}\n`);
 });

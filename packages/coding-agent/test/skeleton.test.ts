@@ -22,7 +22,7 @@ import { buildAgentSessionPath, ensureAgentDir, resolveAgentDir } from "../src/s
  * `docs/gateway/agent-bridge.md`（Agent Design V1）§2.
  */
 const REQUIRED_FILES = [
-	// 5 always-on at root
+	// 4 always-on at root + 1 archived (TODO.md：历史任务留档，不注入)
 	"AGENTS.md",
 	"mission.md",
 	"TOOLS.md",
@@ -131,26 +131,23 @@ describe("skeleton", () => {
 		expect(content).toContain("MUST NOT");
 	});
 
-	test("TODO.md provides current-task + checklist structure", async () => {
+	test("TODO.md 说明自己不再注入，并指向任务板（历史留档）", async () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, "TODO.md")).text();
-		expect(content).toContain("当前任务");
-		expect(content).toContain("待办");
+		// 不能再用旧模板的「当前任务 / 任务 1」结构：那会让读者以为它还是任务面
+		expect(content).toContain("不进自动注入");
+		expect(content).toContain(".cornfield/agent-todos.json");
+		expect(content).not.toMatch(/-\s*\[.\]\s*任务\s*[12]/);
 	});
 
-	test("prompt-includes.json lists the 5 always-on files at root", async () => {
+	test("prompt-includes.json lists the 4 always-on files at root", async () => {
 		await ensureAgentDir(tmpDir);
 		const content = await Bun.file(path.join(tmpDir, "prompt-includes.json")).text();
 		const parsed = JSON.parse(content);
 		expect(parsed).toHaveProperty("files");
 		expect(Array.isArray(parsed.files)).toBe(true);
-		expect(parsed.files).toEqual([
-			"AGENTS.md",
-			"mission.md",
-			"TOOLS.md",
-			"TODO.md",
-			"knowledge/external-workspaces.md",
-		]);
+		// TODO.md 不在里面：它已退出注入（历史任务留档）
+		expect(parsed.files).toEqual(["AGENTS.md", "mission.md", "TOOLS.md", "knowledge/external-workspaces.md"]);
 	});
 
 	test(".cornfield/SYSTEM.md contains gateway agent system prompt baseline", async () => {

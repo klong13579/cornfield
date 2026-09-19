@@ -308,10 +308,9 @@ describe("runAgentValidate", () => {
 		const result = await runAgentValidate({ agentDir: path.join(tmpDir, "bare") });
 		expect(result.valid).toBe(false);
 		const missing = result.issues.filter(i => i.level === "error" && i.message === "Missing always-on file");
-		// Should flag all 5 always-on (alphabetical: D < S, so TODO.md < TOOLS.md)
+		// Should flag all 4 always-on（TODO.md 已退出 always-on：它是历史留档，缺失不再算 error）
 		expect(missing.map(i => i.file).sort()).toEqual([
 			"AGENTS.md",
-			"TODO.md",
 			"TOOLS.md",
 			"knowledge/external-workspaces.md",
 			"mission.md",
@@ -362,16 +361,17 @@ describe("runAgentValidate — MECE rules", () => {
 	}
 
 	test("R1: detects and repairs skeleton placeholders", async () => {
+		// 占位符写在 mission.md（prompt 面文件）：TODO.md 已退出 prompt 面，不再被 MECE 规则读
 		const dir = await initAgent();
-		await Bun.write(path.join(dir, "TODO.md"), "# TODO\n\n- [ ] 任务 1\n- [ ] 任务 2\n");
+		await Bun.write(path.join(dir, "mission.md"), "# mission\n\n<机器人名>\n");
 		const result = await runAgentValidate({ agentDir: dir });
 		const violation = result.mece?.violations.find(v => v.rule === "no-skeleton-placeholder");
 		expect(violation).toBeTruthy();
 		// Fix
 		const fixed = await runAgentValidate({ agentDir: dir, fix: true });
 		expect(fixed.mece?.repaired.length).toBeGreaterThan(0);
-		const todoAfter = await Bun.file(path.join(dir, "TODO.md")).text();
-		expect(todoAfter).not.toContain("任务 1");
+		const missionAfter = await Bun.file(path.join(dir, "mission.md")).text();
+		expect(missionAfter).not.toContain("<机器人名>");
 	});
 
 	test("R2: detects and repairs tool list in mission.md", async () => {

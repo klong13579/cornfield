@@ -74,10 +74,11 @@ export const AGENT_DIR_FILES: readonly AgentDirFile[] = [
 	},
 	{
 		relPath: "TODO.md",
-		title: "当前任务看板",
-		description: "当前任务状态，由 agent 随进展更新；always-on 注入 <context>，TUI 欢迎页也读它。",
-		requirement: "always-on",
-		surface: "prompt",
+		title: "历史任务留档",
+		description:
+			"旧的任务清单与 topic 链接留档（只读）。**不再**经 prompt-includes.json 注入，也不再由 agent 维护：当前任务在那个 Agent 的任务板 `<agentDir>/.cornfield/agent-todos.json`（经 serve 的 wire 命令读写，Todo 页是它的界面）。",
+		requirement: "optional",
+		surface: "other",
 	},
 	{
 		relPath: "user.md",

@@ -16,7 +16,7 @@
 | `AGENTS.md` (this)                   | MANIFEST + CONSTRAINTS           | always-on (manifest trigger)                                         |
 | `mission.md`                         | IDENTITY                         | always-on (via `prompt-includes.json`)                               |
 | `TOOLS.md`                           | CONTEXT + tool-level CONSTRAINTS | always-on                                                            |
-| `TODO.md`                            | CONTEXT (current task)           | always-on                                                            |
+| `TODO.md`                            | ARCHIVE (historical tasks)       | NOT injected — 当前任务在 `.cornfield/agent-todos.json`              |
 | `knowledge/external-workspaces.md`   | CONTEXT (data sources)           | always-on                                                            |
 | `prompt-includes.json`               | RUNTIME (injection manifest)     | read at startup                                                      |
 | `.cornfield/config.yml`                    | RUNTIME (model/role/theme)       | read at startup (hard dependency)                                    |
@@ -54,7 +54,7 @@
 
 - `mission.md` — redefine this bot's identity, capabilities, and language.
 - `TOOLS.md` — add tool-level `MUST` / `MUST NOT` rules co-located with each tool (design §4 principle 2).
-- `TODO.md` — track the current task; updated by the agent as work progresses.
+- `TODO.md` — 历史任务留档（只读）。当前任务在那个 Agent 的任务板 `.cornfield/agent-todos.json`；不要往这里写新任务。
 - `prompt-includes.json` — change which files are injected as always-on.
 - `.cornfield/config.yml` — change `modelRoutes.default.primary` to switch the active model.
 - `.cornfield/SYSTEM.md` — gateway agent system prompt baseline; edit to customize behavior. Leave empty to fall back to CornField's built-in prompt.

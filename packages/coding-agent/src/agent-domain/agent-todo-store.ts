@@ -45,6 +45,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { isEnoent } from "@cornfield/utils";
+import { withFileLock } from "../config/file-lock";
 import { WORKSPACE_DIR_NAME } from "../skeleton/workspace";
 import { validateAgentTodoTransition } from "./relations";
 import type {
@@ -127,59 +128,78 @@ export async function loadAgentTodos(agentDir: string): Promise<AgentTodo[]> {
  * Lifecycle is enforced against the **stored** previous status, not the caller's idea of
  * it (`validateAgentTodoTransition`).
  */
+/**
+ * 写入是**读-改-写**，所以要串行。
+ *
+ * 这块板子同时有多方在写：serve 的 wire 命令（网页 UI）与 agent 自己的 `agent_todo` 工具，
+ * 且它们可能不在同一个进程里（gateway 的 agent 是独立进程）。没有文件锁时两个写入者会各读一份
+ * 旧内容、各写回一份：后写的把先写的整个覆盖掉，用户丢掉一条看起来已经存下的任务。
+ * 锁文件就在板子旁边（`<agent-todos.json>.lock/`），跨进程生效。
+ */
 export async function upsertAgentTodo(agentDir: string, input: AgentTodo): Promise<AgentTodo> {
 	const fields = requireWritableFields(input.id, input);
-	const todos = await loadAgentTodos(agentDir);
-	const previous = todos.find(todo => todo.id === input.id);
-	const now = Date.now();
+	return await withFileLock(agentTodosFilePath(agentDir), async () => {
+		const todos = await loadAgentTodos(agentDir);
+		const previous = todos.find(todo => todo.id === input.id);
+		const now = Date.now();
 
-	if (!previous && fields.sessionRefs.length > 0) {
-		throw new Error(
-			`AgentTodo "${input.id}" cannot be created with sessionRefs: they record which sessions advanced it, ` +
-				`not what the caller has on screen.`,
-		);
-	}
-	if (previous) {
-		const violation = validateAgentTodoTransition(input.id, previous.status, fields.status);
-		if (violation) throw new Error(violation.message);
-		if (!sameRefs(previous.sessionRefs, fields.sessionRefs)) {
+		if (!previous && fields.sessionRefs.length > 0) {
 			throw new Error(
-				`AgentTodo "${input.id}" sessionRefs is not writable through this store: it records which sessions ` +
-					`advanced the Todo, not what the caller currently has on screen.`,
+				`AgentTodo "${input.id}" cannot be created with sessionRefs: they record which sessions advanced it, ` +
+					`not what the caller has on screen.`,
 			);
 		}
-	}
+		if (previous) {
+			const violation = validateAgentTodoTransition(input.id, previous.status, fields.status);
+			if (violation) throw new Error(violation.message);
+			if (!sameRefs(previous.sessionRefs, fields.sessionRefs)) {
+				throw new Error(
+					`AgentTodo "${input.id}" sessionRefs is not writable through this store: it records which sessions ` +
+						`advanced the Todo, not what the caller currently has on screen.`,
+				);
+			}
+		}
 
-	const next: AgentTodo = {
-		id: input.id,
-		agentId: fields.agentId,
-		title: fields.title,
-		status: fields.status,
-		priority: fields.priority,
-		source: fields.source,
-		createdAt: previous?.createdAt ?? now,
-		updatedAt: now,
-		sessionRefs: previous?.sessionRefs ?? [],
-	};
-	if (fields.projectId !== undefined) next.projectId = fields.projectId;
-	if (fields.notes !== undefined) next.notes = fields.notes;
-	if (fields.dueAt !== undefined) next.dueAt = fields.dueAt;
-	if (fields.reminders !== undefined) next.reminders = fields.reminders;
+		const next: AgentTodo = {
+			id: input.id,
+			agentId: fields.agentId,
+			title: fields.title,
+			status: fields.status,
+			priority: fields.priority,
+			source: fields.source,
+			createdAt: previous?.createdAt ?? now,
+			updatedAt: now,
+			sessionRefs: previous?.sessionRefs ?? [],
+		};
+		if (fields.projectId !== undefined) next.projectId = fields.projectId;
+		if (fields.notes !== undefined) next.notes = fields.notes;
+		if (fields.dueAt !== undefined) next.dueAt = fields.dueAt;
+		if (fields.reminders !== undefined) next.reminders = fields.reminders;
 
-	const merged = previous ? todos.map(todo => (todo.id === next.id ? next : todo)) : [...todos, next];
-	await writeAgentTodos(agentDir, merged);
-	return next;
+		const merged = previous ? todos.map(todo => (todo.id === next.id ? next : todo)) : [...todos, next];
+		await writeAgentTodos(agentDir, merged);
+		return next;
+	});
 }
 
 /** Remove one Todo. Returns true when it existed. */
 export async function removeAgentTodo(agentDir: string, todoId: AgentTodoId): Promise<boolean> {
-	const todos = await loadAgentTodos(agentDir);
-	const next = todos.filter(todo => todo.id !== todoId);
-	if (next.length === todos.length) return false;
-	await writeAgentTodos(agentDir, next);
-	return true;
+	return await withFileLock(agentTodosFilePath(agentDir), async () => {
+		const todos = await loadAgentTodos(agentDir);
+		const next = todos.filter(todo => todo.id !== todoId);
+		if (next.length === todos.length) return false;
+		await writeAgentTodos(agentDir, next);
+		return true;
+	});
 }
 
+/**
+ * 落盘：先写同目录的临时文件，再 rename 覆盖。
+ *
+ * 直接 `Bun.write` 目标是截断再写，中途被别人读到就会拿到半份 JSON —— 读方会把它报成
+ * 「板子损坏」（一个我们并不拥有的结论）。rename 是原子的：读者要么看见旧的整份，要么新的整份。
+ * 写者之间由 {@link upsertAgentTodo} 的文件锁串行，这一层只管「读者不会看到半份」。
+ */
 async function writeAgentTodos(agentDir: string, todos: readonly AgentTodo[]): Promise<void> {
 	const file: AgentTodoStoreFile = {
 		version: AGENT_TODO_STORE_VERSION,
@@ -187,7 +207,14 @@ async function writeAgentTodos(agentDir: string, todos: readonly AgentTodo[]): P
 	};
 	const target = agentTodosFilePath(agentDir);
 	await fs.mkdir(path.dirname(target), { recursive: true });
-	await Bun.write(target, `${JSON.stringify(file, null, 2)}\n`);
+	const scratch = `${target}.tmp-${process.pid}-${Date.now()}`;
+	try {
+		await Bun.write(scratch, `${JSON.stringify(file, null, 2)}\n`);
+		await fs.rename(scratch, target);
+	} catch (err) {
+		await fs.rm(scratch, { force: true }).catch(() => undefined);
+		throw err;
+	}
 }
 
 /** Reference equality by value — `sessionRefs` is a list, and a new array is not a new fact. */

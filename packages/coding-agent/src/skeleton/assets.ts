@@ -5,7 +5,8 @@
  * is bundled at build time — no runtime file reads, no string-literal duplication.
  *
  * Asset layout mirrors the agentDir layout per `docs/gateway/agent-bridge.md`（Agent Design V1）§2:
- *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
+ *   - 4 always-on files at root: AGENTS.md, mission.md, TOOLS.md, knowledge/external-workspaces.md
+ *   - 1 archived file at root: TODO.md（历史任务留档，**不注入**；当前任务在 `<agentDir>/.cornfield/agent-todos.json`）
  *   - 1 project-level user persona: user.md (overrides / supplements the user-level ~/.cornfield/user.md)
  *   - runtime files: prompt-includes.json, .gitignore, .cornfield/config.yml, .cornfield/SYSTEM.md
  */
@@ -40,8 +41,10 @@ export interface SkeletonFile {
  * Order is preserved for deterministic output; .gitkeep stubs are generated programmatically in `ensure.ts`.
  *
  * Layout mirrors the agentDir layout per `docs/gateway/agent-bridge.md`（Agent Design V1）§2:
- *   - 5 always-on files at root: AGENTS.md, mission.md, TOOLS.md, TODO.md, knowledge/external-workspaces.md
+ *   - 4 always-on files at root: AGENTS.md, mission.md, TOOLS.md, knowledge/external-workspaces.md
  *     (loaded into <context> via prompt-includes.json; see `loadProjectContextFiles`)
+ *   - TODO.md is written for new agents but NOT injected — it is the archived task record; the live
+ *     board is `<agentDir>/.cornfield/agent-todos.json`
  *   - 1 project-level user persona: user.md
  *     (overrides / supplements the user-level ~/.cornfield/user.md that `loadUserProfile` injects into <user>)
  *   - runtime files: prompt-includes.json, .gitignore, .cornfield/config.yml, .cornfield/SYSTEM.md

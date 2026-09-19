@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@cornfield/agent";
 import { getProjectDir } from "@cornfield/utils";
 import { Type } from "@sinclair/typebox";
@@ -10,25 +9,27 @@ import { RUNNERS } from "./recipe/runners";
 
 const projectContextSchema = Type.Object({});
 
+/**
+ * `todo` 字段已删（2026-09-19）：这里曾把 `<projectRoot>/TODO.md` 的内容报给模型，而 TODO.md 已退出
+ * Agent 的任务流程（历史留档；当前任务在那个 Agent 的任务板 `<agentDir>/.cornfield/agent-todos.json`）。
+ * 继续报一份不再维护的存档，就是拿过期内容当事实——模型没有第二个信号能分辨它。
+ */
 type ProjectContextDetails = {
 	cwd: string;
 	projectRoot: string | null;
 	git: { root: string | null; status: git.GitStatusSummary | null; head: string | null; error?: string };
 	contextFiles: { paths: string[]; count: number; error?: string };
-	todo: { exists: boolean; path: string | null; summary: string | null; error?: string };
 	recipes: { runners: Array<{ id: string; label: string; tasks: string[] }>; error?: string };
 	errors: string[];
 };
-
-const TODO_MAX_LINES = 12;
 
 export class ProjectContextTool implements AgentTool<typeof projectContextSchema, ProjectContextDetails> {
 	readonly name = "project_context";
 	readonly label = "ProjectContext";
 	readonly loadMode = "essential" as const;
-	readonly summary = "Orients the agent in the current project: root, git state, project docs, and pending todos.";
+	readonly summary = "Orients the agent in the current project: root, git state, project docs, and available recipes.";
 	readonly description =
-		"Inspect structured project context: roots, git status, context files, TODO, and available recipes.";
+		"Inspect structured project context: roots, git status, context files, and available recipes.";
 	readonly parameters = projectContextSchema;
 	readonly strict = true;
 
@@ -48,7 +49,6 @@ export class ProjectContextTool implements AgentTool<typeof projectContextSchema
 			projectRoot: null,
 			git: { root: null, status: null, head: null },
 			contextFiles: { paths: [], count: 0 },
-			todo: { exists: false, path: null, summary: null },
 			recipes: { runners: [] },
 			errors,
 		};
@@ -80,22 +80,6 @@ export class ProjectContextTool implements AgentTool<typeof projectContextSchema
 		} catch (error) {
 			details.contextFiles.error = error instanceof Error ? error.message : String(error);
 			errors.push(`context files: ${details.contextFiles.error}`);
-		}
-
-		const todoPath = path.join(details.projectRoot ?? cwd, "TODO.md");
-		try {
-			const content = await Bun.file(todoPath).text();
-			details.todo.exists = true;
-			details.todo.path = todoPath;
-			const lines = content.split("\n").slice(0, TODO_MAX_LINES);
-			details.todo.summary = lines.join("\n").trim() || null;
-		} catch (error) {
-			if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-				// TODO.md is optional; absence is a normal result.
-			} else {
-				details.todo.error = error instanceof Error ? error.message : String(error);
-				errors.push(`TODO: ${details.todo.error}`);
-			}
 		}
 
 		try {

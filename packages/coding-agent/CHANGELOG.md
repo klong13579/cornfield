@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Agent 能按需读写自己的长期任务板：新工具 `agent_todo`**（`src/tools/agent-todo.ts`, `src/tools/index.ts`, `src/prompts/tools/agent-todo.md`, `src/agent-domain/agent-todo-board.ts`）：板子就是 Todo 页显示的那块 `<agentDir>/.cornfield/agent-todos.json`。工具按 `discoverable` 挂成 `xd://agent_todo` 设备 —— 「按需」不等于「藏在代码里」：设备目录（`_environment.md` 的 Mounted devices 段）会列出它的 summary，模型由此知道这个能力存在，要用时 `read xd://agent_todo` 取手册、`write xd://agent_todo` 执行。动作 `list` / `add` / `update` / `delete`；字段 `status`（`completed`/`cancelled` 是终态）· `priority` · `dueAt`（本地墙钟；`YYYY-MM-DD` 落在当日结束，空串清空）· `notes` · `projectId`（受 Agent 声明的绑定上限约束）。
+  - 读写走**共享的板子 API** `agent-domain/agent-todo-board`（从 `server/agent-todos-wire.ts` 的原实现抽出，wire 命令与工具同一份）：owner（agentId 由注册表按 agentDir 反查，不猜）、Project 绑定、生命周期、时间戳全在那一层判 —— 两个入口各写一套校验就是两条会漂的真相（一条从 GUI 进不来的写入会从工具进去）。
+  - 与 `todo`（会话清单）的分工写进手册：`todo` 管这一次会话的步骤，`agent_todo` 管跨会话的长期任务；会话内清单不会自动变成长期任务。
+
 - **python 共享网关孤儿回收**（`src/ipy/gateway-coordinator.ts`、`test/core/python-gateway-orphan-reap.test.ts`）：`acquireSharedGateway` 在锁内扫一遘 `ps -eo pid,ppid,args`，回收同时满足三条件的进程——argv 含 `-m kernel_gateway`、PPID=1（拉它的人已经没了）、且 config root 下任何 profile 的 `gateway.json` 都没记录它的 pid；三条缺一不杀，**记录集枚举失败就整个跳过**（“没扫到”不等于“可以杀”，误杀会打断别人正在用的会话）。回收用 SIGTERM（Jupyter 自己的退出路径比 SIGKILL 干净）。真机实测回收 16 个孤儿（最老 8 天）。配套：`gateway.users` 读时剔除死 pid——它此前只增不减（实测 36 个 pid 里 35 个是死进程），而 `shutdownSharedGateway` 靠这份名单判断“还有没有人在用”，死 pid 堆着会让网关永不关闭。
 
 - **LSP `workspace/configuration` 的应答落一行通用 debug**（`src/lsp/client.ts`）：`logger.debug("LSP configuration request answered", { server, sections })`，取在 `sendResponse` **之后**（这条出现即表示答案已经上线），**只记 section 名不记值**（`settings` 里可能有凭据）。
@@ -11,6 +15,13 @@
   - 默认 info 级看不到，需 `PI_LOG_LEVEL=debug`。
 
 ### Changed
+
+- **`TODO.md` 退出 Agent 的注入与任务流程，降级为历史留档**（`src/skeleton/assets/{prompt-includes.json,TODO.md,AGENTS.md}`, `src/skeleton/agent-dir-files.ts`, `src/skeleton/assets.ts`, `src/prompts/system/custom-system-prompt.md`, `src/cli/mece-rules.ts`, `src/tools/project-context.ts`）：任务的真源是那个 Agent 的任务板 `<agentDir>/.cornfield/agent-todos.json`（Todo 页是它的界面，`agent_todo` 工具是 agent 侧的入口）。`TODO.md` 不再是任务面：新 Agent 仍会拿到这个文件，但内容只有「不进自动注入 + 任务板在哪 + 不要手改 JSON」三句。
+  - 清单层：骨架模板与 8 个在用 Agent 的 `prompt-includes.json` 都摘掉 `"TODO.md"`；`AGENT_DIR_FILES` 里它从 `requirement: always-on` / `surface: prompt` 改为 `optional` / `other` —— 于是 `agent validate` 不再因它缺失报 error，`get_agent_prompt_sources` 从 8 项变 7 项（前端 Prompts 源不再列它）。
+  - 规则层：`MECE_FILES` 不再读它，随之删掉两条只服务旧 TODO 模板的占位符正则（`- [ ] 任务 1/2`、`YYYY-MM-DD HH:MM — 任务起点`）—— 模板没有那两行后它们已无匹配对象。
+  - `project_context` 工具不再读 `<projectRoot>/TODO.md` 并报给模型（`todo` 字段从 `ProjectContextDetails` 删掉）：报一份不再维护的存档，模型没有第二个信号能分辨它是过期的。
+  - 系统提示的「任务追踪纪律」改为：多步任务用会话内 `todo` 工具；长期任务在任务板；`TODO.md` 是留档，不读也不写。
+  - 边界：已存在的 `TODO.md` 文件一份都没删（原件留档）；`Project TODO.md`（`projectRoot/TODO.md`，`project-todo` skill 维护）是另一个概念，未动；生效于**新会话**（上下文在会话建立时装）。
 
 - **产物清单加「用户发进来的」这一来源**（`src/server/artifacts.ts`, `test/wire-server-inspection.integration.test.ts`）：`list_artifacts` 此前只有一个来源 —— 会话 JSONL 里 write / edit / puppeteer screenshot 写出的文件，所以用户在会话里贴的图永远不出现在右栏「产物」面板里（图落在会话 artifacts 目录的 `uploads/`，不来自任何工具调用，提取器压根看不见它）。现在两个维度都多扫这一个来源：会话维度扫本会话的 `uploads/`，Agent 维度扫本次命中的每个会话各自的 `uploads/`（沿用既有的「最近 5 个会话」窗口，不另开一套），合并后按 mtime 倒序、50 条上限。每条产物带 `source`（`agent` / `user`），同一条路径两个来源都报时以先到的为准（防御性的，实际不会发生）。路径仍走 `fileWithinRoots` → `relativePathWithinRoot`，边界规则一份没动。
   - 读不到 `uploads/` 目录不是失败（见过图的会话本来就没有），非 ENOENT 的原因留一行 warn —— 不把「读不到」静默成「没有」。
@@ -40,6 +51,11 @@
   - **① 实测无效（2026-09-18）**：RA **从不**向 cornfield 请求配置 —— 初始化期不问、`didOpen` 之后也不问、**绕开 lspmux 直连**（`CORNFIELD_DISABLE_LSPMUX=1`）同样不问。同仪器下 `typescript-language-server` 在 `didOpen` 之后**会**请求（section `formattingOptions`）——所以「零命中」是**真否定**，不是仪器没装（仪器自证：同一进程自己打的两行 start / didOpen sent 把那个 pid 的负结果夹在中间）。
   - **边界**：该否定在**这个 RA 版本 + 这种拉起形态**下成立；RA 换版或换拉起方式（不经 lspmux）要重看。另外 cornfield 侧**从不主动推**配置（唯一发 `workspace/didChangeConfiguration` 的地方是重启辅助函数，且发的是空 settings），这是静态可查的另一半。
   - **本轮唯一的正结论（可复用）：RA 认配置的通道是「文件」，不是 `settings`** —— 工作区根的 `rust-analyzer.toml` / 全局 RA config（启动时读）。两个后果：① 要压那波 464 crate，落点在文件（机器级那份全局 config 实测有效）；② 以后看到 `lsp.json`/`defaults.json` 里写给 RA 的 `settings`，默认它不会生效。
+
+### Fixed
+
+- **Agent Todo 板的并发写会丢任务**（`src/agent-domain/agent-todo-store.ts`, `test/agent-todo-store.test.ts`）：写一条是读-改-写，而这块板子同时有两个写入者（serve 的 wire 命令 / agent 的 `agent_todo` 工具），且可能不在同一个进程里 —— 两个写入者各读一份旧内容、各写回一份，后写的把先写的整个覆盖掉，用户丢掉一条看起来已经存下的任务。现 `upsertAgentTodo` / `removeAgentTodo` 走 `withFileLock`（锁文件就在板子旁边，跨进程生效）。回归：12 条并发写必须全部落盘；把锁摘掉这条用例会红（实测过）。
+- **Agent Todo 板可能被读到半份 JSON**（同上）：落盘改为「写同目录临时文件 + `rename`」—— 直接 `Bun.write` 是截断再写，并发读者会拿到半份内容，然后把它报成「板子损坏」（一个我们并不拥有的结论）。rename 是原子的：读者要么看见旧的整份、要么新的整份。
 
 ## [1.2.5] - 2026-09-16
 

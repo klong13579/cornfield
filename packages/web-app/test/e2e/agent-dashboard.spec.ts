@@ -48,7 +48,6 @@ const PROMPT_PATHS = [
 	"AGENTS.md",
 	"mission.md",
 	"TOOLS.md",
-	"TODO.md",
 	"user.md",
 	"prompt-includes.json",
 	".cornfield/SYSTEM.md",

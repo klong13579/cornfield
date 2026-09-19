@@ -5,16 +5,22 @@
  * `cornfield agent validate` 按什么级别要求它们（`cli/agent-cli.ts`）、前端 Prompt 源视图列哪些
  * （`get_agent_prompt_sources`）。所以这里钉住三件事：
  *   1. 清单覆盖骨架写出的**每一个**文件，不多不少；
- *   2. prompt 面正好是那 8 个（`.omp/SYSTEM.md` 是旧路径、AGENTS-personal.md/CONTEXT.md 从来不存在）；
- *   3. 从清单推导出的三个校验集与历史字面量逐位相同（元素 + 顺序）—— validate 输出不许变形。
+ *   2. prompt 面正好是那 7 个（`.omp/SYSTEM.md` 是旧路径、AGENTS-personal.md/CONTEXT.md 从来不存在）；
+ *      `TODO.md` **不在其中**：它已退出注入（历史任务留档），当前任务在 `<agentDir>/.cornfield/agent-todos.json`；
+ *   3. 从清单推导出的三个校验集与字面量逐位相同（元素 + 顺序）—— validate 输出不许变形。
  */
 
 import { describe, expect, test } from "bun:test";
 import { AGENT_DIR_FILES, AGENT_DIR_PROMPT_FILES, agentDirFilesWithRequirement } from "../src/skeleton/agent-dir-files";
 import { SKELETON_FILES } from "../src/skeleton/assets";
 
-/** validate 历史上的三个集合（改造前写在 `cli/agent-cli.ts` 里的字面量）。顺序是契约的一部分。 */
-const HISTORICAL_ALWAYS_ON = ["AGENTS.md", "mission.md", "TOOLS.md", "TODO.md", "knowledge/external-workspaces.md"];
+/**
+ * validate 的三个集合（改造前写在 `cli/agent-cli.ts` 里的字面量）。顺序是契约的一部分。
+ *
+ * `TODO.md` 从 always-on 移出（2026-09-19：它退出注入流程，requirement 降为 optional）——
+ * 这是那次改动**有意**改的契约，不是漂移：缺它不再报 error。
+ */
+const HISTORICAL_ALWAYS_ON = ["AGENTS.md", "mission.md", "TOOLS.md", "knowledge/external-workspaces.md"];
 const HISTORICAL_RUNTIME_HARD_DEPS = [".cornfield/config.yml"];
 const HISTORICAL_RUNTIME_RECOMMENDED = ["prompt-includes.json", ".gitignore", ".cornfield/SYSTEM.md"];
 
@@ -23,12 +29,13 @@ const EXPECTED_PROMPT_SURFACE = [
 	"AGENTS.md",
 	"mission.md",
 	"TOOLS.md",
-	"TODO.md",
 	"user.md",
 	"prompt-includes.json",
 	".cornfield/SYSTEM.md",
 	"knowledge/external-workspaces.md",
-	// 「其它面」的三个（列出反例，防有人顺手把 .gitignore 也当 prompt 源）：
+	// 「其它面」的四个（列出反例，防有人顺手把 .gitignore 也当 prompt 源）：
+	// TODO.md 在这里：不再注入，也不再由 agent 维护（历史任务留档）。
+	"TODO.md",
 	".gitignore",
 	".cornfield/config.yml",
 	".cornfield/skills/lint/SKILL.md",
@@ -44,12 +51,12 @@ describe("agentDir 文件清单（单一真相）", () => {
 		expect([...manifest].sort()).toEqual([...skeleton].sort());
 	});
 
-	test("prompt 面正好是 8 个，其余 3 个不在其中", () => {
+	test("prompt 面正好是 7 个，其余 4 个不在其中", () => {
 		const promptPaths = AGENT_DIR_PROMPT_FILES.map(file => file.relPath);
 		const otherPaths = AGENT_DIR_FILES.filter(file => file.surface === "other").map(file => file.relPath);
 
-		expect(promptPaths).toEqual(EXPECTED_PROMPT_SURFACE.slice(0, 8));
-		expect(otherPaths).toEqual(EXPECTED_PROMPT_SURFACE.slice(8));
+		expect(promptPaths).toEqual(EXPECTED_PROMPT_SURFACE.slice(0, 7));
+		expect(otherPaths).toEqual(EXPECTED_PROMPT_SURFACE.slice(7));
 		// prompt 面必须是声明顺序（= 骨架写出顺序），供 UI 直接渲染。
 		expect(promptPaths).toEqual(AGENT_DIR_FILES.filter(f => f.surface === "prompt").map(f => f.relPath));
 	});

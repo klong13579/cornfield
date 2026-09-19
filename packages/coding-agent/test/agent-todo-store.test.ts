@@ -4,8 +4,9 @@
  * Two layers are under test and they fail differently on purpose:
  *   - the store (`agent-domain/agent-todo-store`) owns persistence, lifecycle and the
  *     record's provenance fields;
- *   - the bridge (`server/agent-todos-wire`) owns the relations between an Agent and a
- *     Todo — ownership and Project binding.
+ *   - the board API (`agent-domain/agent-todo-board`, re-exported as DTOs by
+ *     `server/agent-todos-wire`) owns the relations between an Agent and a Todo —
+ *     ownership and Project binding.
  *
  * The failure models the design names are the ones worth pinning: a store that cannot be
  * read must never look like an empty board, a Todo belongs to exactly one Agent, and a
@@ -206,6 +207,26 @@ describe("agent todo store", () => {
 		expect(await loadAgentTodos(dir)).toEqual([]);
 	});
 
+	/**
+	 * 写入是读-改-写，所以要串行。
+	 *
+	 * 一块板子同时有两个写入者（serve 的 wire 命令 / agent 的 `agent_todo` 工具），可能还不在
+	 * 同一个进程里。不加锁时它们各读一份旧内容、各写回一份：后写的把先写的整个覆盖掉 ——
+	 * 用户丢掉一条看起来已经存下的任务。这条用例就是那个丢失的守门：12 条并发写，12 条都要在。
+	 */
+	test("concurrent writes on one board all land (no lost update)", async () => {
+		const dir = fixture.agentDir("hr");
+		await Promise.all(
+			Array.from({ length: 12 }, (_, i) =>
+				upsertAgentTodo(dir, makeTodo({ id: `todo-${String(i).padStart(2, "0")}`, title: `T${i}` })),
+			),
+		);
+
+		const todos = await loadAgentTodos(dir);
+		expect(todos).toHaveLength(12);
+		expect(new Set(todos.map(todo => todo.id)).size).toBe(12);
+	});
+
 	test("two agents never share a board", async () => {
 		const hr = fixture.agentDir("hr");
 		const algorithm = fixture.agentDir("algorithm");
@@ -297,7 +318,9 @@ describe("agent todo wire bridge", () => {
 		await writeAgentTodo(target, makeTodo());
 		expect(await dropAgentTodo(target, "todo-1")).toBe(true);
 		expect(await dropAgentTodo(target, "todo-1")).toBe(false);
-		await expect(dropAgentTodo(target, "")).rejects.toThrow(/non-empty todoId/);
+		// 报错原文来自共享的板子 API（`agent-domain/agent-todo-board`），不再是 wire 命令专属措辞：
+		// 同一份校验现在也服务 agent 的 agent_todo 工具，叫某个命令的名字在那里就不对了。
+		await expect(dropAgentTodo(target, "")).rejects.toThrow(/non-empty todo id/);
 	});
 
 	/**

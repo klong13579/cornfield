@@ -11,9 +11,10 @@ afterEach(async () => {
 });
 
 describe("project_context tool", () => {
-	test("returns structured context with TODO summary and explicit errors", async () => {
+	test("returns structured context with explicit errors and no TODO.md summary", async () => {
 		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "project-context-test-"));
 		dirs.push(cwd);
+		// 盘上就算有一份 TODO.md，也不该被报出来：它已退出 agent 的任务流程（历史留档）。
 		await Bun.write(path.join(cwd, "TODO.md"), "# TODO\n\n- ship it\n");
 		const tool = new ProjectContextTool({
 			cwd,
@@ -24,9 +25,8 @@ describe("project_context tool", () => {
 		expect(details.cwd).toBe(cwd);
 		expect(details.projectRoot).toBeNull();
 		expect(details.contextFiles).toEqual({ paths: [path.join(cwd, "AGENTS.md")], count: 1 });
-		expect(details.todo.exists).toBe(true);
-		expect(details.todo.summary).toContain("ship it");
 		expect(Array.isArray(details.errors)).toBe(true);
-		expect((result.content[0] as { text: string }).text).toContain('"todo"');
+		expect(details).not.toHaveProperty("todo");
+		expect((result.content[0] as { text: string }).text).not.toContain('"todo"');
 	});
 });
