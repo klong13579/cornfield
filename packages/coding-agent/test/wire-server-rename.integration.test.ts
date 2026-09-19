@@ -50,7 +50,14 @@ async function seedHome(home: string): Promise<void> {
 		await Bun.write(
 			target,
 			`${[
-				JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-08-18T10:00:00.000Z", cwd: hrDir, ...header }),
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id,
+					timestamp: "2026-08-18T10:00:00.000Z",
+					cwd: hrDir,
+					...header,
+				}),
 				entryLine("model_change", { model: "test-provider/test-model" }),
 				entryLine("message", {
 					message: {
@@ -210,7 +217,10 @@ describe("rename_session：改磁盘上的历史会话", () => {
 		try {
 			const before = await readSplit(HR_FILES.titled);
 			const outside = path.join(fixture!.home, "outside.jsonl");
-			await Bun.write(outside, `${JSON.stringify({ type: "session", version: 3, id: "x", timestamp: "t", cwd: "/" })}\n`);
+			await Bun.write(
+				outside,
+				`${JSON.stringify({ type: "session", version: 3, id: "x", timestamp: "t", cwd: "/" })}\n`,
+			);
 			const notJsonl = path.join(hrSessions, "note.txt");
 			await Bun.write(notJsonl, "not a session\n");
 
