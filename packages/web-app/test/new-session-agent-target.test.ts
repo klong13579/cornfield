@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
+import { WORKING_PROJECT_KEY } from "../src/lib/working-project";
 import { activeAgentIdOf } from "../src/state/agent-context";
 import { PiClientAdapter, type ServeConnectionConfig } from "../src/state/pi-client-adapter";
 import { SessionStore } from "../src/state/session-store";
@@ -61,6 +62,13 @@ class FakeServe implements PiWebSocketLike {
 	readonly sessions = new Map<string, string>([["default", "/sessions/default.jsonl"]]);
 	/** 下一条 `new_session` 的结局：true = serve 回 `cancelled:true`（接了命令但没建，见 wire-server）。 */
 	cancelNextCreate = false;
+	/**
+	 * `list_projects` 的名单。`undefined` = 照旧回一个空 result（模拟「还没读到名单」）；
+	 * 非 undefined = 真回一份名单，`SessionStore` 据此校验恢复出来的工作上下文。
+	 */
+	declaredProjects: string[] | undefined = undefined;
+	/** 让 `list_projects` 报错（存储损坏）—— 用来钉「读失败不校验」。 */
+	listProjectsError: string | undefined = undefined;
 	#seq = 0;
 
 	constructor(_url: string) {
@@ -146,6 +154,18 @@ class FakeServe implements PiWebSocketLike {
 					return this.#fail(id, `agent not attached: ${agent} (send attach first)`);
 				}
 				return this.#ok(id, {});
+			}
+			case "list_projects": {
+				// serve 的读面：名单与「当前会话归属」同一条命令。这里只回名单（归属与本文件无关）。
+				if (this.listProjectsError !== undefined) return this.#fail(id, this.listProjectsError);
+				if (this.declaredProjects === undefined) return this.#ok(id, {});
+				return this.#ok(id, {
+					projects: this.declaredProjects.map(projectId => ({
+						projectId,
+						name: projectId,
+						root: `/repos/${projectId}`,
+					})),
+				});
 			}
 			default:
 				return this.#ok(id, {});
@@ -551,5 +571,130 @@ describe("新建会话带 Project：落到 new_session.projectId，未知 id 原
 		const view = store.getSnapshot();
 		expect(view.currentProjectId).toBeUndefined();
 		expect(view.workingProjectId).toBe("dtc");
+	});
+});
+
+// ── 工作上下文落盘（localStorage）──────────────────────────────────────
+
+/** 内存 Storage —— 与 `recent-paths.test.ts` 同一套约定：每个用例自己装、自己拆。 */
+function makeMemoryStorage(): Storage {
+	const data = new Map<string, string>();
+	return {
+		get length(): number {
+			return data.size;
+		},
+		clear(): void {
+			data.clear();
+		},
+		getItem(key: string): string | null {
+			return data.has(key) ? data.get(key)! : null;
+		},
+		key(index: number): string | null {
+			return [...data.keys()][index] ?? null;
+		},
+		removeItem(key: string): void {
+			data.delete(key);
+		},
+		setItem(key: string, value: string): void {
+			data.set(key, String(value));
+		},
+	};
+}
+
+/**
+ * 工作上下文落盘：刷新之后它还在，而**恢复到的那一个**要在第一次真的读到名单时校验一次。
+ *
+ * 四件事在这里被钉住：
+ *   1. **刷新的表现**：选过之后重建 store（= 重开页面）仍然带着那个选择，不再悄悄退回「不指定」；
+ *   2. **校验只对恢复到的那一个做一次**，而且只在真的读到一份名单时做 —— 名单没读到 / 读失败
+ *      都不是「名单里没有它」（读不到 ≠ 没有）；
+ *   3. **用户自己刚做的选择不校验**：那是决定，不是恢复；
+ *   4. **选回「不指定」= 忘掉存储里那条**，不留一条永远不再成立的记录。
+ */
+describe("工作上下文落盘：刷新后还在，恢复时按名单校验一次", () => {
+	let storage: Storage;
+
+	beforeEach(() => {
+		storage = makeMemoryStorage();
+		(globalThis as { localStorage?: Storage }).localStorage = storage;
+	});
+
+	afterEach(() => {
+		delete (globalThis as { localStorage?: Storage }).localStorage;
+	});
+
+	it("选过之后重建 store（= 重开页面）仍然带着它", async () => {
+		const before = await createConnectedStore();
+		before.store.setWorkingProject("dtc");
+		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("dtc");
+
+		// 重开页面：新 store、新连接，名单还没读到
+		const after = await createConnectedStore();
+		expect(after.store.getSnapshot().workingProjectId).toBe("dtc");
+		// 名单还没读到 ≠ 名单里没有它：此刻不得先把它当成陈旧态
+		expect(after.store.getSnapshot().projects).toBeUndefined();
+	});
+
+	it("恢复出来的那个已经不在名单里：丢掉（连同存储）—— 不把一个不存在的选择带回来", async () => {
+		(await createConnectedStore()).store.setWorkingProject("dtc");
+		const { store, serve } = await createConnectedStore();
+		expect(store.getSnapshot().workingProjectId).toBe("dtc");
+
+		serve.declaredProjects = ["mkt"];
+		await store.refreshProjects();
+
+		expect(store.getSnapshot().workingProjectId).toBeUndefined();
+		expect(storage.getItem(WORKING_PROJECT_KEY)).toBeNull();
+	});
+
+	it("恢复出来的那个还在名单里：留着（校验不是「一律清掉」）", async () => {
+		(await createConnectedStore()).store.setWorkingProject("dtc");
+		const { store, serve } = await createConnectedStore();
+
+		serve.declaredProjects = ["dtc", "mkt"];
+		await store.refreshProjects();
+
+		expect(store.getSnapshot().workingProjectId).toBe("dtc");
+		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("dtc");
+	});
+
+	it("名单读失败：「不知道」不删用户的选择（读不到 ≠ 没有）", async () => {
+		(await createConnectedStore()).store.setWorkingProject("dtc");
+		const { store, serve } = await createConnectedStore();
+		serve.listProjectsError = "Project store is not valid JSON";
+
+		await store.refreshProjects();
+
+		expect(store.getSnapshot().projectsError).toContain("not valid JSON");
+		expect(store.getSnapshot().workingProjectId).toBe("dtc");
+		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("dtc");
+
+		// 一次读失败不能把校验吃掉：下一次真的读到名单时仍然判一次
+		serve.listProjectsError = undefined;
+		serve.declaredProjects = [];
+		await store.refreshProjects();
+		expect(store.getSnapshot().workingProjectId).toBeUndefined();
+	});
+
+	it("恢复之后用户自己改过：那道校验不再动他刚做的决定", async () => {
+		(await createConnectedStore()).store.setWorkingProject("dtc");
+		const { store, serve } = await createConnectedStore();
+		store.setWorkingProject("mkt"); // 他刚选的，名单里此刻还没有它
+
+		serve.declaredProjects = [];
+		await store.refreshProjects();
+
+		expect(store.getSnapshot().workingProjectId).toBe("mkt");
+		expect(storage.getItem(WORKING_PROJECT_KEY)).toBe("mkt");
+	});
+
+	it("选回「不指定」：存储里那条被忘掉", async () => {
+		const { store } = await createConnectedStore();
+		store.setWorkingProject("dtc");
+
+		store.setWorkingProject(undefined);
+
+		expect(store.getSnapshot().workingProjectId).toBeUndefined();
+		expect(storage.getItem(WORKING_PROJECT_KEY)).toBeNull();
 	});
 });

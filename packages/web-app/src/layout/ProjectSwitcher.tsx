@@ -164,11 +164,18 @@ export function ProjectPanel({
 	const { draft } = state;
 	const registry = projectRegistryState(view);
 	const declared = registry.kind === "ready" ? registry.projects : [];
-	/** 选过、但已声明清单里没有它：得给它一个选项，否则 <select> 会把 value 画成空白。 */
-	const staleId =
+	/**
+	 * 选过、但当前这份名单里没有它：得给它一个选项，否则 `<select>` 会把 `value` 画成空白。
+	 *
+	 * 「名单里没有它」**只有在真的读到一份名单时**才是事实：还没读到 / 读不出来时只能说「还不知道
+	 * 它还在不在」——把「读不到」写成「已不在注册表」就是替一次还没回来的读取下结论（而那正是
+	 * 恢复出来的选择会先遇到的状态）。
+	 */
+	const unlisted =
 		workingProjectId !== "" && !declared.some(project => project.projectId === workingProjectId)
 			? workingProjectId
 			: undefined;
+	const unlistedLabel = registry.kind === "ready" || registry.kind === "empty" ? "已不在注册表" : "名单还没读到";
 	const field =
 		"min-w-0 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink outline-none placeholder:text-ink-faint";
 
@@ -208,7 +215,11 @@ export function ProjectPanel({
 							{project.name}
 						</option>
 					))}
-					{staleId !== undefined && <option value={staleId}>{staleId}（已不在注册表）</option>}
+					{unlisted !== undefined && (
+						<option value={unlisted}>
+							{unlisted}（{unlistedLabel}）
+						</option>
+					)}
 				</select>
 				<div className="mt-1 text-[11px] text-ink-faint">
 					切它不重启 serve：只在建**新**会话时带上去，已经在跑的会话不动。

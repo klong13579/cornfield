@@ -30,6 +30,7 @@ import type {
 	ModelTestResultDto,
 	PermissionRequestDto,
 	ProgressEventDto,
+	ProjectDeclareInput,
 	ProjectRecordDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
@@ -47,6 +48,7 @@ import type {
 	WireServerEventDto,
 } from "@cornfield/wire";
 import { loadNotifyPrefs, notifyGuarded } from "../lib/notifications";
+import type { PickDirectoryResult } from "../lib/path-picker";
 import type {
 	AgentTodoDto,
 	ArtifactDto,
@@ -65,6 +67,7 @@ import type {
 } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "../lib/records";
 import { isServeVerdict, serveVerdictOf } from "../lib/serve-verdict";
+import { loadWorkingProjectId, rememberWorkingProjectId } from "../lib/working-project";
 import { activeAgentIdOf } from "./agent-context";
 import { createClient } from "./client";
 import { type ServeConnectionConfig, saveServeConfig } from "./pi-client-adapter";
@@ -335,10 +338,27 @@ export class SessionStore {
 	 * 工作上下文（客户端选择）：**不随会话变** —— 换会话不该把我选的工作项目偷偷改掉，
 	 * 它是「下一批活干在哪」这件事，而不是「这个会话在哪」这件事。
 	 *
+	 * 初值从 localStorage 恢复（`lib/working-project`）：刷新页面不该把它悄悄退回「不指定」。
+	 * 恢复出来的这一个还没被名单校验过，见 {@link #unverifiedWorkingProjectId}。
+	 *
 	 * 声明过的 Project 被删时这里不做静默清理：清掉它就是在替用户做一个他没做的选择，
 	 * 而 UI 会把「选过但已不在注册表里」老实说出来（与「未声明」不是同一句话）。
+	 * 唯一的例外是**恢复**那一次（见 `#loadProjects`）：那不是替他做选择，是把一个他上次做的、
+	 * 如今已经不存在的选择丢掉。
 	 */
-	#workingProjectId: string | undefined;
+	#workingProjectId: string | undefined = loadWorkingProjectId() || undefined;
+
+	/**
+	 * 从存储恢复出来、**还没被名单校验**的那个工作上下文。
+	 *
+	 * 页面关着的那段时间里它可能已经被删了。第一次真的读到一份名单时判一次（见 `#loadProjects`）：
+	 * 还在就留，不在就丢（连同存储）—— 「恢复」不该把一个已经不存在的选择带回来。
+	 *
+	 * 判过之后归 `undefined`。两道不校验的门都是有理由的：
+	 *   - **读失败不校验**：「读不到」不是「没有」，拿一次失败的读取去删用户的选择是最坏的一种猜；
+	 *   - **用户自己改过选择不校验**：那是他刚做的决定，不是恢复（`setWorkingProject` 会清掉它）。
+	 */
+	#unverifiedWorkingProjectId: string | undefined = this.#workingProjectId;
 	/**
 	 * Agent Todo 板属于一个 Agent，**不随会话变**：切会话（同一 Agent 换历史会话）不重读，
 	 * 换 Agent 才作废重读。
@@ -1053,6 +1073,21 @@ export class SessionStore {
 	}
 
 	/**
+	 * 改名一条磁盘上的会话记录（rename_session；侧栏的历史会话行）。
+	 *
+	 * 原样转发、不吞错：serve 的拒绝原文在 `PiServerError.serverError` 上（路径越界 / 文件刚被
+	 * 改过 / 本进程挂着的会话改不了），侧栏要拿原文显示 —— 吞掉它，用户就只能看到一个「改不了」。
+	 */
+	renameSession(opts: { sessionFile: string; name: string }): Promise<void> {
+		return this.#client.renameSession(opts);
+	}
+
+	/** 改名本连接挂着的那个会话（set_session_name；侧栏「当前会话」那一行）。失败原样抛。 */
+	renameActiveSession(name: string): Promise<void> {
+		return this.#client.renameActiveSession(name);
+	}
+
+	/**
 	 * 打开历史会话（sidebar 点击会话行）：
 	 * 1. switch 到所属 agent（serve 端 switch_session 内含 attach，工作台随后跟随）；
 	 * 2. 有 sessionFile 则 get_session_messages 拉历史消息 → 覆盖 view.messages（Transcript 复用渲染）；
@@ -1301,9 +1336,15 @@ export class SessionStore {
 	 * 不在这里捣校验：注册表可能还没读到（此时无法判定 ids 合不合法），而一个「选过、但当前
 	 * 注册表里找不到」的选择必须能被如实说出来 —— 静默换成另一个 Project，或静默降成「未声明」，
 	 * 都是在替用户做一个他没做的选择。已删除的项目由 UI 按陈旧态显示（见 `projectLabelOf`）。
+	 *
+	 * 同时把这条选择记进 localStorage（空串 = 忘掉它）：刷新之后它还在。**校验只对「从存储恢复」
+	 * 的那一个做一次**，不对这里新做的决定做 —— 他刚选的那个必须原样留着，哪怕名单里还没有它。
 	 */
 	setWorkingProject(projectId?: string): void {
+		// 用户自己做的选择：恢复时那道一次性校验就此作废（见 #unverifiedWorkingProjectId）。
+		this.#unverifiedWorkingProjectId = undefined;
 		this.#workingProjectId = projectId === undefined || projectId === "" ? undefined : projectId;
+		rememberWorkingProjectId(this.#workingProjectId ?? "");
 		const view = cloneView(this.getSnapshot());
 		view.workingProjectId = this.#workingProjectId;
 		this.#view = view;
@@ -1317,10 +1358,13 @@ export class SessionStore {
 	 * 以为已经声明好了，而盘上什么也没多。
 	 * 写入之后一律用重读而不是就地拼一份「写入后的样子」：`root` 由存储归一，一个 root 只能属于
 	 * 一个 Project —— 该重算的归属在 serve 那边，自拼一份就是在猜存储做了哪个决定。
+	 *
+	 * 入参只需 `root`（+ 可选的默认 Agent）：`projectId` / `name` 由 serve 从目录名推导，客户端
+	 * 算不了那件事（目录名是那台机器的路径语义，撞名判定要按 symlink 归一比较）。
 	 */
-	async setProject(project: ProjectRecordDto): Promise<ProjectRecordDto> {
+	async setProject(input: ProjectDeclareInput): Promise<ProjectRecordDto> {
 		try {
-			const result = await this.#client.setProject(project);
+			const result = await this.#client.setProject(input);
 			return result.project;
 		} finally {
 			// 失败也重读：请求超时 / 断线时写入可能已经落盘，而我们手上这份还是旧的 —— 报错不刷新，
@@ -1341,6 +1385,17 @@ export class SessionStore {
 		} finally {
 			await this.refreshProjects(this.#activeAgentId ?? undefined);
 		}
+	}
+
+	/**
+	 * 让**跑 serve 的那台机器**上的人选一个目录（pick_directory）。
+	 *
+	 * 原样转发，不缓存也不包一层：一次选择是一次事件，不是一份能存下来的状态。
+	 * 失败原样抛（没有 GUI 会话 / 平台没实现）—— 调用方要把原文显示出来，「人根本没被问到」
+	 * 不能变成「人取消了」。
+	 */
+	pickDirectory(defaultPath?: string): Promise<PickDirectoryResult> {
+		return this.#client.pickDirectory(defaultPath);
 	}
 
 	/**
@@ -1377,6 +1432,18 @@ export class SessionStore {
 		view.currentProjectSource = currentProjectSource;
 		view.projectsPending = false;
 		view.projectsError = error;
+		// 从存储恢复的工作上下文在这里校验这一次（见 `#unverifiedWorkingProjectId`）：
+		// 只在**真的读到一份名单**时判 —— `projects` 是 `undefined` 表示没读到，那不是「名单里没有它」；
+		// 读失败（`error`）同样不判：「不知道」不能拿来删用户的选择。
+		if (projects !== undefined && this.#unverifiedWorkingProjectId !== undefined) {
+			const candidate = this.#unverifiedWorkingProjectId;
+			this.#unverifiedWorkingProjectId = undefined;
+			if (!projects.some(project => project.projectId === candidate)) {
+				this.#workingProjectId = undefined;
+				rememberWorkingProjectId("");
+				view.workingProjectId = undefined;
+			}
+		}
 		this.#view = view;
 		this.#notify();
 	}

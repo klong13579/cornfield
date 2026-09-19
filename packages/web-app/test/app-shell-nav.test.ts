@@ -550,6 +550,14 @@ describe("ProjectSwitcher", () => {
 		expect(html).not.toContain(">不指定</b>");
 	});
 
+	it("名单还没读到：不冒充「已不在注册表」，但选项得在（不然 value 会被画成空白）", () => {
+		// 恢复出来的工作上下文会先遇到这个状态：选择已经在，名单还在路上
+		const html = renderToStaticMarkup(createElement(ProjectSwitcher, { view: viewOf({ workingProjectId: "demo" }) }));
+		expect(html).toContain('value="demo"');
+		expect(html).toContain("名单还没读到");
+		expect(html).not.toContain("已不在注册表");
+	});
+
 	it("当前会话归属：来源分开说（会话记录 / 按目录匹配），两者不是一个可信度", () => {
 		const recorded = renderToStaticMarkup(
 			createElement(ProjectSwitcher, {
