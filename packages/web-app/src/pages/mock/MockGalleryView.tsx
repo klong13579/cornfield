@@ -636,6 +636,7 @@ function InsightsMock(): React.JSX.Element {
 							<div
 								className="w-full rounded-t bg-accent"
 								style={{ height: `${value * (scope === "all" ? 1 : agents[0].requests / 1000)}%` }}
+								role="img"
 								aria-label={`第 ${index + 1} 日示例趋势`}
 							/>
 							<span className="text-[10px] text-ink-faint">{index + 1}日</span>
