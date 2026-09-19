@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { PiWebSocketCtor, PiWebSocketLike } from "@cornfield/client";
 import type { AgentInfoDto, TodoPhaseDto } from "@cornfield/wire";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { PathField, type PathFieldProps } from "../src/components/PathField";
 import { ProjectList } from "../src/components/ProjectContext";
 import { AgentSwitcher } from "../src/layout/AgentSwitcher";
 import { AppShell } from "../src/layout/AppShell";
@@ -12,9 +13,10 @@ import {
 	ProjectPanel,
 	type ProjectPanelState,
 	ProjectSwitcher,
-	projectDraftToRecord,
+	projectDraftToInput,
 } from "../src/layout/ProjectSwitcher";
 import { activePanelOf, getPanelGroups, getPanels, panelHandle } from "../src/layout/panel-registry";
+import type { DirectoryPicker } from "../src/lib/path-picker";
 import type { ChildSessionNodeDto, ProjectRecordDto } from "../src/lib/pi-client-api";
 import { projectFieldState, projectLabelOf } from "../src/lib/project-read-model";
 import {
@@ -728,6 +730,8 @@ function panelOf({
 	onChange,
 	onDeclare,
 	onDelete,
+	rootSuggestions,
+	servePicker,
 }: {
 	view: SessionView;
 	state?: ProjectPanelState;
@@ -737,28 +741,132 @@ function panelOf({
 	onChange?: (patch: Partial<ProjectPanelState>) => void;
 	onDeclare?: () => void;
 	onDelete?: () => void;
+	rootSuggestions?: readonly string[];
+	servePicker?: DirectoryPicker;
 }): ReactElement {
 	return ProjectPanel({
 		view,
-		state: state ?? { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false },
+		state: state ?? { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: null },
 		workingProjectId: workingProjectId ?? "",
 		onSelectProject: onSelectProject ?? noop,
 		...(onRefresh ? { onRefresh } : {}),
 		onChange: onChange ?? noop,
 		onDeclare: onDeclare ?? noop,
 		onDelete: onDelete ?? noop,
+		...(rootSuggestions ? { rootSuggestions } : {}),
+		...(servePicker ? { servePicker } : {}),
 	});
 }
 
-describe("Project 写面：声明 / 删除", () => {
-	it("声明表单长在控件里：id / 名称 / 绝对路径 / 默认 Agent 只能从已注册清单里选", () => {
-		const html = renderToStaticMarkup(
-			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, agents: AGENTS }) }),
-		);
-		expect(html).toContain('aria-label="project id"');
-		expect(html).toContain('aria-label="名称"');
+// ── 7b. root 字段：能打 / 能选 / 能少打 ───────────────────────────────
+
+/**
+ * 桌面壳的替身。本文件在模块顶部把 `window` 设成了 `globalThis`（router 求值需要它），
+ * 所以壳就挂在 `globalThis.api` 上；每个用例自己拆掉，不留长命全局改动。
+ */
+function installShell(pickDirectory: (defaultPath?: string) => unknown): void {
+	(globalThis as { api?: unknown }).api = { dialog: { pickDirectory } };
+}
+
+/**
+ * 面板里那个路径控件**自己**（不是它渲染出来的东西）。
+ *
+ * `collect` 只走直接写在外面的元素：嵌套组件（`<PathField …/>`）对它是黑盒子。
+ * 但对“面板给了控件什么”这件事，拿它的 props 就是最准的断言 —— 比 HTML 里数元素更贴真实接线。
+ * 控件自己渲染成什么样，在 `path-field.render.test.ts` 里单独验。
+ */
+function pathFieldOf(root: ReactNode): PathFieldProps {
+	const el = collect(root).find(node => node.type === PathField);
+	if (!el) throw new Error("面板里没有路径控件");
+	return el.props as PathFieldProps;
+}
+
+describe("Project 声明面板的 root 字段", () => {
+	afterEach(() => {
+		delete (globalThis as { api?: unknown }).api;
+	});
+
+	it("浏览器直开（没有壳）但 serve 连着：按钮照画 —— 走的是 serve 那台机器上的选择框", () => {
+		const html = renderToStaticMarkup(createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS }) }));
+		// root 输入框本身照常在
 		expect(html).toContain('aria-label="项目根路径"');
-		expect(html).toContain("声明</button>");
+		// 没有壳也能选：浏览器自己拿不到绝对路径（webkitdirectory 只给相对路径），只能由 serve 弹
+		expect(html).toContain("浏览…");
+	});
+
+	it("控件拿到的是 serve 那条通路（面板连着 serve 时）", () => {
+		const pick: DirectoryPicker = () => Promise.resolve({ canceled: true });
+		const field = pathFieldOf(panelOf({ view: viewOf({ projects: PROJECTS }), servePicker: pick }));
+		expect(field.servePicker).toBe(pick);
+	});
+
+	it("有壳：画浏览按钮（按钮在不在只取决于壳在不在，与输入框里有没有内容无关）", () => {
+		installShell(() => ({ canceled: true }));
+		const html = renderToStaticMarkup(createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS }) }));
+		expect(html).toContain("浏览…");
+	});
+
+	it("候选 = 已声明项目的 root 在前 + 本机用过的路径在后（跨来源去重由控件做）", () => {
+		const field = pathFieldOf(
+			panelOf({ view: viewOf({ projects: PROJECTS }), rootSuggestions: ["/Users/me/dtc", "/Users/me/new"] }),
+		);
+		expect(field.suggestions).toEqual(["/Users/me/cornfield", "/Users/me/dtc", "/Users/me/new"]);
+	});
+
+	it("还没用过任何路径时，已声明的项目 root 就是候选（第一次就用得上）", () => {
+		expect(pathFieldOf(panelOf({ view: viewOf({ projects: PROJECTS }) })).suggestions).toEqual([
+			"/Users/me/cornfield",
+			"/Users/me/dtc",
+		]);
+	});
+
+	it("控件拿到的是草稿里的 root（不是另一个副本）", () => {
+		const field = pathFieldOf(
+			panelOf({
+				view: viewOf({ projects: PROJECTS }),
+				state: {
+					draft: { root: "/Users/me/dtc", defaultAgentId: "" },
+					deleteTargetId: "",
+					busy: null,
+				},
+			}),
+		);
+		expect(field.value).toBe("/Users/me/dtc");
+	});
+
+	it("改 root：交出去的是一条草稿改动（写回 root，并清掉上一次的失败文案）", () => {
+		const patches: Array<Partial<ProjectPanelState>> = [];
+		pathFieldOf(panelOf({ view: viewOf({ projects: PROJECTS }), onChange: p => patches.push(p) })).onChange(
+			"/Users/me/picked",
+		);
+		expect(patches).toEqual([{ draft: { ...EMPTY_PROJECT_DRAFT, root: "/Users/me/picked" }, error: undefined }]);
+	});
+
+	it("选择器失败：走面板唯一的错误界面（原文照原样）", () => {
+		const patches: Array<Partial<ProjectPanelState>> = [];
+		pathFieldOf(panelOf({ view: viewOf({ projects: PROJECTS }), onChange: p => patches.push(p) })).onPickError(
+			"Error invoking remote method 'dialog:pick-directory': no handler registered",
+		);
+		expect(patches).toEqual([
+			{ error: "Error invoking remote method 'dialog:pick-directory': no handler registered" },
+		]);
+	});
+});
+
+describe("Project 写面：保存 / 删除", () => {
+	it("保存表单长在控件里：只问根路径（+ 焦点不是 default 时的那一档默认 Agent）", () => {
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, {
+				view: viewOf({ projects: PROJECTS, agents: AGENTS, activeAgentId: "hr" }),
+			}),
+		);
+		// id 与名称不再问用户：它们是 root 目录名的函数，由 serve 推导
+		expect(html).not.toContain('aria-label="project id"');
+		expect(html).not.toContain('aria-label="名称"');
+		expect(html).toContain("id 与名称取目录名");
+		expect(html).toContain('aria-label="项目根路径"');
+		// 钮上写的是人能认出的那个动作（不是 wire 里的「声明」），而且是主按钮
+		expect(html).toContain("保存</button>");
 		expect(html).toContain("不指定默认 Agent");
 		// 默认 Agent 是选择项，不是自由文本：清单里的 agent 真的成了选项
 		expect(html).toContain('value="hr"');
@@ -767,41 +875,77 @@ describe("Project 写面：声明 / 删除", () => {
 		expect(html).toContain("选择要删除的 Project");
 	});
 
-	it("未连接：不画写面（发不出去的命令不是声明），也不替清单编内容", () => {
+	it("保存钮与 root 同排：面板把它交给了路径控件的 trailing，不另起一行", () => {
+		const field = pathFieldOf(panelOf({ view: viewOf({ projects: PROJECTS, agents: AGENTS }) }));
+		const save = field.trailing as ReactElement;
+		expect(save.type).toBe("button");
+		expect(textOf((save.props as { children?: ReactNode }).children)).toBe("保存");
+	});
+
+	it("面板受视口约束：高度不超视口并可滚（矮窗口下保存钮曾被推到屏幕外且无处可滚）", () => {
+		const html = renderToStaticMarkup(createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS }) }));
+		expect(html).toContain("max-h-[calc(100vh-3.5rem)]");
+		expect(html).toContain("max-w-[calc(100vw-1rem)]");
+		expect(html).toContain("overflow-y-auto");
+	});
+
+	it("焦点就是 `default`：不问默认 Agent（那个选择框没有信息量），但保存钮照常在", () => {
+		// 没显式给焦点 → activeAgentIdOf 落到注册表第一个（default）
+		const html = renderToStaticMarkup(
+			createElement(ProjectSwitcher, { view: viewOf({ projects: PROJECTS, agents: AGENTS }) }),
+		);
+		expect(html).not.toContain("不指定默认 Agent");
+		expect(html).toContain("保存</button>");
+		expect(html).toContain('aria-label="项目根路径"');
+	});
+
+	it("未连接：不画写面（发不出去的命令不是保存），也不替清单编内容", () => {
 		const html = renderToStaticMarkup(
 			createElement(ProjectSwitcher, { view: viewOf({ connected: false, projects: undefined }) }),
 		);
-		expect(html).not.toContain("声明</button>");
+		expect(html).not.toContain("保存</button>");
 		expect(html).not.toContain("选择要删除的 Project");
 		expect(html).toContain("未连接——Project registry 不可用");
 	});
 
-	it("点「声明」真的把动作交出去（不是画着好看的按钮）", () => {
+	it("忙碌文案只说正在跑的那个动作（保存中… / 删除中…）—— 另一个钮不谎报", () => {
+		const html = (busy: ProjectPanelState["busy"]): string =>
+			renderToStaticMarkup(
+				panelOf({
+					view: viewOf({ projects: PROJECTS, agents: AGENTS }),
+					state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "dtc", busy },
+				}),
+			);
+		// 删除要真的是个可点的目标（没选目标时那个钮本来就是禁用的），否则这条断言问不到删除钮的文字
+		expect(html("save")).toContain("保存中…");
+		expect(html("save")).not.toContain("删除中…");
+		expect(html("delete")).toContain("删除中…");
+		expect(html("delete")).not.toContain("保存中…");
+		expect(html(null)).not.toContain("中…");
+	});
+
+	it("点「保存」真的把动作交出去（不是画着好看的按钮）", () => {
 		let declared = 0;
 		const tree = panelOf({
 			view: viewOf({ projects: PROJECTS, agents: AGENTS }),
 			state: {
-				draft: { projectId: "dtc", name: "DTC", root: "/Users/me/dtc", defaultAgentId: "hr" },
+				draft: { root: "/Users/me/dtc", defaultAgentId: "hr" },
 				deleteTargetId: "",
-				busy: false,
+				busy: null,
 			},
 			onDeclare: () => (declared += 1),
 		});
-		fireOnText(tree, "button", "声明", "onClick");
+		const save = pathFieldOf(tree).trailing as ReactElement;
+		(save.props as { onClick: () => void }).onClick();
 		expect(declared).toBe(1);
 	});
 
-	it("声明可达：填表 → 声明 → serve 真的收到 set_project，写完后重读 registry", async () => {
+	it("声明可达：填表 → 声明 → serve 真的收到 set_project（只带 root 与选了的默认 Agent），写完后重读 registry", async () => {
 		const store = await createConnectedStore();
-		const parsed = projectDraftToRecord({
-			projectId: "dtc",
-			name: "DTC",
-			root: "/Users/me/dtc",
-			defaultAgentId: "hr",
-		});
+		const parsed = projectDraftToInput({ root: "/Users/me/dtc", defaultAgentId: "hr" });
 		if (!parsed.ok) throw new Error(parsed.error);
 
-		const pending = store.setProject(parsed.record);
+		const pending = store.setProject(parsed.input);
 		// 断言可能在响应之前就失败：先挂一个接住 rejection 的分支，别让 afterEach 的断开变成
 		// 「测试之间未处理的错误」（重试分支仍在最后真等它）。
 		void pending.catch(() => {});
@@ -809,13 +953,21 @@ describe("Project 写面：声明 / 删除", () => {
 		const write = sentRequests().at(-1);
 		expect(write?.command).toMatchObject({
 			type: "set_project",
-			projectId: "dtc",
-			name: "DTC",
 			root: "/Users/me/dtc",
 			defaultAgentId: "hr",
 		});
+		// id 与名称不是客户端的决定：一个也不发，交给 serve 从目录名推
+		expect(write?.command).not.toHaveProperty("projectId");
+		expect(write?.command).not.toHaveProperty("name");
 
-		respondTo(write!.id, { project: parsed.record });
+		// 答复是**存储里那一份**（serve 推出来的 id / 名称在这里才第一次出现），不是我们发出去的那几个字
+		const stored: ProjectRecordDto = {
+			projectId: "dtc",
+			name: "dtc",
+			root: "/Users/me/dtc",
+			defaultAgentId: "hr",
+		};
+		respondTo(write!.id, { project: stored });
 		await Bun.sleep(0);
 
 		// 写完之后重读（归属由 serve 重算，不是客户端自己拼一份「写入后的样子」）
@@ -829,28 +981,19 @@ describe("Project 写面：声明 / 删除", () => {
 
 	it("没选默认 Agent 就不带那个字段（缺省不是空串）", async () => {
 		const store = await createConnectedStore();
-		const parsed = projectDraftToRecord({
-			projectId: "cornfield",
-			name: "CornField",
-			root: "/Users/me/cornfield",
-			defaultAgentId: "",
-		});
+		const parsed = projectDraftToInput({ root: "/Users/me/cornfield", defaultAgentId: "" });
 		if (!parsed.ok) throw new Error(parsed.error);
-		expect(parsed.record.defaultAgentId).toBeUndefined();
+		expect(parsed.input.defaultAgentId).toBeUndefined();
 
-		const pending = store.setProject(parsed.record);
+		const pending = store.setProject(parsed.input);
 		void pending.catch(() => {});
 		const write = sentRequests().at(-1);
-		expect(write?.command).toMatchObject({
-			type: "set_project",
-			projectId: "cornfield",
-			name: "CornField",
-			root: "/Users/me/cornfield",
-		});
+		expect(write?.command).toMatchObject({ type: "set_project", root: "/Users/me/cornfield" });
 		// 没选默认 Agent 就是**不发这个字段**（缺省与空串不是一回事）
 		expect(write?.command).not.toHaveProperty("defaultAgentId");
+		expect(write?.command).not.toHaveProperty("projectId");
 
-		respondTo(write!.id, { project: parsed.record });
+		respondTo(write!.id, { project: PROJECTS[0] });
 		await Bun.sleep(0);
 		respondTo(sentRequests().at(-1)!.id, { projects: [PROJECTS[0]] });
 		await pending;
@@ -880,14 +1023,9 @@ describe("Project 写面：声明 / 删除", () => {
 	});
 
 	it("错误真的被画出来：本地校验的不成立、以及 serve 的原始判决", async () => {
-		// 1) 本地就能看出的不成立（空字段）：面板把原文画出来
-		const invalid = projectDraftToRecord({
-			projectId: "   ",
-			name: "DTC",
-			root: "/Users/me/dtc",
-			defaultAgentId: "",
-		});
-		if (invalid.ok) throw new Error("空 projectId 不该通过");
+		// 1) 本地就能看出的不成立（空 root）：面板把原文画出来
+		const invalid = projectDraftToInput({ root: "   ", defaultAgentId: "" });
+		if (invalid.ok) throw new Error("空 root 不该通过");
 		const invalidHtml = renderToStaticMarkup(
 			createElement(ProjectPanel, {
 				view: viewOf({ projects: PROJECTS, agents: AGENTS }),
@@ -901,14 +1039,10 @@ describe("Project 写面：声明 / 删除", () => {
 
 		// 2) serve 的判决（从一次真失败的写入里取出来）同样原文可见，不被换成自造的提示
 		const store = await createConnectedStore();
-		const parsed = projectDraftToRecord({
-			projectId: "dtc",
-			name: "DTC",
-			root: "relative/dir",
-			defaultAgentId: "",
-		});
+		// 本地看不出不成立（非空就是合法输入），交给 serve 判：绝对路径那条规则只有它守
+		const parsed = projectDraftToInput({ root: "relative/dir", defaultAgentId: "" });
 		if (!parsed.ok) throw new Error(parsed.error);
-		const pending = store.setProject(parsed.record);
+		const pending = store.setProject(parsed.input);
 		void pending.catch(() => {});
 		const write = sentRequests().at(-1);
 		respondErrorTo(
@@ -938,35 +1072,25 @@ describe("Project 写面：声明 / 删除", () => {
 		expect(html).toContain("root must be an absolute path");
 	});
 
-	it("草稿→记录：字段去空格；projectId / 名称 / root 空着就不发", () => {
-		const parsed = projectDraftToRecord({
-			projectId: "  dtc  ",
-			name: " 米克原子 DTC ",
-			root: "  /Users/me/dtc ",
-			defaultAgentId: "  hr ",
-		});
+	it("草稿→入参：只送 root（去空格）与真的选了的默认 Agent；root 空着就不发", () => {
+		const parsed = projectDraftToInput({ root: "  /Users/me/dtc ", defaultAgentId: "  hr " });
 		if (!parsed.ok) throw new Error(parsed.error);
-		expect(parsed.record).toEqual({
-			projectId: "dtc",
-			name: "米克原子 DTC",
-			root: "/Users/me/dtc",
-			defaultAgentId: "hr",
-		});
+		expect(parsed.input).toEqual({ root: "/Users/me/dtc", defaultAgentId: "hr" });
 
-		for (const draft of [
-			{ projectId: "", name: "DTC", root: "/Users/me/dtc", defaultAgentId: "" },
-			{ projectId: "dtc", name: "  ", root: "/Users/me/dtc", defaultAgentId: "" },
-			{ projectId: "dtc", name: "DTC", root: "", defaultAgentId: "" },
-		]) {
-			expect(projectDraftToRecord(draft).ok).toBe(false);
-		}
+		// 没选默认 Agent：那个字段**不出现**（缺省与空串不是一回事）
+		const withoutAgent = projectDraftToInput({ root: "/Users/me/dtc", defaultAgentId: "  " });
+		if (!withoutAgent.ok) throw new Error(withoutAgent.error);
+		expect(withoutAgent.input).toEqual({ root: "/Users/me/dtc" });
+
+		// id / 名称不再是入参，所以“哪个字段空着”只剩 root 一种
+		expect(projectDraftToInput({ root: "", defaultAgentId: "hr" }).ok).toBe(false);
 	});
 
 	it("删除目标没选就不发命令（不替用户默认挑一个再删）", () => {
 		let removed = 0;
 		const tree = panelOf({
 			view: viewOf({ projects: PROJECTS, agents: AGENTS }),
-			state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: false },
+			state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "", busy: null },
 			onDelete: () => (removed += 1),
 		});
 		// 没选时删除钮是禁用的（画出来但点不动），选了才可点
@@ -976,7 +1100,7 @@ describe("Project 写面：声明 / 删除", () => {
 
 		const ready = panelOf({
 			view: viewOf({ projects: PROJECTS, agents: AGENTS }),
-			state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "dtc", busy: false },
+			state: { draft: EMPTY_PROJECT_DRAFT, deleteTargetId: "dtc", busy: null },
 			onDelete: () => (removed += 1),
 		});
 		fireOnText(ready, "button", "删除", "onClick");
