@@ -230,6 +230,17 @@ export type MultiplexCommand =
 	| { id?: string; type: "get_branch_messages"; sessionId?: string }
 	| { id?: string; type: "get_last_assistant_text"; sessionId?: string }
 	| { id?: string; type: "set_session_name"; sessionId?: string; name: string }
+	/**
+	 * 改一条**磁盘上**的会话记录的名字（列在会话列表里的那些历史会话）。
+	 *
+	 * 与 `set_session_name` 的分工：那条按**附件地址**定位，只能改本进程此刻挂着的那个会话；
+	 * 历史会话不在任何附件上，够不到。这条直接指名会话文件（`list_sessions` 给出的绝对路径），
+	 * 只重写它的头（`title` + `titleSource: "user"` —— 人工命名，自动起名不再覆盖）。
+	 *
+	 * serve 侧会拒：不在任何 agent 的 sessions 根下的路径、本进程正挂着的那个会话（走 set_session_name）、
+	 * 以及复制途中被别的写入者改动的文件（宁可拒绝，不拿别人的追加换一个名字）。
+	 */
+	| { id?: string; type: "rename_session"; sessionFile: string; name: string }
 	// Messages
 	| { id?: string; type: "get_messages"; sessionId?: string }
 	// P3：TUI 渲染/导出查询

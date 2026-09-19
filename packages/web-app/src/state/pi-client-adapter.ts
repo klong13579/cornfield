@@ -625,6 +625,30 @@ export class PiClientAdapter implements PiClient {
 		}
 	}
 
+	/**
+	 * 改名一条磁盘上的会话记录（rename_session；`list_sessions` 给的绝对路径）。
+	 *
+	 * 分工（为什么要两条，见 `lib/pi-client-api.ts` 的接口注释）在这里就一句话：这条不碰本连接
+	 * 的附件，只改列表里那些没挂着的记录。serve 拒本进程挂着的那个会话（要求走
+	 * `renameActiveSession`）—— 那种行由调用方按身份分流，不在这里猜。
+	 *
+	 * 失败原样上抛：`PiServerError.serverError` 就是 serve 的拒绝原文，调用方要用它显示。
+	 */
+	renameSession(opts: { sessionFile: string; name: string }): Promise<void> {
+		return this.#req({ type: "rename_session", sessionFile: opts.sessionFile, name: opts.name }).then(
+			() => undefined,
+		);
+	}
+
+	/**
+	 * 改名本连接挂着的那个会话（set_session_name）。
+	 *
+	 * 不带 `sessionId` = serve 解析为当前焦点附件 —— 正是这条命令的能力边界：它只能改挂着的那个。
+	 */
+	renameActiveSession(name: string): Promise<void> {
+		return this.#req({ type: "set_session_name", name }).then(() => undefined);
+	}
+
 	/** 读当前会话的委派账本（get_session_tree）。 */
 	getSessionTree(sessionId?: string): Promise<SessionTreeDto> {
 		return this.#req<SessionTreeDto>({ type: "get_session_tree", ...(sessionId ? { sessionId } : {}) });

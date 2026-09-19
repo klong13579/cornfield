@@ -9,8 +9,10 @@ import {
 	Search,
 	Star,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { SessionRecordSummary } from "../../lib/records";
+import { serveVerdictOf } from "../../lib/serve-verdict";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
@@ -87,6 +89,79 @@ export function sessionRowAction(
 	if (!isCurrent(row)) return () => void actions.openHistorySession(row);
 	if (row.playback) return () => void actions.returnToLiveSession();
 	return undefined;
+}
+
+/**
+ * 一行该发哪条改名命令（纯函数：无 React、无 store）。
+ *
+ * 判据是**这一行代表谁**，不是行的长相 —— wire 上那两条命令各自只能改一种会话：
+ *   - 本连接挂着的那个会话（当前会话那一行，它的 id 就是附件地址）→ `set_session_name`；
+ *   - 列表里的历史记录 → `rename_session`，按 `list_sessions` 给出的会话文件定位。
+ *
+ * 反过来会怎样：拿本连接挂着的那个会话的文件去 `rename_session`，serve 直接拒
+ * （`session is open in this process: rename it as the active session instead`）—— 它的内存态
+ * 与文件是同一份事实，绕开活跃会话改文件会让两边漂。
+ */
+export type RenameTarget =
+	| { kind: "history"; sessionFile: string }
+	| { kind: "active" }
+	| { kind: "none"; reason: string };
+
+/** 历史记录没有会话文件路径时菜单项要说的原因（不可用就得说得出为什么）。 */
+const NO_SESSION_FILE_REASON = "这条记录没有会话文件路径，改不了名字";
+
+export function renameTargetOf(row: SidebarRow, activeSessionId: string | undefined): RenameTarget {
+	// 当前会话那一行：id 是附件地址，不是会话文件 —— 只能走 set_session_name
+	if (isCurrent(row)) return { kind: "active" };
+	// 本连接挂着的那个会话的地址：判据是身份，不是行的形状。列表今天已经把这种行滤掉了，
+	// 但换一处过滤顺序就会把一条注定被拒的命令发出去，而这一条命令的拒绝理由用户没法自己修。
+	if (activeSessionId !== undefined && row.id === activeSessionId) return { kind: "active" };
+	const sessionFile = row.sessionFile;
+	if (sessionFile === undefined || sessionFile.trim() === "") return { kind: "none", reason: NO_SESSION_FILE_REASON };
+	return { kind: "history", sessionFile };
+}
+
+/** 右键菜单的一项（数据不是 JSX：可纯函数断言，也可静态渲染）。 */
+export interface SessionMenuItem {
+	id: "rename";
+	label: string;
+	/** 不可用 = 点了不会有反应的那种项；此时必须同时给出 reason。 */
+	disabled: boolean;
+	/** 不可用的原因（画在 title 上，不是一句“自己去猜”）。 */
+	reason?: string;
+}
+
+/**
+ * 菜单项列表（纯函数）。目标改不了时不弹一个空菜单：那一项在，但**不可用并说得出为什么** ——
+ * 一个点了没反应的项比没有它更坏（用户会以为菜单坏了）。
+ */
+export function sessionMenuItems(target: RenameTarget): SessionMenuItem[] {
+	if (target.kind === "none") return [{ id: "rename", label: "重命名", disabled: true, reason: target.reason }];
+	return [{ id: "rename", label: "重命名", disabled: false }];
+}
+
+/**
+ * 提交前把输入框里的名字过一遍（纯函数）：空 / 只有空白 → undefined（不发命令）。
+ *
+ * serve 也会拒空名（`Session name cannot be empty`），但那是一次网络往返之后的拒绝；先在这里
+ * 挡住，输入框原地留着让人接着改。清洗（去控制字符 / 折叠空白）是 serve 的事，不在这层做第二遍。
+ */
+export function renameNameToSubmit(raw: string): string | undefined {
+	const name = raw.trim();
+	return name === "" ? undefined : name;
+}
+
+/** 菜单贴光标，但不越出视口（纯函数）：边距内收，右下角放不下就收回来贴着边。 */
+export function clampMenuPosition(
+	point: { x: number; y: number },
+	size: { width: number; height: number },
+	viewport: { width: number; height: number },
+	margin = 8,
+): { left: number; top: number } {
+	return {
+		left: Math.max(margin, Math.min(point.x, viewport.width - size.width - margin)),
+		top: Math.max(margin, Math.min(point.y, viewport.height - size.height - margin)),
+	};
 }
 
 export interface SessionGroup {
@@ -267,15 +342,57 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 	const [pinned, setPinned] = useState<Set<string>>(loadPinned);
 	/** 展开着的组（key）。空 = 全折叠 —— 默认态是折叠，展开是用户点出来的。**不持久化**（与「当前计划」条同款约定：每次进工作台都从折叠开始）。 */
 	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+	/** 右键菜单的目标行 + 光标位置（视口坐标）；null = 没开。 */
+	const [menu, setMenu] = useState<{ row: SidebarRow; x: number; y: number } | null>(null);
+	/** 正在就地改名的行 id；null = 没有。 */
+	const [editingRowId, setEditingRowId] = useState<string | null>(null);
+	/**
+	 * 改名失败的原因（serve 原文）。
+	 *
+	 * 落在侧栏本地而不是 `view.historyError`：那个错误位属于「回放这条读」（归一在 store 里），
+	 * 而改名是侧栏自己发起的动作 —— 两者混在一起，回放一刷新就会把改名的报错抹掉。
+	 */
+	const [renameError, setRenameError] = useState<string | undefined>(undefined);
+	const menuRef = useRef<HTMLDivElement | null>(null);
+
+	/** 历史会话索引重读（连接建立时一次；改完名字后重跑**同一条**读，不另立一份列表状态）。 */
+	const refreshSessions = useCallback((): Promise<void> => {
+		return store
+			.listSessions()
+			.then(setSessions)
+			.then(() => undefined)
+			.catch(() => undefined);
+	}, [store]);
 
 	/** 历史会话索引（list_sessions 真数据）；未连接/失败保持空列表，UI 空态 */
 	useEffect(() => {
 		if (!view.connected) return;
-		void store
-			.listSessions()
-			.then(setSessions)
-			.catch(() => undefined);
-	}, [store, view.connected]);
+		void refreshSessions();
+	}, [refreshSessions, view.connected]);
+
+	/**
+	 * 菜单的三种关闭：Esc、点外部、滚动（捕获阶段 —— 列表那个滚动容器不冒泡）。
+	 * 都在菜单打开时才注册，不留常驻监听。
+	 */
+	useEffect(() => {
+		if (!menu) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setMenu(null);
+		};
+		const onPointerDown = (event: PointerEvent) => {
+			if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+			setMenu(null);
+		};
+		const onScroll = () => setMenu(null);
+		document.addEventListener("keydown", onKeyDown);
+		document.addEventListener("pointerdown", onPointerDown, true);
+		document.addEventListener("scroll", onScroll, true);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown);
+			document.removeEventListener("pointerdown", onPointerDown, true);
+			document.removeEventListener("scroll", onScroll, true);
+		};
+	}, [menu]);
 
 	const togglePin = (id: string) => {
 		setPinned(prev => {
@@ -289,6 +406,57 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 			}
 			return next;
 		});
+	};
+
+	/** 行上右键 = 我们的菜单；拦掉浏览器自带那个（位置与项都不是我们要给的那个）。 */
+	const openRowMenu = (row: SidebarRow, event: React.MouseEvent): void => {
+		event.preventDefault();
+		setMenu({ row, x: event.clientX, y: event.clientY });
+	};
+
+	/** 选「重命名」：进就地编辑。目标改不了时不进去 —— 那种项本来就不可用。 */
+	const startRename = (row: SidebarRow): void => {
+		const target = renameTargetOf(row, view.sessionId);
+		if (target.kind === "none") {
+			setRenameError(target.reason);
+			return;
+		}
+		setRenameError(undefined);
+		setEditingRowId(row.id);
+	};
+
+	/**
+	 * 提交改名：按行的身份分流（当前会话走后一条，历史行走前一条），成功后重跑列表那条读。
+	 *
+	 * 失败把 serve 的原文落到错误条上：这些拒绝（路径越界 / 本进程挂着的会话 / 文件刚被别人改过）
+	 * 都是用户能据以行动的东西，改写一句「改名失败」就把证据丢了。
+	 */
+	const submitRename = (row: SidebarRow, raw: string): void => {
+		const name = renameNameToSubmit(raw);
+		// 空名字：不发命令，输入框留在原地（SessionRow 那一层已经挡了一道，这里再兜一次）
+		if (name === undefined) return;
+		const target = renameTargetOf(row, view.sessionId);
+		if (target.kind === "none") {
+			setEditingRowId(null);
+			setRenameError(target.reason);
+			return;
+		}
+		setEditingRowId(null);
+		const request =
+			target.kind === "active"
+				? store.renameActiveSession(name)
+				: store.renameSession({ sessionFile: target.sessionFile, name });
+		void request
+			.then(() => refreshSessions())
+			.catch((err: unknown) => {
+				setRenameError(`改名失败：${serveVerdictOf(err).message}`);
+			});
+	};
+
+	/** 菜单项选中（目前只有一项；仍按 id 分流，免得以后加项时悄悄接错）。 */
+	const selectMenuItem = (row: SidebarRow, id: SessionMenuItem["id"]): void => {
+		setMenu(null);
+		if (id === "rename") startRename(row);
 	};
 
 	// 行副标题的归属：会话自己记下的 projectId（没记过 = 不显示，不拿目录名冒充一个 Project）。
@@ -440,6 +608,11 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 									{view.historyError}
 								</div>
 							)}
+							{renameError && (
+								<div className="mx-3 mb-1 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+									{renameError}
+								</div>
+							)}
 							{/* 会话列表 */}
 							<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
 								{renderedGroups.length === 0 && (
@@ -471,8 +644,12 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 															pinned={pinned.has(row.id)}
 															active={!isCurrent(row) && row.id === view.sessionId}
 															projectLabel={isCurrent(row) ? undefined : projectNameOf(row)}
+															renaming={editingRowId === row.id}
 															onTogglePin={() => togglePin(row.id)}
 															onClick={sessionRowAction(row, store)}
+															onContextMenu={event => openRowMenu(row, event)}
+															onRenameSubmit={name => submitRename(row, name)}
+															onRenameCancel={() => setEditingRowId(null)}
 														/>
 													))}
 												</div>
@@ -483,6 +660,20 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 							</div>
 						</>
 					)}
+
+					{/* 右键菜单浮层：portal 到 body —— 这一层 aside 带 transform（折叠/抽屉动画），
+				    fixed 会以它为包含块，菜单就贴不到光标了 */}
+					{menu &&
+						createPortal(
+							<SessionContextMenu
+								menuRef={menuRef}
+								x={menu.x}
+								y={menu.y}
+								items={sessionMenuItems(renameTargetOf(menu.row, view.sessionId))}
+								onSelect={id => selectMenuItem(menu.row, id)}
+							/>,
+							document.body,
+						)}
 
 					{/* 底部状态 */}
 					<div className="flex shrink-0 items-center gap-2 border-t border-hairline px-3 py-2.5 text-[12px] text-ink-subtle">
@@ -523,28 +714,114 @@ function rowSubtitle(row: SessionRecordSummary, projectLabel: string | undefined
 	return [projectLabel, `${row.messageCount} 条`].filter((part): part is string => part !== undefined).join(" · ");
 }
 
+export interface SessionMenuPanelProps {
+	left: number;
+	top: number;
+	items: readonly SessionMenuItem[];
+	onSelect: (id: SessionMenuItem["id"]) => void;
+	menuRef?: React.Ref<HTMLDivElement>;
+}
+
+/**
+ * 会话右键菜单（纯展示，无 hook，导出供静态渲染断言）：`role="menu"` + 每项 `role="menuitem"`。
+ *
+ * 不可用的项画成 native `disabled`（不是「点了没反应」的假按钮），原因放在 `title` 上 ——
+ * 一个点了没反应的项比没有它更坏：用户会以为菜单坏了，而不是「这条记录改不了」。
+ */
+export function SessionMenuPanel({ left, top, items, onSelect, menuRef }: SessionMenuPanelProps): React.JSX.Element {
+	return (
+		<div
+			{...(menuRef ? { ref: menuRef } : {})}
+			role="menu"
+			aria-label="会话操作"
+			className="fixed z-menu min-w-[150px] rounded-[10px] border border-hairline-strong bg-surface p-1 shadow-xl"
+			style={{ left, top }}
+		>
+			{items.map(item => (
+				<button
+					key={item.id}
+					type="button"
+					role="menuitem"
+					disabled={item.disabled}
+					className="block w-full rounded px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-surface-2 disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
+					{...(item.reason ? { title: item.reason } : {})}
+					onClick={() => onSelect(item.id)}
+				>
+					{item.label}
+				</button>
+			))}
+		</div>
+	);
+}
+
+/**
+ * 菜单浮层：先量自己的真实尺寸再夹进视口（菜单多长由项数决定，靠常量估高会在项数变时露出来）。
+ *
+ * 量尺寸放在 layout 阶段完成（不闪）；本件只在菜单**开着**时才存在，静态渲染碰不到它。
+ * 容器带 transform，所以 `fixed` 得靠 portal 到 body 才有视口坐标（见调用点）。
+ */
+function SessionContextMenu({
+	menuRef,
+	x,
+	y,
+	items,
+	onSelect,
+}: {
+	menuRef: React.RefObject<HTMLDivElement | null>;
+	x: number;
+	y: number;
+	items: readonly SessionMenuItem[];
+	onSelect: (id: SessionMenuItem["id"]) => void;
+}): React.JSX.Element {
+	const [pos, setPos] = useState({ left: x, top: y });
+	useLayoutEffect(() => {
+		const rect = menuRef.current?.getBoundingClientRect();
+		setPos(
+			clampMenuPosition(
+				{ x, y },
+				{ width: rect?.width ?? 0, height: rect?.height ?? 0 },
+				{ width: window.innerWidth, height: window.innerHeight },
+			),
+		);
+	}, [menuRef, x, y, items.length]);
+	return <SessionMenuPanel menuRef={menuRef} left={pos.left} top={pos.top} items={items} onSelect={onSelect} />;
+}
+
 /**
  * 会话列表的一行（纯展示，导出供静态渲染断言）。
+ *
+ * `renaming` 为真时名字那格换成输入框（就地改名）：Enter 提交、Esc 取消、失焦取消。
+ * 用 `defaultValue`（非受控）—— 打字这件事不需要过 React 状态，提交时从事件里读当下的值。
  */
 export function SessionRow({
 	row,
 	pinned,
 	active,
 	projectLabel,
+	renaming,
 	onTogglePin,
 	onClick,
+	onContextMenu,
+	onRenameSubmit,
+	onRenameCancel,
 }: {
 	row: SidebarRow;
 	pinned: boolean;
 	active: boolean;
 	/** 会话自己记下的 Project 显示名；未记录 = undefined（不显示，也不拿目录名冒充）。 */
 	projectLabel?: string;
+	/** 这一行正在就地改名（名字那格换成输入框）。 */
+	renaming?: boolean;
 	onTogglePin: () => void;
 	onClick?: () => void;
+	onContextMenu?: (event: React.MouseEvent) => void;
+	onRenameSubmit?: (name: string) => void;
+	onRenameCancel?: () => void;
 }): React.JSX.Element {
 	return (
 		<div
 			className={`group flex w-full items-start gap-1.5 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2 ${active ? "bg-accent-dim" : ""}`}
+			{...(onContextMenu ? { onContextMenu } : {})}
 		>
 			<button
 				type="button"
@@ -557,21 +834,45 @@ export function SessionRow({
 			>
 				<Star size={12} strokeWidth={1.5} />
 			</button>
-			<button
-				type="button"
-				className="min-w-0 flex-1 text-left"
-				onClick={onClick}
-				title={isCurrent(row) ? (row.playback ? "回到实时会话" : "当前会话") : "打开会话"}
-			>
-				<span className="block truncate text-[13px] text-ink">{row.name}</span>
-				<span className="block truncate text-[11px] text-ink-faint">
-					{isCurrent(row)
-						? row.playback
-							? "回放中 · 点这里回到实时"
-							: "当前会话"
-						: rowSubtitle(row, projectLabel)}
-				</span>
-			</button>
+			{renaming ? (
+				<input
+					type="text"
+					className="min-w-0 flex-1 rounded border border-hairline-strong bg-surface-2 px-1.5 py-0.5 text-[13px] text-ink outline-none"
+					defaultValue={row.name}
+					aria-label="会话名"
+					// biome-ignore lint/a11y/noAutofocus: 就地改名是用户点出来的：输入框一出现就该能直接打字（键盘路径入口）
+					autoFocus
+					onKeyDown={event => {
+						if (event.key === "Enter") {
+							// 空名字不发命令：输入框留在原地，人可以接着改
+							if (renameNameToSubmit(event.currentTarget.value) === undefined) return;
+							onRenameSubmit?.(event.currentTarget.value);
+							return;
+						}
+						if (event.key === "Escape") {
+							event.stopPropagation();
+							onRenameCancel?.();
+						}
+					}}
+					onBlur={() => onRenameCancel?.()}
+				/>
+			) : (
+				<button
+					type="button"
+					className="min-w-0 flex-1 text-left"
+					onClick={onClick}
+					title={isCurrent(row) ? (row.playback ? "回到实时会话" : "当前会话") : "打开会话"}
+				>
+					<span className="block truncate text-[13px] text-ink">{row.name}</span>
+					<span className="block truncate text-[11px] text-ink-faint">
+						{isCurrent(row)
+							? row.playback
+								? "回放中 · 点这里回到实时"
+								: "当前会话"
+							: rowSubtitle(row, projectLabel)}
+					</span>
+				</button>
+			)}
 		</div>
 	);
 }

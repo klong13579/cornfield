@@ -756,6 +756,34 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					done({ messages: res.messages });
 					return;
 				}
+				case "rename_session": {
+					// 列表里的历史会话改名：与 get_session_messages 同一条路 —— 按**会话文件**定位，
+					// 不 attach 任何东西（它可能属于此刻根本没在跑的那个 Agent）。
+					// 落的是 `titleSource: "user"`：人工命名永久优先，之后的自动起名不再覆盖它。
+					const name = command.name.trim();
+					if (!name) {
+						fail("Session name cannot be empty");
+						return;
+					}
+					const target = await resolveRenamableSessionFile(registry, command.sessionFile);
+					if (!target.ok) {
+						fail(target.error);
+						return;
+					}
+					// 改名走 SessionManager（会话文件只有一个写入者）：open + setSessionName + close，
+					// 头部的重写是它自己那条原子路径（临时文件 + rename）。
+					const manager = await SessionManager.open(target.path);
+					try {
+						if (!(await manager.setSessionName(name, "user"))) {
+							fail("Session name cannot be empty");
+							return;
+						}
+					} finally {
+						await manager.close();
+					}
+					done();
+					return;
+				}
 				case "diagnose_session": {
 					// 诊断会话：先做简单路径（快速出 fallback），再用 runEphemeralTurn 做 LLM 深度分析
 					const sf = command.sessionFile;
@@ -2897,6 +2925,50 @@ async function entryExists(target: string): Promise<boolean> {
 async function isWithinRealPath(root: string, candidate: string): Promise<boolean> {
 	const entry = (await nearestExistingEntry(candidate)) ?? candidate;
 	return pathIsWithin(root, await realTargetOf(entry));
+}
+
+/** `rename_session` 里「这个文件刚刚被改过」的窗口（毫秒）。 */
+const RENAME_QUIET_MS = 10_000;
+
+/**
+ * `rename_session` 的目标校验：会话文件必须落在某个 Agent 的 sessions 根下，且此刻不像正被人写。
+ *
+ * 三条拒绝各自的理由：
+ * - **越界路径**：写命令比读命令更该守住边界（读一个不属于任何 Agent 的文件是噪音，改写它是事故）。
+ * - **本进程挂着的会话**：它的内存态与文件是同一份事实，绕开 `set_session_name` 直接改文件会让两边漂。
+ * - **刚被改过的文件（10 秒内）**：别的进程可能正拿它写（gateway 子进程持有 append 句柄），
+ *   而改名是「换 inode」—— 此刻替换，对方之后追加的内容会写进被摘掉的 inode 上，随句柄一起消失。
+ *   这条是尽力而为的信号，**不是锁**：安静地持有句柄的进程仍可能被误伤。
+ */
+async function resolveRenamableSessionFile(
+	registry: SessionRegistry,
+	sessionFile: string,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+	const file = path.resolve(sessionFile);
+	if (!path.isAbsolute(sessionFile) || path.extname(file) !== ".jsonl") {
+		return { ok: false, error: `not a session file: ${sessionFile}` };
+	}
+	const roots = [defaultSessionsRoot(), ...registry.listMetas().map(meta => agentSessionsRoot(meta))];
+	const root = roots.find(candidate => isUnderLexically(candidate, file));
+	if (!root || !(await isWithinRealPath(root, file))) {
+		return { ok: false, error: `session file is outside every agent's sessions root: ${sessionFile}` };
+	}
+	for (const attached of registry.listAttached()) {
+		const openFile = attached.session.sessionFile;
+		if (openFile && path.resolve(openFile) === file) {
+			return { ok: false, error: "session is open in this process: rename it as the active session instead" };
+		}
+	}
+	const stat = await fs.stat(file).catch((err: unknown) => {
+		if (isEnoent(err)) return undefined;
+		throw err;
+	});
+	if (!stat) return { ok: false, error: `session file not found: ${sessionFile}` };
+	if (!stat.isFile()) return { ok: false, error: `not a file: ${sessionFile}` };
+	if (Date.now() - stat.mtimeMs < RENAME_QUIET_MS) {
+		return { ok: false, error: "session file was modified seconds ago: retry when it settles" };
+	}
+	return { ok: true, path: file };
 }
 
 /** 从目标自己往上找到第一个存在的条目（到文件系统根为止）。 */

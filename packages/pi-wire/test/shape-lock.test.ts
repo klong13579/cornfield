@@ -463,6 +463,8 @@ const COMMAND_TYPES = [
 	"create_agent",
 	"list_sessions",
 	"get_session_messages",
+	// 改列表里历史会话的名字（按会话文件定位，与 set_session_name 分工：那条只能改挂着的那个）
+	"rename_session",
 	"fs_list",
 	"fs_read",
 	"fs_read_image",

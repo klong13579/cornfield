@@ -542,6 +542,36 @@ export interface PiClient {
 	/** 历史会话索引（list_sessions；be-dev 就绪后返回真数据，未实现时返回基础查询）。 */
 	listSessions(): Promise<SessionRecordSummary[]>;
 
+	// ── 会话改名（两条命令，各管一件事）──
+	/**
+	 * 改一条**磁盘上的会话记录**的名字（rename_session）—— 列表（list_sessions）里的历史会话。
+	 *
+	 * 与 {@link renameActiveSession} 的分工是**身份**问题，不是实现细节：这两条命令各自只能改
+	 * 一种会话，谁也替不了谁，所以不能只留一个。
+	 *
+	 * - 这条按**会话文件**定位（`list_sessions` 给出的绝对路径）：它可能属于此刻根本没在跑的
+	 *   Agent（历史记录不在任何附件上，`set_session_name` 够不到）；
+	 * - 但**本进程此刻挂着的那个会话**不能走这条：serve 直接拒（`session is open in this
+	 *   process: rename it as the active session instead`）—— 它的内存态与文件是同一份事实，
+	 *   绕开活跃会话改文件会让两边漂。那种行要走 {@link renameActiveSession}。
+	 *
+	 * 名字由 serve 清洗（去控制字符、折叠空白、trim）后写进会话头，并标 `titleSource: "user"`
+	 * —— 人工命名永久优先，之后的自动起名不再覆盖。
+	 *
+	 * 失败抛错，serve 的拒绝原文在 `PiServerError.serverError` 上（如 `not a session file:` /
+	 * `session file not found:` / `session file was modified seconds ago: retry when it settles`），
+	 * 调用方**原样显示**，不改写。
+	 */
+	renameSession(opts: { sessionFile: string; name: string }): Promise<void>;
+	/**
+	 * 改**本连接此刻挂着的那个会话**的名字（set_session_name）—— 不指名文件，也就是改不了历史记录。
+	 *
+	 * 定位用的是**附件地址**（当前会话那一行的 id），不是会话文件；不传地址 = 本连接的当前焦点。
+	 * 分工与为什么不能只留一条见 {@link renameSession}。失败抛错（原文 `Session name cannot be
+	 * empty` 也原样给调用方）。
+	 */
+	renameActiveSession(name: string): Promise<void>;
+
 	// ── Session Tree（T8：父会话的委派账本 + 结果带回）──
 	/**
 	 * 读一个会话直接委派出去的子会话（get_session_tree）。
