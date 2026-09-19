@@ -8,6 +8,10 @@
 
 - **Prompts 源不再列 `TODO.md`**（`src/pages/agents/AgentDetailView.tsx`, `test/e2e/agent-dashboard.spec.ts`）：serve 侧 `AGENT_DIR_PROMPT_FILES` 把 `TODO.md` 移出 prompt 面（它退出注入流程，改为历史留档），清单随真源从 8 项变 7 项。前端照渲染 serve 给的清单，只改了一份独立核对用的字面量与一处已过时的注释。
 
+### Added
+
+- **分栏可拖拽：会话栏 / 右栏 / 主导航 / 右栏内部的文件分栏**（`src/lib/pane-resize.ts`, `src/layout/PaneDivider.tsx`, `src/layout/use-pane-layout.ts`, `src/state/ui-store.ts`, `src/layout/{AppShell,AppSidebar}.tsx`, `src/pages/workspace/{WorkspaceView,SessionSidebar,RightPanel,FileExplorer}.tsx`）：四处分栏此前都是写死的宽度（240 / 300 / 300 / 40%）。现在每处中间夹一条分隔条（`role="separator"` + aria 数值 + 键盘 ←→/↑↓、Shift 粗调、双击回默认），拖动实时改宽、松手才落盘（`cornfield.workspace.panes`），刷新还在。**偏好与渲染分开**：容器把偏好写成 CSS 变量、栏自己取用，窗口放不下时由 flex 按各栏下限收紧，而**被收紧的值不写回偏好**（不然窗口缩一次就把用户选的宽度永久改掉）；左右栏的拖拽上限是动态的（按内容列此刻的剩余空间现算、扣掉转录列下限），拖到极限不会把转录列压没。右栏内部那处上下分栏存**比例**而不是像素（它锚的是高度，存像素会在右栏换宽后失真）。拖拽中**不经过 React**（每帧只改容器上的 CSS 变量）：工作台流式输出时每次会话更新都会重渲染，靠 React state 承载拖拽中的宽度会被一次无关重渲染弹回偏好值；落盘发生在松手，那时 React 写回同一个值。分隔条自带 `z-index` —— 可抓范围向两侧各撑 4px，不抬层级时 DOM 上后出现的邻居会盖掉它一侧（实测那条 1px 的线上只有一半能按中，光标在另一半还会变回邻居的样式）。移动端与 `/m` 不参与（`<lg` 两侧栏是抽屉，没有可拖的分栏）。回归：`test/pane-resize.test.ts`（几何 / 拖拽会话 / 偏好读盘，含边界与坏数据）、`test/pane-divider.render.test.ts`（role / aria / 轴向）、`test/e2e/pane-resize.spec.ts`（真实指针：拖拽 + 刷新持久 + 键盘 ±16 / Shift 64 + 双击复位 + 拖到极限转录列仍有下限 + 主导航变宽时整块工作台跟着让位）。
+
 ## [1.3.0] - 2026-09-17
 
 ### Changed

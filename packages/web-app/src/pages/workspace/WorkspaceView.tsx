@@ -5,7 +5,10 @@ import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
 import { AgentSwitcher } from "../../layout/AgentSwitcher";
 import { DevicePreview } from "../../layout/DevicePreview";
+import { PaneDivider } from "../../layout/PaneDivider";
 import { ProjectSwitcher } from "../../layout/ProjectSwitcher";
+import { usePaneLayout } from "../../layout/use-pane-layout";
+import { CONTENT_MIN_PX, type PaneId } from "../../lib/pane-resize";
 import { FloatingCardHost } from "../../render/FloatingCardHost";
 import { activeAgentIdOf, activeAgentOf } from "../../state/agent-context";
 import type { SessionView } from "../../state/session-store";
@@ -231,14 +234,19 @@ export function CompactButton({ onCompact }: { onCompact: () => void }): React.J
 	);
 }
 
+/** 工作台里可拖的两栏。模块级常量：分栏集合是这个工作台的形状，不是每次渲染算出来的。 */
+const WORKSPACE_PANES: readonly PaneId[] = ["sessionSidebar", "rightPanel"];
+
 /**
- * 会话工作台（FR-1）：自定义顶栏 + 转录区 + Composer（右栏已按用户决策移除，对话区占满全宽）。
+ * 会话工作台（FR-1）：自定义顶栏 + 转录区 + Composer（右栏默认收起是用户决策，展开后转录列收窄）。
+ * 三栏的宽度都可拖（会话栏 / 转录列 / 右栏），几何由 `usePaneLayout` 给出。
  * 支持 ?q= 直达（Home Composer 跳转带话），一次性消费：自动发送后从 URL 移除 q 参数。
  */
 export function WorkspaceView({ compact = false }: { compact?: boolean }): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const ui = useUiState();
+	const layout = usePaneLayout(WORKSPACE_PANES);
 	const [searchParams, setSearchParams] = useSearchParams();
 	const initialQuery = (searchParams.get("q") ?? "").trim();
 	// 新建会话表单：顶栏那个入口把它打开（不再直接发 new_session——那会跳过「这次要建在哪」）
@@ -284,9 +292,21 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 	}, [initialQuery, store, setSearchParams]);
 
 	return (
-		<div className="flex h-full min-h-0">
-			{!compact && <SessionSidebar />}
-			<div className="flex min-w-0 flex-1 flex-col">
+		<div className="flex h-full min-h-0" ref={layout.containerRef} style={layout.containerStyle}>
+			{!compact && <SessionSidebar elementRef={layout.paneRef("sessionSidebar")} />}
+			{/* 折叠态（桌面薄栏）不是可拖的分栏，分隔条跟着藏；lg 以下会话栏是抽屉，同样没有可拖的分栏 */}
+			{!compact && !ui.sessionSidebarCollapsed && (
+				<PaneDivider
+					axis="vertical"
+					edge="before"
+					target={layout.target("sessionSidebar")}
+					className="hidden lg:block"
+				/>
+			)}
+			{/* 内容列的下限就是转录列的下限：拖任何一栏都不该把它压成一个看不见的宽度。
+			    用 inline style 而不是 min-w-0 —— 同一个下限值（CONTENT_MIN_PX）同时是拖拽上限的
+			    依据，两处必须同源；显式 min-width 也顺带压住了自动最小尺寸（长代码行撑宽转录列）。 */}
+			<div className="flex flex-1 flex-col" ref={layout.contentRef} style={{ minWidth: CONTENT_MIN_PX }}>
 				{view.commandError && (
 					<div className="flex items-center gap-2 border-b border-danger/40 bg-danger/5 px-4 py-1.5 text-[12px] text-danger">
 						<span className="flex-1 truncate">{view.commandError}</span>
@@ -403,7 +423,15 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 				<FloatingCardHost />
 				<ComposerBar autoFocusDraft={initialQuery} />
 			</div>
-			{!compact && <RightPanel collapsed={!ui.rightPanelOpen} />}
+			{!compact && ui.rightPanelOpen && (
+				<PaneDivider
+					axis="vertical"
+					edge="after"
+					target={layout.target("rightPanel")}
+					className="hidden lg:block"
+				/>
+			)}
+			{!compact && <RightPanel collapsed={!ui.rightPanelOpen} elementRef={layout.paneRef("rightPanel")} />}
 			{!compact && <DevicePreview />}
 		</div>
 	);

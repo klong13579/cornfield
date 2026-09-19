@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { PaneDivider } from "../../layout/PaneDivider";
+import { useFileSplit } from "../../layout/use-pane-layout";
 import { fmtSize } from "../../lib/format-size";
+import { FILE_SPLIT_VAR } from "../../lib/pane-resize";
 import { getFileWorkflow } from "../../state/file-workflow-store";
 import { useSessionStore } from "../../state/session-store";
 import { FilePreviewPane } from "./FilePreviewPane";
@@ -22,7 +25,7 @@ import { FilePreviewPane } from "./FilePreviewPane";
  *
  * variant:
  * - "wide"（默认）：详情页左右双栏（目录树 | 文件预览）
- * - "narrow"：右栏上下布局（目录树 | 文件预览，40% 预览区）
+ * - "narrow"：右栏上下布局（目录树 | 文件预览，中间可拖 —— 份额存比例，右栏宽度可变）
  */
 
 interface FsTreeNode {
@@ -57,6 +60,8 @@ export function FileExplorer({
 	const [root, setRoot] = useState<FsTreeNode | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [image, setImage] = useState<PreviewImage | null>(null);
+	// 上下分栏的几何：narrow 变体用，wide 变体不看它（hook 本身不自带副作用）。
+	const split = useFileSplit();
 
 	const loadDir = async (node: FsTreeNode): Promise<void> => {
 		try {
@@ -217,9 +222,13 @@ export function FileExplorer({
 
 	if (variant === "narrow") {
 		return (
-			<div className="flex min-h-0 flex-col gap-3">
+			<div className="flex min-h-0 flex-col gap-3" ref={split.containerRef} style={split.containerStyle}>
 				<div className="min-h-0 flex-1">{tree}</div>
-				<div className="h-[40%] shrink-0">{preview}</div>
+				{/* 预览在分隔条下侧（edge="after"）：分隔条下移 = 预览变矮 */}
+				<PaneDivider axis="horizontal" edge="after" target={split.target} />
+				<div className="shrink-0" ref={split.previewRef} style={{ height: `var(${FILE_SPLIT_VAR})` }}>
+					{preview}
+				</div>
 			</div>
 		);
 	}

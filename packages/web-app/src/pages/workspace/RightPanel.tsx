@@ -30,7 +30,14 @@ const TABS: { id: TabId; label: string; icon: typeof FolderOpen }[] = [
 	{ id: "changes", label: "改动", icon: GitBranch },
 ];
 
-export function RightPanel({ collapsed = false }: { collapsed?: boolean }): React.JSX.Element {
+export function RightPanel({
+	collapsed = false,
+	elementRef,
+}: {
+	collapsed?: boolean;
+	/** 交出去给分栏容器量可见宽度（拖拽起点用屏幕上那个值，不是偏好值）。 */
+	elementRef?: React.Ref<HTMLElement>;
+}): React.JSX.Element {
 	const view = useSession();
 	const ui = useUiState();
 	const [tab, setTab] = useState<TabId>("files");
@@ -50,7 +57,8 @@ export function RightPanel({ collapsed = false }: { collapsed?: boolean }): Reac
 				/>
 			)}
 			<aside
-				className={`fixed inset-y-0 right-0 z-drawer flex w-[300px] flex-col border-l border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "translate-x-full"} ${collapsed ? "lg:hidden" : ""}`}
+				ref={elementRef}
+				className={`fixed inset-y-0 right-0 z-drawer flex w-[300px] flex-col border-l border-hairline bg-surface transition-transform duration-200 lg:static lg:z-auto lg:w-[var(--pane-rightPanel-width)] lg:min-w-[var(--pane-rightPanel-min)] lg:translate-x-0 ${ui.mobileNavOpen ? "translate-x-0" : "translate-x-full"} ${collapsed ? "lg:hidden" : ""}`}
 			>
 				{/* 三 tab */}
 				<div role="tablist" className="flex shrink-0 border-b border-hairline px-3 pt-2">

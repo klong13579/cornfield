@@ -1,4 +1,12 @@
 import { useSyncExternalStore } from "react";
+import {
+	clampRatio,
+	PANE_GEOMETRY_KEY,
+	type PaneId,
+	type PaneWidths,
+	readPaneGeometry,
+	writePaneGeometry,
+} from "../lib/pane-resize";
 
 /**
  * UI 偏好 store —— 原生 useSyncExternalStore 实现（等价 zustand，手写栈见 FRAMEWORK-MAPPING 差异章节）。
@@ -16,6 +24,10 @@ export interface UiState {
 	rightPanelOpen: boolean;
 	/** 会话侧栏折叠开关（桌面 Linear 风格窄栏；移动端抽屉不受影响）。 */
 	sessionSidebarCollapsed: boolean;
+	/** 分栏偏好宽度（px）——**用户选的**值，不是当前渲染出来的值（容器放不下时渲染会收紧）。 */
+	paneWidths: PaneWidths;
+	/** 右栏内部分栏的比例（锚容器高度，所以存比例：右栏宽度可变，像素会失真）。 */
+	fileSplitRatio: number;
 }
 
 const DRAFT_KEY = "cornfield.workspace.draft";
@@ -32,6 +44,9 @@ function loadString(key: string): string {
 	}
 }
 
+// 分栏几何与其余 UI 偏好同一时机读盘（模块求值）：读不出来就用 spec 默认值。
+const initialGeometry = readPaneGeometry(loadString(PANE_GEOMETRY_KEY) || null);
+
 class UiStore {
 	#state: UiState = {
 		draft: loadString(DRAFT_KEY),
@@ -40,6 +55,8 @@ class UiStore {
 		mobileNavOpen: false,
 		rightPanelOpen: loadString(RIGHTPANEL_KEY) === "1",
 		sessionSidebarCollapsed: loadString(SESSIONSIDEBAR_KEY) === "1",
+		paneWidths: initialGeometry.widths,
+		fileSplitRatio: initialGeometry.fileSplitRatio,
 	};
 	#listeners = new Set<() => void>();
 
@@ -97,6 +114,29 @@ class UiStore {
 		}
 	}
 
+	/** 一栏的偏好宽度。范围收口在写入时做（拖拽已经 clamp 过一次，这里防的是非拖拽调用）。 */
+	setPaneWidth(id: PaneId, px: number): void {
+		if (!Number.isFinite(px)) return;
+		this.#mutate({ paneWidths: { ...this.#state.paneWidths, [id]: px } });
+		this.#persistGeometry();
+	}
+
+	setFileSplitRatio(ratio: number): void {
+		if (!Number.isFinite(ratio)) return;
+		this.#mutate({ fileSplitRatio: clampRatio(ratio) });
+		this.#persistGeometry();
+	}
+
+	/** 宽度与比例是同一份偏好、同一个键：分两次写会让刷新后读到半套几何。 */
+	#persistGeometry(): void {
+		const { paneWidths, fileSplitRatio } = this.#state;
+		try {
+			localStorage.setItem(PANE_GEOMETRY_KEY, writePaneGeometry({ widths: paneWidths, fileSplitRatio }));
+		} catch {
+			// localStorage 不可用时仅内存态
+		}
+	}
+
 	#mutate(patch: Partial<UiState>): void {
 		this.#state = { ...this.#state, ...patch };
 		for (const listener of this.#listeners) {
@@ -110,6 +150,9 @@ const uiStore = new UiStore();
 export function useUiState(): UiState {
 	return useSyncExternalStore(
 		cb => uiStore.subscribe(cb),
+		() => uiStore.getSnapshot(),
+		// SSR（renderToStaticMarkup 那类渲染测试）也读得到：store 的状态是模块级初值，
+		// 本来就有快照；缺这一项会让「直渲外壳/工作台」的测试直接抛 Missing getServerSnapshot。
 		() => uiStore.getSnapshot(),
 	);
 }

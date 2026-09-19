@@ -6,19 +6,24 @@ import { useSession } from "../state/use-session";
 import { getPanelGroups, type PanelGroupView } from "./panel-registry";
 
 /**
- * 左侧导航（桌面 240px）—— 由 panel 注册表驱动，按分组分段渲染：
+ * 左侧导航（桌面默认 240px，可拖）—— 由 panel 注册表驱动，按分组分段渲染：
  * 顶部是「我是谁」（logo + 当前 Agent + 工作上下文），下面是四个组（组标题 + 组内条目）。
  *
  * 分组与组内顺序都不是这份组件的事：它们是注册表的元数据（PANEL_GROUPS / group / order），
  * 这个文件只负责把那份事实画出来 —— 加一个面板 = router.tsx 加一项，这里一个字都不用改。
+ *
+ * 宽度不是这份组件的事：`md:w-[var(--pane-appSidebar-width)]` 取自外壳的分栏容器
+ * （`usePaneLayout`），拖拽时也是同一个变量在动。`min-w` 一起给，窄窗口下它才肯让位。
+ * `elementRef` 交出去是为了量可见宽度 —— 被容器收紧过的是屏幕上那个尺寸，不是偏好值。
  */
-export function AppSidebar(): React.JSX.Element {
+export function AppSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElement> } = {}): React.JSX.Element {
 	const view = useSession();
 
 	return (
 		<nav
+			ref={elementRef}
 			aria-label="主导航"
-			className="hidden w-[240px] shrink-0 flex-col overflow-y-auto border-r border-hairline bg-surface px-3.5 py-3.5 md:flex"
+			className="hidden w-[240px] flex-col overflow-y-auto border-r border-hairline bg-surface px-3.5 py-3.5 md:flex md:min-w-[var(--pane-appSidebar-min)] md:w-[var(--pane-appSidebar-width)]"
 		>
 			<div className="px-2 pb-5 pt-3 text-xl font-extrabold tracking-tight text-ink">cornfield</div>
 			<SidebarAgentContext view={view} />

@@ -487,6 +487,59 @@ details[open] > summary.chip {
 	transform: translateX(14px);
 }
 
+/* ── 分栏分隔条（可拖）──
+   视觉是一条 1px hairline（和面板边框同一种线），可抓取范围由 ::before 撑到 ±4px ——
+   1px 的线按不准，但把线本身画粗又会破坏 hairline 这套语言。坐标换算见 lib/pane-resize.ts。 */
+.pane-divider {
+	position: relative;
+	/* 自带一层：可抓范围靠 ::before 向两侧各撑 4px，而 DOM 上后出现的邻居（工作台内容列、
+	   右栏）会盖住它那一侧 —— 不抬层级，那条 1px 的线上就只有一半能按中，光标在另一半
+	   还会变回邻居的样式。 */
+	z-index: 1;
+	flex: none;
+	align-self: stretch;
+	width: 1px;
+	background: var(--color-hairline);
+	cursor: col-resize;
+	transition: background 120ms ease;
+}
+.pane-divider::before {
+	content: "";
+	position: absolute;
+	inset-block: 0;
+	inset-inline: -4px;
+}
+.pane-divider--row {
+	width: auto;
+	height: 1px;
+	cursor: row-resize;
+}
+.pane-divider--row::before {
+	inset-inline: 0;
+	inset-block: -4px;
+}
+.pane-divider:hover,
+.pane-divider[data-dragging="true"] {
+	background: var(--color-accent);
+}
+
+/* 拖拽期间：指针甩到分隔条外仍是 resize 光标、也不会顺手选中旁边的文本；并关掉被拖那一栏的
+   宽度过渡（过渡会让分隔条追不上指针）。其余时间保留过渡 —— 会话栏的折叠动画照旧。 */
+body.pane-resizing {
+	user-select: none;
+}
+body.pane-resizing-col,
+body.pane-resizing-col * {
+	cursor: col-resize;
+}
+body.pane-resizing-row,
+body.pane-resizing-row * {
+	cursor: row-resize;
+}
+body.pane-resizing .pane-no-drag-transition {
+	transition: none;
+}
+
 /* ── 工具卡 ── */
 .toolcard {
 	border: 1px solid var(--color-hairline);

@@ -169,7 +169,9 @@ export function groupSessions(
 	return [...map.values()];
 }
 
-export function SessionSidebar(): React.JSX.Element {
+export function SessionSidebar({
+	elementRef,
+}: { elementRef?: React.Ref<HTMLElement> } = {}): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
 	const ui = useUiState();
@@ -250,7 +252,8 @@ export function SessionSidebar(): React.JSX.Element {
 
 	return (
 		<aside
-			className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-hairline bg-surface transition-[transform,width] duration-200 lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 ${collapsed ? "w-[60px]" : "w-[300px]"} ${ui.mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
+			ref={elementRef}
+			className={`pane-no-drag-transition fixed inset-y-0 left-0 z-50 flex flex-col border-r border-hairline bg-surface transition-[transform,width] duration-200 lg:static lg:z-auto lg:translate-x-0 ${collapsed ? "w-[60px]" : "w-[300px] lg:w-[var(--pane-sessionSidebar-width)] lg:min-w-[var(--pane-sessionSidebar-min)]"} ${ui.mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
 		>
 			{collapsed ? (
 				/* 折叠态薄栏（Linear 风格）：展开 / 新会话 / 连接状态 */
