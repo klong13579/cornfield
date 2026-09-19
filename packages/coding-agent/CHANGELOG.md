@@ -10,6 +10,17 @@
 
 ### Changed
 
+- **产物清单加「用户发进来的」这一来源**（`src/server/artifacts.ts`, `test/wire-server-inspection.integration.test.ts`）：`list_artifacts` 此前只有一个来源 —— 会话 JSONL 里 write / edit / puppeteer screenshot 写出的文件，所以用户在会话里贴的图永远不出现在右栏「产物」面板里（图落在会话 artifacts 目录的 `uploads/`，不来自任何工具调用，提取器压根看不见它）。现在两个维度都多扫这一个来源：会话维度扫本会话的 `uploads/`，Agent 维度扫本次命中的每个会话各自的 `uploads/`（沿用既有的「最近 5 个会话」窗口，不另开一套），合并后按 mtime 倒序、50 条上限。每条产物带 `source`（`agent` / `user`），同一条路径两个来源都报时以先到的为准（防御性的，实际不会发生）。路径仍走 `fileWithinRoots` → `relativePathWithinRoot`，边界规则一份没动。
+  - 读不到 `uploads/` 目录不是失败（见过图的会话本来就没有），非 ENOENT 的原因留一行 warn —— 不把「读不到」静默成「没有」。
+  - `/preview` 一行没改：会话 artifacts 目录在 `<agentDir>/sessions/…` 下，而 agentDir 永远是 roots 的最后一个，所以上传的图本来就取得到。集成测试直接 fetch `/preview/<agent>/sessions/…/uploads/<file>` 断言 200 + `image/png`，把这条判断变成断言。
+
+- **`TODO.md` 退出 Agent 的注入与任务流程，降级为历史留档**（`src/skeleton/assets/{prompt-includes.json,TODO.md,AGENTS.md}`, `src/skeleton/agent-dir-files.ts`, `src/skeleton/assets.ts`, `src/prompts/system/custom-system-prompt.md`, `src/cli/mece-rules.ts`, `src/tools/project-context.ts`）：任务的真源是那个 Agent 的任务板 `<agentDir>/.cornfield/agent-todos.json`（WP10 的结构化板，Todo 页是它的界面，经 `list_agent_todos` / `set_agent_todo` / `delete_agent_todo` 读写）。`TODO.md` 不再是任务面：新 Agent 仍会拿到这个文件，但内容只有「不进自动注入 + 任务板在哪 + 不要手改 JSON」三句。
+  - 清单层：骨架模板与 8 个在用 Agent 的 `prompt-includes.json` 都摘掉 `"TODO.md"`；`AGENT_DIR_FILES` 里它从 `requirement: always-on` / `surface: prompt` 改为 `optional` / `other` —— 于是 `agent validate` 不再因它缺失报 error，`get_agent_prompt_sources` 从 8 项变 7 项（前端 Prompts 源不再列它）。
+  - 规则层：`MECE_FILES` 不再读它，随之删掉两条只服务旧 TODO 模板的占位符正则（`- [ ] 任务 1/2`、`YYYY-MM-DD HH:MM — 任务起点`）—— 模板没有那两行后它们已无匹配对象。
+  - `project_context` 工具不再读 `<projectRoot>/TODO.md` 并报给模型（并把 `todo` 字段从 `ProjectContextDetails` 删掉）：报一份不再维护的存档，模型没有第二个信号能分辨它是过期的。
+  - 系统提示的「任务追踪纪律」改为：多步任务用会话内 `todo` 工具；长期任务在任务板；`TODO.md` 是留档，不读也不写。
+  - 边界：已存在的 `TODO.md` 文件一份都没删（原件留档）；`Project TODO.md`（`projectRoot/TODO.md`，`project-todo` skill 维护）是另一个概念，本轮未动；生效于**新会话**（上下文在会话建立时装）。
+
 - **附件图片落盘：`prompt.images` 之外给 agent 一个可读的路径**（`src/server/wire-server.ts`, `test/wire-server-prompt-images.integration.test.ts`）：带图的消息此前只把图片当 inline base64 发出去——它能不能到模型取决于 provider 有没有透传（实测某 provider 没透传，模型回的是「没收到图，给我个本地路径」，见 `docs/web-app-agents-t3/after.dom.txt`），而 `inspect_image` / `read` 只认磁盘路径（`tools/inspect-image.ts` 的 `loadImageInput({ path })`）。现在 5 个带 `images` 的命令（`prompt` / `steer` / `follow_up` / `abort_and_prompt` / `retry_from`）统一经过一个 helper：每张图先归一成 `inspect_image` 认得的格式（BMP/SVG 等转 PNG），写进会话 artifacts 目录的 `uploads/uploaded-<UTC 秒>-<内容 hash 前 8 位>.<ext>`，再把 `[image: <绝对路径> (mime, 字节)]` 追加进消息文本（与 gateway 的 `[file: <路径> (mime, 大小)]` 同一形态）。inline base64 保留，视觉模型那条路不回退。
   - **落盘失败不静默**：转不了 / 存不下 / 会话没有 artifacts 目录，都在消息里写明「inspect_image cannot read this attachment」——不然模型会对着一个不存在的附件硬编。
   - 修在 wire-server 而不是 `AgentSession`：`SessionManager` 是整个执行图的枢纽（impact 报 457 个依赖 / 9 条执行流），而落点只需要它已经公开的 `getArtifactsDir()`。TUI / gateway 的粘贴路径按本轮范围**未改**（TUI 粘贴的图仍只能靠会话模型自己看，`inspect_image` 拿不到它）。

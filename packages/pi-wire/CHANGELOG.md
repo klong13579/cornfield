@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`ArtifactDto.source`：产物说清是谁放进会话的**（`src/results/artifacts.ts`）：`ArtifactDto` 加必填字段 `source: ArtifactSource`（`"agent" | "user"`），`list_artifacts` 从此报两本账 —— `agent` = 会话 JSONL 里 write / edit / puppeteer screenshot 写出的文件；`user` = 用户发给该会话的文件（目前是贴/选进来的图，落在会话 artifacts 目录的 `uploads/`）。必填而不是可选：两个产出方都在本仓，谁产出谁声明，前端因此不必猜、也没有「来源未知」这一态。路径约束两个来源相同（会话 workspace roots，与 fs_read / `/preview` 同一条边界），所以 /preview 不用为它开新口。
+
 ## [1.3.0] - 2026-09-17
 
 ### Added

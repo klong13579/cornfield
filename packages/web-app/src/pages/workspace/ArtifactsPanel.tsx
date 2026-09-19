@@ -10,6 +10,10 @@ import { useSession } from "../../state/use-session";
 /**
  * Artifacts 产物面板（工作台右栏 Artifacts tab，R-ARTIFACTS 接真数据）。
  *
+ * 这本账有**两个来源**，`entry.source` 说清每条是谁放进来的：`agent`（Tool 写出的文件）与
+ * `user`（用户贴/选进来的图）。两者同一个列表、按时间倒序 —— 不合成一个看不见的字段，
+ * 也不拆成两个列表：用户问的是「这个会话手上都有什么」。
+ *
  * 数据源：store.listArtifacts(attachmentAddress, sessionFile) —— 第一个入参是**会话身份**
  * （`view.attachmentAddress`，焦点附件的地址），不是屏幕上那个 Agent 名：
  * - 列表：wire 拿它 + `sessionFile` 解出那个会话的工作面（产物路径就是相对它报的）
@@ -73,6 +77,51 @@ function fmtTime(ts: number): string {
  * `connected` 与 `attachmentAddress` 由调用方从**与右栏文件/改动两 tab 同一处**取
  * （`view.connected` / `view.attachmentAddress`），三个 tab 因此说的是同一件事。
  */
+/**
+ * 来源标记的文案。两个标记各管一件事：`type` 决定点开怎么预览，`source` 说明这个文件是谁
+ * 放进会话的 —— 用户贴的图和 agent 写出的文件同处一个列表，不标来源就是让用户自己猜。
+ */
+const SOURCE_LABELS: Record<ArtifactDto["source"], string> = {
+	agent: "agent",
+	user: "我发的",
+};
+
+/**
+ * 产物清单的一行（纯展示，从 ArtifactsPanel 提出，静态渲染可断言）。
+ */
+export function ArtifactRow({
+	entry,
+	selected,
+	onOpen,
+}: {
+	entry: ArtifactDto;
+	selected: boolean;
+	onOpen: (entry: ArtifactDto) => void;
+}): React.JSX.Element {
+	return (
+		<button
+			type="button"
+			className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2 ${selected ? "bg-surface-2" : ""}`}
+			onClick={() => onOpen(entry)}
+		>
+			<div className="min-w-0 flex-1">
+				<div className="truncate text-[13px] text-ink">{entry.title}</div>
+				<div className="mt-0.5 text-[11px] text-ink-faint">
+					{fmtTime(entry.updatedAt)} · {fmtSize(entry.size)}
+				</div>
+			</div>
+			<span
+				className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${entry.source === "user" ? "bg-accent-dim text-ink" : "border border-hairline text-ink-subtle"}`}
+			>
+				{SOURCE_LABELS[entry.source]}
+			</span>
+			<span className="shrink-0 rounded-full border border-hairline px-2 py-0.5 font-mono text-[10px] text-ink-subtle">
+				{entry.type}
+			</span>
+		</button>
+	);
+}
+
 function useArtifacts(
 	connected: boolean,
 	attachmentAddress: string,
@@ -227,7 +276,7 @@ export function ArtifactsPanel({
 						<Files size={24} strokeWidth={1.25} className="text-ink-faint" />
 						<div className="text-[12px] text-ink-faint">暂无产物</div>
 						<div className="px-2 text-[11px] leading-relaxed text-ink-subtle">
-							让 agent 生成网页/图片/文档后，产物会自动出现在这里
+							agent 写出的文件、以及你贴进来的图，都会出现在这里
 						</div>
 					</div>
 				)}
@@ -236,21 +285,7 @@ export function ArtifactsPanel({
 					<ul className="divide-y divide-hairline">
 						{state.entries.map(entry => (
 							<li key={entry.id}>
-								<button
-									type="button"
-									className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-2 ${selected?.id === entry.id ? "bg-surface-2" : ""}`}
-									onClick={() => openPreview(entry)}
-								>
-									<div className="min-w-0 flex-1">
-										<div className="truncate text-[13px] text-ink">{entry.title}</div>
-										<div className="mt-0.5 text-[11px] text-ink-faint">
-											{fmtTime(entry.updatedAt)} · {fmtSize(entry.size)}
-										</div>
-									</div>
-									<span className="shrink-0 rounded-full border border-hairline px-2 py-0.5 font-mono text-[10px] text-ink-subtle">
-										{entry.type}
-									</span>
-								</button>
+								<ArtifactRow entry={entry} selected={selected?.id === entry.id} onOpen={openPreview} />
 							</li>
 						))}
 					</ul>

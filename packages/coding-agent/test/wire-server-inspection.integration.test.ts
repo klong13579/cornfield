@@ -2,7 +2,8 @@
  * wire-server 只读巡检 e2e（真机 serve 子进程 + bun WS/HTTP 客户端）——三组只读命令共用一个 serve。
  *
  * 覆盖命令：
- * - list_artifacts：产物提取/分类/mtime 倒序/过滤已删文件、sessionFile 维度隔离视图、未知 agent 报错；
+ * - list_artifacts：产物提取/分类/mtime 倒序/过滤已删文件、两个来源（agent 工具调用 + 用户上传图）
+ *   各自带 source、sessionFile 维度隔离视图、未知 agent 报错；
  *   配套 /preview/<agentId>/<path> 静态预览（HTML 内容 + content-type、图片字节、路径越界 400、未知 agent 404）
  * - list_sessions：历史会话索引（结构字段、状态推断、时间倒序、agent 过滤、limit、标题来源优先级）
  * - get_memory：只读记忆投影三分区（user / project / memoryStore）
@@ -34,6 +35,7 @@ interface ArtifactRow {
 	id: string;
 	title: string;
 	type: string;
+	source: string;
 	path: string;
 	updatedAt: number;
 	size: number;
@@ -148,6 +150,11 @@ function nextFrame(ws: WebSocket, pred: (f: Frame) => boolean, timeoutMs: number
 /** 产物 fixture 的 HTML 内容（seedHome 写入，测试体断言同源）。 */
 const DASHBOARD_HTML = "<!doctype html><html><body><h1>Dashboard</h1></body></html>";
 
+/** 用户上传图的文件名：时间戳 + 内容 hash 前缀 + 扩展名，与 serve 的落点命名同形。 */
+const UPLOAD_FILENAME = "uploaded-20260827100000-deadbeef.png";
+/** 它相对 artDir 的路径（前端拿它拼 /preview）。 */
+const UPLOAD_RELATIVE = `sessions/by-date/2026-08-27/100000__newest/uploads/${UPLOAD_FILENAME}`;
+
 let fixture: ServeFixture | undefined;
 let repoRoot = "";
 /** 产物 fixture 的会话目录（sessionFile 维度断言用）。 */
@@ -260,6 +267,16 @@ async function seedHome(home: string): Promise<void> {
 		].join("\n")}\n`,
 	);
 
+	// 用户发进来的图：落在 newest 会话的 artifacts 目录的 uploads/ —— serve 把图交给 agent 时的
+	// 真实落点（会话文件路径去掉 .jsonl，再进 uploads/）。它不来自任何 toolCall，所以只能由
+	// 「用户来源」那一条扫描看见。
+	const artUploads = path.join(artSessions, "100000__newest", "uploads");
+	await fs.mkdir(artUploads, { recursive: true });
+	await Bun.write(
+		path.join(artUploads, UPLOAD_FILENAME),
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+	);
+
 	// ── registry：hr（历史会话）+ art（产物）──
 	const registryDir = path.join(home, ".cornfield", "agent");
 	await fs.mkdir(registryDir, { recursive: true });
@@ -295,22 +312,32 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 	try {
 		// ── list_artifacts：art 定向 ──
 		const result = (await request(ws, { type: "list_artifacts", sessionId: "art" })) as { artifacts: ArtifactRow[] };
-		expect(result.artifacts.length).toBe(2);
+		expect(result.artifacts.length).toBe(3);
 
 		// mtime 倒序：dashboard.html 先写（同会话内 write 在前），都是产物；stale.txt 已删被过滤
 		const titles = result.artifacts.map(a => a.title);
 		expect(titles).toContain("dashboard.html");
 		expect(titles).toContain("dashboard_preview.png");
+		expect(titles).toContain(UPLOAD_FILENAME);
 		expect(titles).not.toContain("stale.txt");
 
-		// 分类
+		// 分类 + 来源：工具写出的标 agent，用户发进来的标 user
 		const htmlArtifact = result.artifacts.find(a => a.title === "dashboard.html");
 		expect(htmlArtifact?.type).toBe("html");
+		expect(htmlArtifact?.source).toBe("agent");
 		expect(htmlArtifact?.path).toBe("dashboard.html");
 		expect(htmlArtifact?.size).toBe(html.length);
 		const pngArtifact = result.artifacts.find(a => a.title === "dashboard_preview.png");
 		expect(pngArtifact?.type).toBe("image");
+		expect(pngArtifact?.source).toBe("agent");
 		expect(pngArtifact?.updatedAt).toBeGreaterThan(0);
+
+		// 用户上传的图：不在任何 toolCall 里，只能由 uploads/ 那一条扫描列出来；
+		// 相对路径相对的是它所属的那个根（artDir），前端直接拿它拼 /preview。
+		const uploadArtifact = result.artifacts.find(a => a.source === "user");
+		expect(uploadArtifact?.title).toBe(UPLOAD_FILENAME);
+		expect(uploadArtifact?.type).toBe("image");
+		expect(uploadArtifact?.path).toBe(UPLOAD_RELATIVE);
 
 		// ── list_artifacts 按会话定向（sessionFile）：只提该会话产物，不受 Agent 维度扫描影响 ──
 		const sessionFiles = [path.join(artSessions, "100000__newest.jsonl")];
@@ -319,7 +346,11 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 			sessionId: "art",
 			sessionFile: sessionFiles[0],
 		})) as { artifacts: ArtifactRow[] };
-		expect(sessionResult.artifacts.map(a => a.title).sort()).toEqual(["dashboard.html", "dashboard_preview.png"]);
+		expect(sessionResult.artifacts.map(a => a.title).sort()).toEqual([
+			"dashboard.html",
+			"dashboard_preview.png",
+			UPLOAD_FILENAME,
+		]);
 
 		// 定向旧会话（stale.txt 已在磁盘删除）→ 空数组，不串当前会话产物
 		const staleResult = (await request(ws, {
@@ -350,6 +381,13 @@ test("list_artifacts：提取/分类/排序 + /preview 静态服务", async () =
 		expect(pngRes.headers.get("content-type")).toBe("image/png");
 		const pngBytes = new Uint8Array(await pngRes.arrayBuffer());
 		expect(pngBytes[1]).toBe(0x50); // PNG magic 前 4 字节
+
+		// ── /preview 用户上传的图：会话 artifacts 目录在 agentDir 这个根内，所以路由不用为它开新口 ──
+		const uploadRes = await fetch(`${previewUrl}/preview/art/${UPLOAD_RELATIVE}`);
+		expect(uploadRes.status).toBe(200);
+		expect(uploadRes.headers.get("content-type")).toBe("image/png");
+		const uploadBytes = new Uint8Array(await uploadRes.arrayBuffer());
+		expect(uploadBytes[1]).toBe(0x50);
 
 		// ── /preview 越界路径 → 400 ──
 		const escapeRes = await fetch(`${previewUrl}/preview/art/../secret.txt`);

@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, it, spyOn } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ArtifactDto } from "../../lib/pi-client-api";
 import type { SessionView } from "../../state/session-store";
 import * as sessionStoreModule from "../../state/session-store";
 import * as useSessionModule from "../../state/use-session";
-import { ArtifactsPanel } from "./ArtifactsPanel";
+import { ArtifactRow, ArtifactsPanel } from "./ArtifactsPanel";
 
 /**
  * 产物面板：三种「没有」不许互相顶替。
@@ -74,5 +75,54 @@ describe("ArtifactsPanel 三种「没有」分开显示", () => {
 		const unmounted = render({ connected: true, attachmentAddress: "" });
 		const loading = render({ connected: true, attachmentAddress: SESSION_ADDRESS });
 		expect(new Set([disconnected, unmounted, loading]).size).toBe(3);
+	});
+});
+
+/**
+ * 产物行：这本账里两种来源都有（agent 写出的文件 + 用户贴进来的图），所以每行必须说清
+ * 是谁放进来的。两个标记各管一件事 —— type 决定点开怎么预览，source 说明归属。
+ */
+describe("ArtifactRow 来源与类型标记", () => {
+	function renderRow(overrides: Partial<ArtifactDto>): string {
+		return renderToStaticMarkup(
+			createElement(ArtifactRow, {
+				entry: {
+					id: "dashboard.html",
+					title: "dashboard.html",
+					type: "html",
+					source: "agent",
+					path: "dashboard.html",
+					updatedAt: 0,
+					size: 2048,
+					...overrides,
+				},
+				selected: false,
+				onOpen: () => undefined,
+			}),
+		);
+	}
+
+	it("用户发进来的行写「我发的」", () => {
+		const html = renderRow({ source: "user", title: "uploaded-20260919093439-eca746db.png" });
+		expect(html).toContain("我发的");
+		expect(html).not.toContain(">agent<");
+	});
+
+	it("agent 写出的行写「agent」", () => {
+		const html = renderRow({ source: "agent" });
+		expect(html).toContain(">agent<");
+		expect(html).not.toContain("我发的");
+	});
+
+	it("类型标记仍在（两个标记不互相顶替）", () => {
+		const html = renderRow({ source: "user", type: "image", title: "a.png" });
+		expect(html).toContain(">image<");
+		expect(html).toContain("我发的");
+	});
+
+	it("标题与大小都看得见", () => {
+		const html = renderRow({ title: "dashboard.html", size: 2048 });
+		expect(html).toContain("dashboard.html");
+		expect(html).toContain("2K");
 	});
 });
