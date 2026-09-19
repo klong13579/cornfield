@@ -246,13 +246,14 @@ describe("runTestRun corruption guard", () => {
 //
 // Verifies that `CronLifecycle.notifyOriginSessionIfPending` correctly:
 //   1. No-ops when no `origin` is passed (regular cron fire, not a test-run).
-//   2. No-ops when the bridge is not running.
-//   3. No-ops (logs warn) when bridge.executePrompt throws.
+//   2. Wakes a parked bridge (`ensureRunning`) and then pushes the completion turn.
+//   3. No-ops (logs warn) when the bridge cannot be woken or `executePrompt` throws.
 //   4. Dispatches bridge.executePrompt with the correct sessionPath and
 //      rendered prompt on the happy path.
 
 interface FakeBridge {
 	isRunning: boolean;
+	ensureRunning: ReturnType<typeof mock>;
 	executePrompt: ReturnType<typeof mock>;
 	setModel: ReturnType<typeof mock>;
 	setDisabledToolsets: ReturnType<typeof mock>;
@@ -260,9 +261,16 @@ interface FakeBridge {
 
 const sampleOrigin = { sessionPath: "/path/to/origin_session.jsonl", accountId: "algorithm" };
 
-function makeBridge(opts: { running?: boolean; throwOnExecute?: Error } = {}): FakeBridge {
-	return {
+function makeBridge(opts: { running?: boolean; throwOnExecute?: Error; throwOnEnsure?: Error } = {}): FakeBridge {
+	const bridge: FakeBridge = {
 		isRunning: opts.running ?? true,
+		// Idle-stop parks the child without dying; the real bridge re-attaches its
+		// session and model here. A bridge that cannot be woken (crash-suppressed)
+		// rejects, which is the only way the notifier skips the completion turn.
+		ensureRunning: mock(async () => {
+			if (opts.throwOnEnsure) throw opts.throwOnEnsure;
+			bridge.isRunning = true;
+		}),
 		executePrompt: mock(async () => {
 			if (opts.throwOnExecute) throw opts.throwOnExecute;
 			return "ok";
@@ -270,6 +278,7 @@ function makeBridge(opts: { running?: boolean; throwOnExecute?: Error } = {}): F
 		setModel: mock(async () => {}),
 		setDisabledToolsets: mock(async () => {}),
 	};
+	return bridge;
 }
 
 function makeNotifyLifecycle(bridge: FakeBridge): CronLifecycle {
@@ -309,7 +318,7 @@ describe("notifyOriginSessionIfPending", () => {
 		expect(bridge.executePrompt).not.toHaveBeenCalled();
 	});
 
-	test("bridge not running → no bridge call (logs warn)", () => {
+	test("parked bridge (isRunning false) → woken by ensureRunning, then delivered", async () => {
 		const bridge = makeBridge({ running: false });
 		const lifecycle = makeNotifyLifecycle(bridge);
 		(lifecycle as any).notifyOriginSessionIfPending(
@@ -325,6 +334,34 @@ describe("notifyOriginSessionIfPending", () => {
 			true,
 			sampleOrigin,
 		);
+		await new Promise(r => setTimeout(r, 20));
+		// Parked is not dead: the origin session still has to receive the completion
+		// turn, so the notifier wakes the bridge instead of skipping it.
+		expect(bridge.ensureRunning).toHaveBeenCalledTimes(1);
+		expect(bridge.isRunning).toBe(true);
+		expect(bridge.executePrompt).toHaveBeenCalledTimes(1);
+	});
+
+	test("bridge that cannot be woken → no push, no crash", async () => {
+		const bridge = makeBridge({ running: false, throwOnEnsure: new Error("crash-suppressed") });
+		const lifecycle = makeNotifyLifecycle(bridge);
+		expect(() =>
+			(lifecycle as any).notifyOriginSessionIfPending(
+				{
+					taskName: "weekly-kb-lint",
+					taskId: "task_001",
+					slug: "weekly-kb-lint",
+					status: "success",
+					exitCode: 0,
+					durationMs: 124_000,
+					output: "3 warnings",
+				},
+				true,
+				sampleOrigin,
+			),
+		).not.toThrow();
+		await new Promise(r => setTimeout(r, 20));
+		expect(bridge.ensureRunning).toHaveBeenCalledTimes(1);
 		expect(bridge.executePrompt).not.toHaveBeenCalled();
 	});
 
