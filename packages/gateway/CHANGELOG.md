@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **账号子进程空闲退出（idle-stop）**（`src/agent-bridge.ts`、`src/gateway.ts`、`src/gateway-cron-lifecycle.ts`、`src/bridge-status-tool.ts`、`src/types.ts`、`src/config.ts`、`test/agent-bridge-idle-stop.test.ts`）：bridge 空闲超过 `agent.childIdleStopMs`（默认 15 分钟，env `GATEWAY_CHILD_IDLE_STOP_MS`，`0` 关闭）就停掉该账号的 `cornfield --mode wire-stdio` 子进程把内存还给系统，下一条消息按崩溃恢复同一条路径重新拉起并重接会话与模型（`ensureRunning` → `#restartTransport` → `switch_session` + `set_model`）。实测（2026-09-19，5 个账号）：子进程 footprint 239–346MB/个、1.43GB 常驻 24×7（已空闲 1 天 18 小时）；开启后 18:06:06–18:06:14 五个账号各自 `idleMs=900014` 触发退出、进程数归零；18:08:17 注入一条真消息，18:08:20 新子进程就绪且 `pong` 落进 hr 的会话文件——只唤醒被用到的那一个账号，代价是空闲后首条消息约 3 秒。
+  - **parked 不等于 crash**：不记 crash、不动熔断、不污染 crash 窗口，只清子进程级状态（`#activeSessionPath` + `#needsModelReapply`）。漏掉后者会让下一次 `#switchSession` 因缓存路径提前返回，会话静默写进另一个文件（`WireTransport.stop()` 不发 `disconnected`，没人会替你清）。
+  - 生命周期新增 `parked` 态（区别于 `stopped`：parked 会被下一条消息唤醒，stopped 是死了），`bridge_status` 的 LLM 侧状态机与 summary 同步更新。
+
+### Changed
+
+- **唤醒路径不再要求 bridge 已在运行**（`src/gateway.ts`、`src/gateway-cron-lifecycle.ts`）：`sendDirectMessage` 改为先 `ensureRunning()`（用户主动发消息，值得付一次 spawn，而不是报"agent 不可用"）；`getAccountBridge` / `#resolveDirectBridge` 去掉 `isRunning` 前置条件（`executePrompt` 自己会重启，返回 `undefined` 会把调用方推到冷启动子进程）；cron test-run 的完成通知改为 `ensureRunning()` 后再推——否则空闲退出后这几条路径会静默降级成冷启动或直接放弃。
+
 ## [1.3.0] - 2026-09-17
 
 ### Added

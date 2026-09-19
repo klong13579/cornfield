@@ -1144,8 +1144,18 @@ export class Gateway {
 			return null;
 		}
 		if (!bridge.isRunning) {
-			logger.warn("Agent bridge not running", { accountId: accountId ?? "__default__" });
-			return null;
+			// A parked (idle-stopped) or recovering bridge is one spawn away from
+			// serving this message — this is a user-initiated send, so wake it
+			// rather than reporting the agent as unavailable.
+			try {
+				await bridge.ensureRunning();
+			} catch (err) {
+				logger.warn("Agent bridge not running and restart failed", {
+					accountId: accountId ?? "__default__",
+					error: err instanceof Error ? err.message : String(err),
+				});
+				return null;
+			}
 		}
 
 		const resolvedAccountId = accountId ?? "__default__";
@@ -1189,7 +1199,7 @@ export class Gateway {
 		if (accountId && this.#accountBridges.has(accountId)) {
 			return this.#accountBridges.get(accountId)!;
 		}
-		if (!accountId && this.#accountBridges.size === 0 && this.#bridge.isRunning) {
+		if (!accountId && this.#accountBridges.size === 0) {
 			return this.#bridge;
 		}
 		return null;
@@ -1204,8 +1214,12 @@ export class Gateway {
 		if (this.#accountBridges.has(accountId)) {
 			return this.#accountBridges.get(accountId);
 		}
-		// Fall back to default bridge if no per-account bridges exist
-		if (this.#accountBridges.size === 0 && this.#bridge.isRunning) {
+		// Fall back to default bridge if no per-account bridges exist.
+		// Deliberately does NOT require `isRunning`: a parked or crashed bridge
+		// is recovered by `executePrompt`'s own restart path, and handing back
+		// `undefined` here would push callers onto the cold `omp --print`
+		// fallback for what is one spawn away from the warm path.
+		if (this.#accountBridges.size === 0) {
 			return this.#bridge;
 		}
 		return undefined;

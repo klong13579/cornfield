@@ -20,6 +20,8 @@
  *
  * **State machine** (matches `AgentBridge.getSnapshot().state`):
  *   - `stopped`    — OMP subprocess not running. Bridge is dead.
+ *   - `parked`     — OMP subprocess stopped on purpose while idle to give its
+ *                    memory back. The next prompt respawns it; not a failure.
  *   - `starting`   — bridge spawning OMP / waiting for first `ready`.
  *   - `idle`       — healthy; no prompts in flight.
  *   - `busy`       — processing a prompt. Don't re-dispatch yet.
@@ -57,6 +59,7 @@ const BRIDGE_STATUS_DEFINITION: RpcHostToolDefinition = {
 		"  - `busy`       — currently processing a prompt (see `activePromptId`). Wait for it to finish before dispatching another.\n" +
 		"  - `starting`   — bridge spawning the OMP subprocess; first prompt may take a few seconds.\n" +
 		"  - `stopped`    — OMP subprocess is down. Tell the user the agent is unavailable; the gateway will auto-restart on the next inbound message.\n" +
+		"  - `parked`     — OMP subprocess was stopped on purpose while idle to release memory. NOT a failure: the next inbound message respawns it, so only that first reply is slower.\n" +
 		"  - `restarting` — OMP crashed, gateway is restarting with backoff. Brief window of unavailability.\n" +
 		"  - `degraded`   — circuit breaker is open after consecutive failures. New prompts are fast-failed until the cooldown (default 30s) expires. Read `circuitFailures` and `circuitOpenedAt` to estimate when retries will be accepted again.\n" +
 		"  - `error`      — too many crashes; bridge is suppressed and NOT auto-restarting. Operator (human) must intervene. Tell the user the agent is down and the gateway operator needs to restart it.\n" +
@@ -118,6 +121,8 @@ function buildSummary(snap: AgentBridgeSnapshot): string {
 	switch (snap.state) {
 		case "stopped":
 			return "OMP subprocess is not running; bridge is down. The gateway will auto-restart on the next inbound message.";
+		case "parked":
+			return "OMP child was stopped while idle to release its memory. Not a failure — the next message respawns it, so only that first reply is slower.";
 		case "starting":
 			return "OMP subprocess is starting up (waiting for first ready event).";
 		case "idle":

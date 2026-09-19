@@ -616,13 +616,11 @@ export class CronLifecycle {
 		const bridge = origin.accountId
 			? (this.#deps.getAccountBridge(origin.accountId) ?? this.#deps.bridge)
 			: this.#deps.bridge;
-		if (!bridge.isRunning) {
-			logger.warn("[cron-notify] bridge not running; skipping origin notification", {
-				taskName: card.taskName,
-				accountId: origin.accountId ?? "(default)",
-			});
-			return;
-		}
+		// No `isRunning` guard: a parked (idle-stopped) bridge is woken by
+		// `ensureRunning()` below — the origin session must still receive the
+		// completion turn, and the bridge parks itself again after the idle
+		// window. Only a bridge that cannot be woken at all (crash-suppressed)
+		// skips the notification, and that surfaces through the catch.
 
 		const promptText = renderTestRunCompletionPrompt({
 			taskName: card.taskName,
@@ -647,10 +645,13 @@ export class CronLifecycle {
 		// done by the time we get here). We attach a catch so a
 		// throw becomes a log line, not a crash.
 		void bridge
-			.executePrompt(promptText, {
-				sessionPath: origin.sessionPath,
-				inactivityMs: 60_000,
-			})
+			.ensureRunning()
+			.then(() =>
+				bridge.executePrompt(promptText, {
+					sessionPath: origin.sessionPath,
+					inactivityMs: 60_000,
+				}),
+			)
 			.then(() => {
 				logger.info("[cron-notify] pushed to origin session", {
 					taskName: card.taskName,
@@ -658,10 +659,13 @@ export class CronLifecycle {
 			})
 			.catch((err: unknown) => {
 				const message = err instanceof Error ? err.message : String(err);
-				logger.warn("[cron-notify] executePrompt failed; origin session may be closed or bridge down", {
-					taskName: card.taskName,
-					error: message,
-				});
+				logger.warn(
+					"[cron-notify] ensureRunning/executePrompt failed; origin session may be closed or bridge down",
+					{
+						taskName: card.taskName,
+						error: message,
+					},
+				);
 			});
 	}
 }

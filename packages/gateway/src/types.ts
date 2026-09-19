@@ -363,6 +363,10 @@ export interface AgentConfig {
 	longTaskThresholdMs?: number;
 	/** Long-running tool progress ping (ms). See `agentConfigSchema` for semantics. */
 	progressPingIntervalMs?: number;
+	/** Idle-stop window (ms): a bridge with no prompt in flight this long stops
+	 *  its OMP child to release its memory and respawns it on the next message.
+	 *  0 disables. See `agentConfigSchema` for semantics. */
+	childIdleStopMs?: number;
 }
 export interface SessionConfig {
 	idleTimeoutMinutes?: number;

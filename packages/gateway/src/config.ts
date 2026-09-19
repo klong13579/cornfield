@@ -67,6 +67,12 @@ const agentConfigSchema = z.object({
 	 *  so the prompt isn't killed mid-pip-install. Default 60_000
 	 *  (2x margin over the inactivity watchdog — see prompt-queue.ts). */
 	progressPingIntervalMs: z.number().int().positive().optional(),
+	/** Idle-stop window (ms): with no prompt in flight for this long, the
+	 *  bridge stops its OMP child to give its ~250-290MB footprint back and
+	 *  respawns it on the next message (the first reply after a quiet spell
+	 *  pays one spawn, measured median 1.7s). 0 disables. Default 15 min;
+	 *  env override `GATEWAY_CHILD_IDLE_STOP_MS`. */
+	childIdleStopMs: z.number().int().nonnegative().optional(),
 });
 
 const sessionConfigSchema = z.object({

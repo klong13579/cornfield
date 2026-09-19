@@ -40,6 +40,22 @@ const STREAMING_WATCHDOG_POLL_MS = 10_000;
 /** Gateway hygiene: compact session when idle for this long (30 min) */
 const GATEWAY_HYGIENE_IDLE_MS = 30 * 60 * 1000;
 
+/**
+ * Idle-stop window: how long a bridge with no prompt in flight keeps its OMP
+ * child alive.
+ *
+ * The child costs ~250-290MB of footprint whether or not it is doing anything
+ * (measured 2026-09-19: one child per DingTalk account, five accounts, 1.43GB
+ * resident around the clock while idle). Giving the child back after a quiet
+ * window is the difference between "five accounts" and "five processes".
+ *
+ * The wake path is the existing crash-recovery path — `SessionManager` calls
+ * `ensureRunning()` before every inbound forward — so a parked bridge re-attaches
+ * its session and model from disk on the next message, at the cost of one
+ * spawn (measured median 1.7s) for that first message only.
+ */
+const DEFAULT_CHILD_IDLE_STOP_MS = 15 * 60 * 1000;
+
 function readEnvInt(name: string, fallback: number): number {
 	const raw = process.env[name];
 	if (raw === undefined || raw === "") return fallback;
@@ -59,7 +75,18 @@ const LONG_TASK_PROGRESS_PING_MS = readEnvInt(
 export const __TEST_LONG_TASK_THRESHOLD_MS = LONG_TASK_THRESHOLD_MS;
 export const __TEST_LONG_TASK_PROGRESS_PING_MS = LONG_TASK_PROGRESS_PING_MS;
 
-export type AgentBridgeLifecycleState = "stopped" | "starting" | "idle" | "busy" | "restarting" | "degraded" | "error";
+export type AgentBridgeLifecycleState =
+	| "stopped"
+	| "starting"
+	| "idle"
+	| "busy"
+	| "restarting"
+	| "degraded"
+	| "error"
+	/** Child stopped on purpose while idle (memory), not dead — the next
+	 *  prompt spawns a fresh one and re-attaches the session. Distinct from
+	 *  `stopped` so status readers do not report an idle bridge as a failure. */
+	| "parked";
 
 export interface AgentBridgeSnapshot {
 	state: AgentBridgeLifecycleState;
@@ -109,6 +136,11 @@ export interface AgentBridgeOptions {
 	 *  prompt-queue timeout) from 'OMP dead mid-stream' (this watchdog).
 	 *  Default 90s; 0 disables. */
 	streamingWatchdogMs?: number;
+	/** Idle-stop window in ms: after this long with no prompt in flight the
+	 *  child is stopped to release its memory and respawned on the next
+	 *  prompt (see `parkChild`). 0 disables. Default 15 min; env override
+	 *  `GATEWAY_CHILD_IDLE_STOP_MS`. */
+	childIdleStopMs?: number;
 	/** Intercom parent target for this bridge's omp child: when set, the
 	 *  spawned `omp --mode rpc` registers on the intercom broker as a child
 	 *  of that session (auto completion reports, ask→parent routing). */
@@ -164,6 +196,14 @@ export class AgentBridge {
 	#crashLog: CrashLog | undefined;
 	#dataDir: string | undefined;
 	#streamingWatchdogMs: number;
+	/** Idle-stop window (0 = disabled) and its pending timer. */
+	#childIdleStopMs: number;
+	#idleStopTimer: NodeJS.Timeout | undefined;
+	/** When the last prompt finished (or the bridge started). The timer re-checks
+	 *  against this after firing while the bridge happened to be busy. */
+	#lastActivityAt = Date.now();
+	/** Set by `parkChild()`; cleared when a child is spawned again. */
+	#parkedChild = false;
 
 	constructor(options: AgentBridgeOptions = {}) {
 		this.#options = options;
@@ -171,6 +211,8 @@ export class AgentBridge {
 		this.#crashLog = options.crashLog;
 		this.#dataDir = options.dataDir;
 		this.#streamingWatchdogMs = options.streamingWatchdogMs ?? DEFAULT_STREAMING_WATCHDOG_MS;
+		this.#childIdleStopMs =
+			options.childIdleStopMs ?? readEnvInt("GATEWAY_CHILD_IDLE_STOP_MS", DEFAULT_CHILD_IDLE_STOP_MS);
 		if (options.model) {
 			const slashIdx = options.model.indexOf("/");
 			if (slashIdx !== -1) {
@@ -321,6 +363,84 @@ export class AgentBridge {
 		await this.#restartTransport();
 	}
 
+	// ── Idle stop: give the child's memory back while quiet ──────────────
+
+	/** True when the child was stopped on purpose to release memory.
+	 *  `isRunning` is false either way; this distinguishes "parked, wakes on
+	 *  the next prompt" from "down". */
+	get isParked(): boolean {
+		return this.#parkedChild;
+	}
+
+	/**
+	 * Stop the child process to release its memory, keeping the bridge usable.
+	 *
+	 * The next prompt respawns it through the same path a crash takes
+	 * (`ensureRunning` → `#restartTransport`), which re-opens the session and
+	 * re-applies the model from disk — so the conversation continues, it just
+	 * pays one spawn for that first message.
+	 *
+	 * An intentional stop must not look like a crash: it records no crash, trips
+	 * no circuit, and leaves the crash window untouched. What it does mirror is
+	 * the subprocess-scoped state reset, because a fresh child holds neither the
+	 * session path nor the model the old one had — leaving the cached path in
+	 * place would make the next `#switchSession` early-return and silently split
+	 * the conversation into a different session file.
+	 */
+	parkChild(): void {
+		if (!this.isRunning) return;
+		// A prompt in flight owns the child; the caller re-arms instead.
+		if (this.isBusy) return;
+		const idleMs = Date.now() - this.#lastActivityAt;
+		this.#disarmChildIdleStop();
+		this.#parkedChild = true;
+		this.#activeSessionPath = undefined;
+		this.#needsModelReapply = true;
+		logger.info("[AgentBridge] Stopping idle child to release memory", {
+			accountId: this.#accountId,
+			pid: this.#transport.pid,
+			idleMs,
+		});
+		this.#queue.rejectAll(new Error("Agent bridge child stopped while idle"));
+		this.#transport.stop();
+	}
+
+	/** Arm the idle-stop timer. Called on every transition into "nothing in
+	 *  flight": bridge start, recovery restart, prompt completion. */
+	#armChildIdleStop(): void {
+		this.#lastActivityAt = Date.now();
+		if (this.#childIdleStopMs <= 0) return;
+		if (this.#idleStopTimer) clearTimeout(this.#idleStopTimer);
+		this.#idleStopTimer = setTimeout(() => this.#onChildIdleStopTimer(), this.#childIdleStopMs);
+		// Parking a child is a memory optimisation — never a reason to hold the
+		// process's event loop open.
+		this.#idleStopTimer.unref?.();
+	}
+
+	#disarmChildIdleStop(): void {
+		if (this.#idleStopTimer) {
+			clearTimeout(this.#idleStopTimer);
+			this.#idleStopTimer = undefined;
+		}
+	}
+
+	#onChildIdleStopTimer(): void {
+		this.#idleStopTimer = undefined;
+		if (this.#childIdleStopMs <= 0 || this.#parkedChild) return;
+		if (!this.isRunning) return;
+		if (this.isBusy || this.#reconnectGuard) {
+			// The window elapsed while the child was still working — the work is
+			// what keeps it alive, so check again after another full window.
+			this.#armChildIdleStop();
+			return;
+		}
+		if (Date.now() - this.#lastActivityAt < this.#childIdleStopMs) {
+			this.#armChildIdleStop();
+			return;
+		}
+		this.parkChild();
+	}
+
 	async start(): Promise<void> {
 		if (this.#crash.suppressed) {
 			throw new Error("Agent bridge is in ERROR state after repeated crashes");
@@ -338,6 +458,8 @@ export class AgentBridge {
 			throw err;
 		}
 		this.#applyDeniedTools();
+		this.#parkedChild = false;
+		this.#armChildIdleStop();
 		this.#runBootCheck();
 	}
 
@@ -488,6 +610,8 @@ export class AgentBridge {
 		this.#reconnectGuard = false;
 		this.#circuit.reset();
 		this.#activeSessionPath = undefined;
+		this.#parkedChild = false;
+		this.#disarmChildIdleStop();
 
 		this.#queue.rejectAll(new Error("Agent bridge stopped"));
 		this.#transport.stop();
@@ -530,7 +654,7 @@ export class AgentBridge {
 	#getLifecycleState(busy: boolean): AgentBridgeLifecycleState {
 		if (this.#crash.suppressed) return "error";
 		if (this.#reconnectGuard) return this.#transport.pid !== undefined ? "restarting" : "starting";
-		if (!this.#transport.pid) return "stopped";
+		if (!this.#transport.pid) return this.#parkedChild ? "parked" : "stopped";
 		if (!this.#crash.ready) return "starting";
 		if (busy) return "busy";
 		if (this.#circuit.state !== "closed") return "degraded";
@@ -628,6 +752,9 @@ export class AgentBridge {
 					);
 				}
 			}
+			// A prompt is in flight from here on: the child is in use, so the
+			// idle-stop window starts over when this prompt finishes.
+			this.#disarmChildIdleStop();
 
 			logger.debug("Forwarding to agent", {
 				userId: msg.userId,
@@ -764,6 +891,7 @@ export class AgentBridge {
 				this.#abortRequested = false;
 				this.#clearActiveChatContext();
 				await this.#endActiveSession();
+				this.#armChildIdleStop();
 			}
 		});
 	}
@@ -799,6 +927,9 @@ export class AgentBridge {
 				if (!this.isRunning) {
 					await this.#restartTransport();
 				}
+				// The prompt about to be enqueued owns the child: restart the
+				// idle-stop window on completion instead of parking mid-turn.
+				this.#disarmChildIdleStop();
 
 				const inactivityBudgetMs = options?.inactivityMs ?? 0;
 				const sessionPath = options?.sessionPath;
@@ -926,6 +1057,7 @@ export class AgentBridge {
 					return response.trim();
 				} finally {
 					if (watchdog) clearInterval(watchdog);
+					this.#armChildIdleStop();
 					if (sessionPath && previousSessionPath && previousSessionPath !== this.#activeSessionPath) {
 						try {
 							const sessionRestored = await this.#switchSession(previousSessionPath);
@@ -1045,6 +1177,8 @@ export class AgentBridge {
 			// (idle, not stuck in `starting`) after a recovery restart.
 			this.#crash.setReady(true);
 			this.#applyDeniedTools();
+			this.#parkedChild = false;
+			this.#armChildIdleStop();
 		} finally {
 			this.#reconnectGuard = false;
 		}
