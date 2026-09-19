@@ -31,7 +31,7 @@ describe("isLspmuxSupported", () => {
 		expect(lspmux.isLspmuxSupported("/Users/x/.cargo/bin/rust-analyzer")).toBe(true);
 	});
 
-	it("rejects typescript-language-server (lspmux handshake incompatibility) and others", () => {
+	it("rejects typescript-language-server (lspmux drops the server requests it needs) and others", () => {
 		expect(lspmux.isLspmuxSupported("typescript-language-server")).toBe(false);
 		expect(lspmux.isLspmuxSupported("pyright")).toBe(false);
 		expect(lspmux.isLspmuxSupported("bash-language-server")).toBe(false);
@@ -56,7 +56,7 @@ describe("wrapWithLspmux", () => {
 		expect(lspmux.wrapWithLspmux("rust-analyzer", [], state)).toEqual({ command: binaryPath, args: [] });
 	});
 
-	it("returns original for typescript-language-server (defers to direct spawn)", () => {
+	it("returns original for typescript-language-server (multiplexed by drey instead)", () => {
 		const state = { available: true, running: true, binaryPath, config: null };
 		const wrapped = lspmux.wrapWithLspmux("typescript-language-server", ["--stdio"], state);
 		expect(wrapped).toEqual({ command: "typescript-language-server", args: ["--stdio"] });

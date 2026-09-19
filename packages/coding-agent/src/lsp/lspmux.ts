@@ -39,20 +39,19 @@ interface LspmuxState {
 // =============================================================================
 
 /**
- * Servers that benefit from lspmux multiplexing.
+ * Servers that lspmux fronts for us.
  *
- * Only rust-analyzer for now: lspmux 0.3.0's spawn handshake requires the
- * FIRST message after `initialize` to be the initialize response
- * (src/instance.rs "first server message was not initialize response"), but
- * typescript-language-server emits startup notifications before answering
- * initialize — every first client then fails handshake and falls back to
- * lazily-retried diagnostics. tsserver instances are ~30-80MB vs rust-analyzer's
- * 1-2GB, so deferring it from multiplexing costs little and removes the
- * startup stall. Revisit when lspmux fixes trailing-arbitrary-pre-init messages.
+ * Only rust-analyzer. `typescript-language-server` is out of reach for lspmux
+ * for a structural reason, not a tuning one: lspmux drops every request the
+ * server initiates (its README: "it drops any requests from the server"), and
+ * tls sends a `workspace/configuration` request for each document it opens
+ * (measured 2026-09-19: 61 requests for 61 opened documents) — so every opened
+ * file would stall. It is multiplexed by drey instead, which forwards those
+ * requests and answers from the lowest client id; see ./drey.ts.
  */
 const DEFAULT_SUPPORTED_SERVERS = new Set([
 	"rust-analyzer",
-	// Other servers can be added after testing with lspmux
+	// Other servers can be added once they survive lspmux's dropped server requests
 ]);
 
 /** Timeout for liveness check (ms) */

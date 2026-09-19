@@ -700,7 +700,7 @@ internal URL input (rule://, docs://, ...)
 This module is a process-level JSON-RPC client/runtime for language servers. It is intentionally lower-level than feature tools.
 
 - Client acquisition boundary: `getOrCreateClient(config, cwd, initTimeoutMs?)`.
-  - Spawns server process (`ptree.spawn`) and optionally wraps command through lspmux (`isLspmuxSupported()`, `getLspmuxCommand()`).
+  - Spawns server process (`ptree.spawn`) after resolving the command through `resolveLspCommand()` (`src/lsp/multiplexer.ts`), which consults the multiplexers in order — drey for `typescript-language-server`, lspmux for `rust-analyzer` — and falls back to a direct spawn when none accepts.
   - Sends `initialize` request with static `CLIENT_CAPABILITIES`, stores `serverCapabilities`, then sends `initialized` notification.
 - Message transport boundary:
   - framing/parsing via `parseMessage()`, `findHeaderEnd()`, `writeMessage()`

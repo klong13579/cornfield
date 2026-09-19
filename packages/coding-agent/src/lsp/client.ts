@@ -1,7 +1,7 @@
 import { isEnoent, logger, ptree, untilAborted } from "@cornfield/utils";
 import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
 import { applyWorkspaceEdit } from "./edits";
-import { getLspmuxCommand, isLspmuxSupported } from "./lspmux";
+import { resolveLspCommand } from "./multiplexer";
 import type {
 	LspClient,
 	LspJsonRpcNotification,
@@ -444,10 +444,9 @@ export async function getOrCreateClient(config: ServerConfig, cwd: string, initT
 		const baseCommand = config.resolvedCommand ?? config.command;
 		const baseArgs = config.args ?? [];
 
-		// Wrap with lspmux if available and supported
-		const { command, args, env } = isLspmuxSupported(baseCommand)
-			? await getLspmuxCommand(baseCommand, baseArgs)
-			: { command: baseCommand, args: baseArgs };
+		// Route through a multiplexer when one is available — one shared server
+		// across sessions instead of one per session — else spawn directly.
+		const { command, args, env } = await resolveLspCommand(baseCommand, baseArgs);
 
 		const proc = ptree.spawn([command, ...args], {
 			cwd,

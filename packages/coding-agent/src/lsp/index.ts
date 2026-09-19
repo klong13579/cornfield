@@ -25,7 +25,7 @@ import {
 import { getLinterClient } from "./clients";
 import { getServersForFile, type LspConfig, loadConfig } from "./config";
 import { applyTextEditsToString, applyWorkspaceEdit } from "./edits";
-import { detectLspmux } from "./lspmux";
+import { describeMultiplexers } from "./multiplexer";
 import { renderCall, renderResult } from "./render";
 import {
 	type CodeAction,
@@ -1151,19 +1151,14 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
 		// Status action doesn't need a file
 		if (action === "status") {
 			const servers = Object.keys(config.servers);
-			const lspmuxState = await detectLspmux();
-			const lspmuxStatus = lspmuxState.available
-				? lspmuxState.running
-					? "lspmux: active (multiplexing enabled)"
-					: "lspmux: installed but server not running"
-				: "";
+			const multiplexerLines = await describeMultiplexers();
 
 			const serverStatus =
 				servers.length > 0
 					? `Active language servers: ${servers.join(", ")}`
 					: "No language servers configured for this project";
 
-			const output = lspmuxStatus ? `${serverStatus}\n${lspmuxStatus}` : serverStatus;
+			const output = [serverStatus, ...multiplexerLines].join("\n");
 			return {
 				content: [{ type: "text", text: output }],
 				details: { action, success: true, request: params },

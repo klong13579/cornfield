@@ -4,6 +4,15 @@
 
 ### Added
 
+- **typescript-language-server 跨会话共享（drey 复用）**（`src/lsp/drey.ts`, `src/lsp/multiplexer.ts`, `src/lsp/client.ts`, `src/lsp/index.ts`, `test/drey.test.ts`, `test/lsp-multiplexer.test.ts`）：每个会话此前各起一份 tls，实测（2026-09-19，TS 6.0.3，`vmmap` physical footprint）单份 **1.1–4.0GB**，而且一个 tls 实际拉起 **2 个** tsserver 进程 —— 4 个 TUI 会话 ≈ **12.5GB**，是全机 cornfield 自身（4 会话 + gateway ≈ 2.1GB）的 6 倍。现在同一 workspace root 的多个会话共用一个实例：实测两个会话 = 1 个 backend / `CLIENTS 2`，第二个会话**没有新建任何 tsserver** 却照常拿到诊断。
+  - 为什么不是 lspmux（它已在管 rust-analyzer）：lspmux **丢弃服务端发起的请求**（其 README 明写），而 tls 每开一个文档就发一次 `workspace/configuration`（实测 61 请求 / 61 个已开文档）—— 被丢就是每开一个文件卡一次，这是结构不匹配而非调参问题。rust-analyzer 从不请求配置（仓库内既有实测），所以它继续走 lspmux，两条线互不影响。顺带更正 `lspmux.ts` 里那条已失真的依据（「tsserver 只有 30–80MB，不复用代价很小」——实测差 20–100 倍）。
+  - 接缝收敛成**一个入口**：`resolveLspCommand()`（`src/lsp/multiplexer.ts`）按 drey → lspmux → 原生依次问，谁接受用谁；任何一层抛错只降级成直接 spawn，**绝不因 multiplexer 出错而弄坏语言服务**。加第三个 multiplexer 是往列表里加一项，不是往 `client.ts` 里再加一个分支。
+  - **不变量：daemon 不在就绝不交出 shim。** shim 会自启 daemon，而那个 daemon 继承 cornfield 的 stdio —— 实测后果是客户端读不到 stdout EOF、进程永不退出，管道被一个活得比会话久的进程持有。所以 daemon 由 cornfield 自己 detached 启动、stdio 进 `~/.cornfield/logs/drey.log`（复用 lspmux 已有的 poll 就绪模式），daemon 起不来就直接 spawn 原生服务。
+  - **不改写用户配置**：配置的 args 与 drey 内置档不一致时拒绝复用（daemon 用自己的 args 拉起服务，会静默丢掉用户那几个 flag），宁可这一个人不复用。
+  - 开关 `CORNFIELD_DISABLE_DREY=1`，与既有 `CORNFIELD_DISABLE_LSPMUX=1` 同形。**没有**加 `lsp.*` 设置项：那要求把 settings 一路穿到 `getOrCreateClient`（10+ 个调用方），不做穿线就是个「配了不生效」的假旋钮（参 09-18 那条教训）。
+  - 验证（均为实测）：单客户端走 drey 与直连等价且**零额外开销**（186MB vs 188MB）；两客户端错开启动 = 1 backend / CLIENTS 2，第二个客户端零新建进程；**同一文件两份不同未保存改动，各收各的诊断**（`DIRTY 1` / `SWAPS 1`，A 收 `string→number`、B 收 `number→string`，互不串台）；`CORNFIELD_DISABLE_DREY=1` 时绕过 shim 直连且诊断照常；`lsp` 工具 status 同时报两个 multiplexer。单测 49 例（含「绝不无 daemon 交出 shim」这条不变量）。
+  - **未验到的部分 / 已知边界**：① 真机多会话（3–4 个真实 TUI 会话同跑）的整机 footprint 降落未观测 —— 需重建二进制并重启会话才生效；② drey 0.1.9 自称 Early，实测两个缺陷：**并发接入竞态**（两个客户端同一瞬间连接会各起一个 backend，先后启动不触发）、`drey stop` 可能留下 backend 进程树（遇到一次，手工清理）；两者都可提上游 issue，不影响先后启动的会话；③ 该接缝在所有创建 LSP 客户端的路径上，签名未变（impact: MEDIUM，9 个直接调用方、1 条执行流 `LspTool.execute`）。
+
 - **Agent 能按需读写自己的长期任务板：新工具 `agent_todo`**（`src/tools/agent-todo.ts`, `src/tools/index.ts`, `src/prompts/tools/agent-todo.md`, `src/agent-domain/agent-todo-board.ts`）：板子就是 Todo 页显示的那块 `<agentDir>/.cornfield/agent-todos.json`。工具按 `discoverable` 挂成 `xd://agent_todo` 设备 —— 「按需」不等于「藏在代码里」：设备目录（`_environment.md` 的 Mounted devices 段）会列出它的 summary，模型由此知道这个能力存在，要用时 `read xd://agent_todo` 取手册、`write xd://agent_todo` 执行。动作 `list` / `add` / `update` / `delete`；字段 `status`（`completed`/`cancelled` 是终态）· `priority` · `dueAt`（本地墙钟；`YYYY-MM-DD` 落在当日结束，空串清空）· `notes` · `projectId`（受 Agent 声明的绑定上限约束）。
   - 读写走**共享的板子 API** `agent-domain/agent-todo-board`（从 `server/agent-todos-wire.ts` 的原实现抽出，wire 命令与工具同一份）：owner（agentId 由注册表按 agentDir 反查，不猜）、Project 绑定、生命周期、时间戳全在那一层判 —— 两个入口各写一套校验就是两条会漂的真相（一条从 GUI 进不来的写入会从工具进去）。
   - 与 `todo`（会话清单）的分工写进手册：`todo` 管这一次会话的步骤，`agent_todo` 管跨会话的长期任务；会话内清单不会自动变成长期任务。
