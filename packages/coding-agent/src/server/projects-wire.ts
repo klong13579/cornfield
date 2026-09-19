@@ -139,17 +139,19 @@ export function projectIdentity(
 	input: { projectId?: string; name?: string; root: string },
 	declared: readonly ProjectRecord[],
 ): { projectId: string; name: string } {
-	const explicitId = input.projectId?.trim() ?? "";
-	const explicitName = input.name?.trim() ?? "";
+	// 显式给的值原样用（调用方是权威，见上文）：`trim` 只用来判断这个字段算不算「给了」，
+	// 不用来改写值本身 —— 静默 trim 会把「  Repo  」写成「Repo」，与 `declareProject` 的契约相反。
+	const explicitId = input.projectId ?? "";
+	const explicitName = input.name ?? "";
 
 	const byRoot = matchProjectByRoot(declared, input.root);
 	const projectId =
-		explicitId !== ""
+		explicitId.trim() !== ""
 			? explicitId
 			: (byRoot?.projectId ?? freeProjectId(path.basename(path.resolve(input.root)), declared));
 	const existing = declared.find(project => project.projectId === projectId);
 
-	return { projectId, name: explicitName !== "" ? explicitName : (existing?.name ?? projectId) };
+	return { projectId, name: explicitName.trim() !== "" ? explicitName : (existing?.name ?? projectId) };
 }
 
 /**

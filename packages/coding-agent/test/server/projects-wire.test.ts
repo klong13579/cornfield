@@ -322,3 +322,44 @@ describe("dropProject（delete_project 的写面）", () => {
 		});
 	});
 });
+
+describe("declareProject 缺省身份（projectId / name 由 root 推导）", () => {
+	it("两个字段都缺省 → id 取 root 的目录名，name 跟随 id", async () => {
+		const root = path.join(home, "repo");
+
+		const written = await declareProject({ root });
+
+		expect(written.project.projectId).toBe("repo");
+		expect(written.project.name).toBe("repo");
+		expect(await loadProjects()).toEqual([{ projectId: "repo", name: "repo", root }]);
+	});
+
+	it("同一个 root 再声明一次 = 更新：复用原 id、保留已有名字，不多出一条", async () => {
+		const root = path.join(home, "repo");
+		await declareProject({ root, name: "我的仓库" });
+
+		const again = await declareProject({ root });
+
+		// 第二次点「声明」不能变成新项目（那会多出一个 <目录名>-2），
+		// 也不该把用户起的名字改回目录名。
+		expect(again.project.projectId).toBe("repo");
+		expect(again.project.name).toBe("我的仓库");
+		expect(await loadProjects()).toHaveLength(1);
+	});
+
+	it("目录名撞了要避让：已声明的 id 不被覆盖，新声明拿 -2", async () => {
+		await declareProject({ root: path.join(home, "a", "repo") });
+
+		const second = await declareProject({ root: path.join(home, "b", "repo") });
+
+		expect(second.project.projectId).toBe("repo-2");
+		expect((await loadProjects()).map(project => project.projectId)).toEqual(["repo", "repo-2"]);
+	});
+
+	it("id 走推导时，显式 name 仍然原样（不被 trim）", async () => {
+		const written = await declareProject({ name: "  我 的 仓库  ", root: path.join(home, "repo") });
+
+		expect(written.project.projectId).toBe("repo");
+		expect(written.project.name).toBe("  我 的 仓库  ");
+	});
+});

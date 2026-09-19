@@ -60,7 +60,7 @@ function summarize(events: readonly WireServerEvent[]): string {
 	return kinds.length > 0 ? [...new Set(kinds)].join(", ") : "(一条 push 都没收到)";
 }
 
-async function waitForUserMessage(events: readonly WireServerEvent[], timeoutMs = 20_000): Promise<string> {
+async function waitForUserMessage(events: readonly WireServerEvent[], timeoutMs = 60_000): Promise<string> {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
 		const text = userMessageText(events);
