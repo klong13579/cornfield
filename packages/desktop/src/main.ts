@@ -2,7 +2,7 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, type OpenDialogOptions, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import { initFileLogging, updaterLogger } from "./logger.js";
 import {
@@ -121,6 +121,20 @@ function createTray(): Tray {
 
 function setupIpc(): void {
 	ipcMain.handle("sidecar:get-workspace-dir", () => workspaceDir);
+	// 目录选择：供渲染层的路径输入框（Project root / 工作目录）调系统原生选择器。
+	// 只回一个绝对路径，**不做**任何语义校验（是不是已声明的 Project root 由 serve 判）。
+	ipcMain.handle("dialog:pick-directory", async (_event, defaultPath?: unknown) => {
+		const options: OpenDialogOptions = {
+			properties: ["openDirectory", "createDirectory"],
+			defaultPath: pickerStartDir(defaultPath),
+		};
+		// 有主窗口就挂在它上面（macOS 上是 sheet，归属清楚）；没有就用不挂父窗口的应用级弹窗。
+		const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+		const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+		const picked = result.filePaths[0];
+		if (result.canceled || picked === undefined) return { canceled: true };
+		return { canceled: false, path: picked };
+	});
 	ipcMain.handle("sidecar:set-workspace-dir", async (_event, dir: string) => {
 		const next = resolveWorkspaceDir(dir);
 		const changed = next !== workspaceDir;
@@ -144,6 +158,28 @@ function setupIpc(): void {
 		const zipVersion = await readVersionFromUpdateZip(zipPath);
 		return zipVersion !== null && compareVersions(zipVersion, app.getVersion()) >= 0;
 	});
+}
+
+/**
+ * 选择器的起始目录。
+ *
+ * 渲染层传的是输入框里当前那段文本：可能带 `~/`，也可能是一个还不存在的路径（用户正准备建它）。
+ * 指向不存在的目录时 `defaultPath` 的行为随平台而异，与其把这个不确定性交给平台，这里自己定：
+ * 展开 `~` 之后仍然指向一个**存在的目录**才用它，否则退到 home —— 选择器总得开在一个确定的位置。
+ */
+function pickerStartDir(override: unknown): string {
+	const home = app.getPath("home");
+	if (typeof override !== "string") return home;
+	const raw = override.trim();
+	if (raw === "") return home;
+	const expanded = raw === "~" || raw.startsWith("~/") ? path.join(home, raw.slice(1)) : raw;
+	if (!path.isAbsolute(expanded)) return home;
+	try {
+		return fs.statSync(expanded).isDirectory() ? expanded : home;
+	} catch {
+		// 还不存在 / 读不了：退回 home，不把一个开不了的目录交上去。
+		return home;
+	}
 }
 
 async function restartSidecar(next: string): Promise<void> {

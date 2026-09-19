@@ -33,9 +33,9 @@ import type {
 	ModelCatalogDto,
 	ModelSelectionDto,
 	ModelTestResultDto,
+	ProjectDeclareInput,
 	ProjectDeleteDto,
 	ProjectListDto,
-	ProjectRecordDto,
 	ProjectUpsertDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
@@ -95,6 +95,7 @@ export type {
 	TaskRetryDto,
 } from "@cornfield/wire";
 
+import type { PickDirectoryResult } from "./path-picker";
 import type { BranchPoint, PlaybackEntry, SessionRecordSummary } from "./records";
 
 /** fs_list 条目（agent workspace 目录项）。 */
@@ -604,11 +605,24 @@ export interface PiClient {
 	/**
 	 * 声明或更新一个 Project（set_project），返回存储真正落盘的那一份。
 	 *
-	 * 形状复用读模型 `ProjectRecordDto`（存储的就是一份 `ProjectRecord`，不是第二套写入形状）；
-	 * `defaultAgentId` 缺省 = 不声明默认 Agent。`root` 必须是绝对路径，`root` 已被别的 Project
-	 * 占用也会招错 —— 失败**原样招错**，不静默改写别人的声明。
+	 * 入参是 `ProjectDeclareInput`：`root` 必填，`projectId` / `name` **可以不给** —— 缺省由 serve 从
+	 * root 的目录名推导（撞名加 `-2` / `-3`，root 相同则复用原 Project 的身份），客户端不自己算。
+	 * `defaultAgentId` 缺省 = 不声明默认 Agent。`root` 必须是**跑 serve 那台机器**上的绝对路径，
+	 * `root` 已被别的 Project 占用也会招错 —— 失败**原样招错**，不静默改写别人的声明。
 	 */
-	setProject(project: ProjectRecordDto): Promise<ProjectUpsertDto>;
+	setProject(input: ProjectDeclareInput): Promise<ProjectUpsertDto>;
+	/**
+	 * 让**跑 serve 的那台机器**上的人选一个目录（pick_directory）。
+	 *
+	 * 网页直开（没有桌面壳）时「选目录」只有这一条通路能走：浏览器拿不到绝对路径，而 Project root
+	 * 与工作目录要的都是绝对路径。人取消 → `{ canceled: true }`（一次「什么都没发生」，不是一次空
+	 * 路径）；serve 弹不出来（没有 GUI 会话 / 平台没实现）→ **招错**，原文照原样给调用方显示 ——
+	 * 「人根本没被问到」不得说成「人取消了」。
+	 *
+	 * `defaultPath` 只是起始位置建议。这条命令的响应时长由人选多久决定，所以它的请求超时远长于
+	 * 普通命令（见 `state/pi-client-adapter` 的 `PICK_DIRECTORY_TIMEOUT_MS`）。
+	 */
+	pickDirectory(defaultPath?: string): Promise<PickDirectoryResult>;
 	/**
 	 * 删掉一个已声明的 Project（delete_project）。
 	 *

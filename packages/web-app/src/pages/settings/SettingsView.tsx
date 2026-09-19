@@ -1,39 +1,23 @@
 import { useEffect, useState } from "react";
+import { PathField } from "../../components/PathField";
+import { desktopApi } from "../../lib/desktop-bridge";
 import { ensureNotifyPermission, loadNotifyPrefs, type NotifyPrefs, saveNotifyPrefs } from "../../lib/notifications";
 import type { McpServerDto } from "../../lib/pi-client-api";
+import { loadRecentPaths, RECENT_PATH_KEYS, rememberRecentPath } from "../../lib/recent-paths";
 import { DEFAULT_SERVE_CONFIG, loadServeConfig } from "../../state/pi-client-adapter";
 import { useSessionStore } from "../../state/session-store";
 import { getUiStore, useUiState } from "../../state/ui-store";
 import { useSession } from "../../state/use-session";
 import { resolveNextToken } from "./connection-config";
 
-/** Electron 壳 preload bridge（T1 desktop 壳暴露的最小面：window.api.sidecar.setWorkspaceDir + app.getVersion）。
- * 网页直开（无 window.api）时工作目录降级存 localStorage，版本显示「—」，不 crash。
- * 契约与 packages/desktop/src/preload.ts 保持一致；字段均防御式存在性判断。 */
-interface SidecarBridge {
-	setWorkspaceDir: (dir: string) => Promise<unknown> | unknown;
-}
-
-/** Desktop 壳暴露到 window.api 的全部面（当前仅 sidecar + app 版本 + 更新流）。 */
-interface DesktopBridgeApi {
-	sidecar?: SidecarBridge;
-	app?: {
-		getVersion: () => Promise<string> | string;
-		onUpdateAvailable: (cb: () => void) => () => void;
-		onUpdateNotAvailable: (cb: () => void) => () => void;
-		onUpdateProgress: (cb: (p: { percent: number; bytesPerSecond: number }) => void) => () => void;
-		onUpdateDownloaded: (cb: () => void) => () => void;
-		downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;
-		installUpdate: () => Promise<{ ok: boolean; error?: string }>;
-		hasDownloadedUpdate: () => Promise<boolean>;
-		checkUpdate: () => Promise<{ ok: boolean; error?: string }>;
-	};
-}
-
 /**
  * 设置页（FR-7）—— 连接信息（hello）/ 会话行为开关（set_auto_compaction / set_auto_retry）/
  * 主题 / 快捷键 / 连接配置 / 通知（缺口 B7 disabled）/ 钉钉集成（gateway 读占位）/ 危险操作（二次确认）。
  * 视觉主角：kbd 快捷键表。
+ *
+ * 壳（`window.api`）的全部形状收在 `lib/desktop-bridge` 一处 —— 本页只是它的一个调用方，
+ * 不再自备一份 `DesktopBridgeApi`。网页直开（无壳）时：工作目录降级存 localStorage，
+ * 版本显示「—」，目录浏览按钮不画，不 crash。
  */
 export function SettingsView(): React.JSX.Element {
 	const view = useSession();
@@ -50,6 +34,10 @@ export function SettingsView(): React.JSX.Element {
 	});
 	const [workspaceSaved, setWorkspaceSaved] = useState(false);
 	const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+	/** 本机用过的工作目录（localStorage）—— 保存成功后才记，给输入框当候选。 */
+	const [workspaceSuggestions, setWorkspaceSuggestions] = useState<string[]>(() =>
+		loadRecentPaths(RECENT_PATH_KEYS.workspaceDir),
+	);
 	/** 桌面壳版本（Electron app.getVersion；网页直开无 window.api 时为 null）。 */
 	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
 	/** 新版本可用提示（desktop 壳更新事件；状态机 idle→checking→available/uptodate→downloading→downloaded→installing；error=任一步失败）。 */
@@ -98,12 +86,13 @@ export function SettingsView(): React.JSX.Element {
 		setWorkspaceSaved(false);
 		const value = workspaceDir.trim() || "~/workspace";
 		try {
-			const api = (window as Window & { api?: DesktopBridgeApi }).api;
+			const api = desktopApi();
 			if (api?.sidecar?.setWorkspaceDir) {
 				await api.sidecar.setWorkspaceDir(value);
 			}
 			// 镜像到 localStorage（展示初值来源；无 window.api 时即降级存储路径）
 			localStorage.setItem("cornfield.desktop.workspace", value);
+			setWorkspaceSuggestions(rememberRecentPath(RECENT_PATH_KEYS.workspaceDir, value));
 			setWorkspaceSaved(true);
 		} catch (err) {
 			setWorkspaceError(err instanceof Error ? err.message : String(err));
@@ -120,7 +109,7 @@ export function SettingsView(): React.JSX.Element {
 	};
 	/** 用户点「检查更新」：显式触发 checkForUpdates，结果走 available/not-available 事件。 */
 	const checkUpdateNow = async (): Promise<void> => {
-		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		const api = desktopApi();
 		if (!api?.app?.checkUpdate) return;
 		setUpdateError(null);
 		setUpdateState("checking");
@@ -135,7 +124,7 @@ export function SettingsView(): React.JSX.Element {
 	};
 	/** 用户点「下载更新」：触发 electron-updater downloadUpdate，进度走 onUpdateProgress。 */
 	const startUpdateDownload = async (): Promise<void> => {
-		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		const api = desktopApi();
 		if (!api?.app?.downloadUpdate) return;
 		setUpdateError(null);
 		setUpdateState("downloading");
@@ -150,7 +139,7 @@ export function SettingsView(): React.JSX.Element {
 	};
 	/** 用户点「重启更新」：quitAndInstall 立即重启应用完成安装。 */
 	const installUpdateNow = async (): Promise<void> => {
-		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		const api = desktopApi();
 		if (!api?.app?.installUpdate) return;
 		setUpdateError(null);
 		setUpdateState("installing");
@@ -166,7 +155,7 @@ export function SettingsView(): React.JSX.Element {
 
 	// 桌面壳版本 + 更新流：Electron 环境经 window.api.app 读；网页直开无 api → 静默不处理。
 	useEffect(() => {
-		const api = (window as typeof window & { api?: DesktopBridgeApi }).api;
+		const api = desktopApi();
 		if (!api?.app?.getVersion) return;
 		Promise.resolve(api.app.getVersion())
 			.then(v => setDesktopVersion(String(v)))
@@ -194,7 +183,7 @@ export function SettingsView(): React.JSX.Element {
 	}, []);
 
 	// 无桌面壳（网页直开无 window.api）时「检查更新」禁用并在正文说明原因。
-	const desktopShellApi = (window as typeof window & { api?: DesktopBridgeApi }).api;
+	const desktopShellApi = desktopApi();
 	const canCheckUpdate = desktopShellApi?.app?.checkUpdate != null;
 
 	return (
@@ -344,25 +333,31 @@ export function SettingsView(): React.JSX.Element {
 							<label className="block text-[12px] text-ink-subtle" htmlFor="conn-workspace">
 								工作目录
 							</label>
-							<div className="mt-1 flex gap-2">
-								<input
-									id="conn-workspace"
-									value={workspaceDir}
-									onChange={e => {
-										setWorkspaceDir(e.target.value);
-										setWorkspaceSaved(false);
-									}}
-									placeholder="~/workspace"
-									className="flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
-								/>
-								<button
-									type="button"
-									onClick={() => void saveWorkspaceDir()}
-									className="shrink-0 rounded bg-accent px-3 py-1.5 text-[12px] font-medium text-on-accent hover:bg-accent-hover"
-								>
-									保存
-								</button>
-							</div>
+							<PathField
+								id="conn-workspace"
+								value={workspaceDir}
+								onChange={value => {
+									setWorkspaceDir(value);
+									setWorkspaceSaved(false);
+									// 上一次的失败说的是上一次那个值：换了值就不再成立
+									setWorkspaceError(null);
+								}}
+								onPickError={message => setWorkspaceError(message)}
+								ariaLabel="工作目录"
+								placeholder="~/workspace"
+								className="mt-1"
+								inputClassName="min-w-0 flex-1 rounded border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-dim)]"
+								suggestions={workspaceSuggestions}
+								trailing={
+									<button
+										type="button"
+										onClick={() => void saveWorkspaceDir()}
+										className="shrink-0 rounded bg-accent px-3 py-1.5 text-[12px] font-medium text-on-accent hover:bg-accent-hover"
+									>
+										保存
+									</button>
+								}
+							/>
 							{workspaceSaved && <div className="mt-1 text-[11px] text-success">已保存</div>}
 							{workspaceError !== null && <div className="mt-1 text-[11px] text-danger">{workspaceError}</div>}
 						</div>

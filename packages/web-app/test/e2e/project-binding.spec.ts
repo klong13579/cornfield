@@ -254,6 +254,16 @@ test.describe("Project 绑定闭环（真实 serve + 真实前端）", () => {
 			await chip.click();
 			await page.getByLabel("工作上下文", { exact: true }).selectOption(PROJECT_ID);
 			await page.screenshot({ path: `${SHOTS}/3-working-context-panel.png` });
+
+			// root 字段：浏览器直开**没有桌面壳** —— 该有的是「能少打」（候选里是本机已声明过的项目根），
+			// 不该有的是一个点了没反应的「浏览…」按钮（它只在 Electron 壳里存在）。
+			const rootInput = page.getByLabel("项目根路径");
+			await expect(rootInput).toBeVisible();
+			await expect(rootInput).toHaveAttribute("list", "project-root-suggestions");
+			await expect(page.locator("#project-root-suggestions option")).toHaveCount(1);
+			await expect(page.locator("#project-root-suggestions option")).toHaveAttribute("value", projRoot);
+			await expect(page.getByRole("button", { name: "浏览…" })).toHaveCount(0);
+
 			await chip.click(); // 收起面板，免得挡住顶栏按钮
 
 			// ── 3. 打开新建会话表单：它的 Project 字段读的就是工作上下文 ──

@@ -24,10 +24,11 @@ import type {
 	ModelCatalogDto,
 	ModelSelectionDto,
 	ModelTestResultDto,
+	PickDirectoryDto,
 	ProgressEventDto,
+	ProjectDeclareInput,
 	ProjectDeleteDto,
 	ProjectListDto,
-	ProjectRecordDto,
 	ProjectUpsertDto,
 	ProviderDisconnectResultDto,
 	ProviderListDto,
@@ -43,6 +44,7 @@ import type {
 	WireCommand,
 	WireServerEventDto,
 } from "@cornfield/wire";
+import type { PickDirectoryResult } from "../lib/path-picker";
 import type {
 	AgentMessageDto,
 	AgentTodoDeleteDto,
@@ -74,6 +76,17 @@ import type {
 } from "../lib/pi-client-api";
 import { FsConflictError } from "../lib/pi-client-api";
 import type { BranchPoint, PlaybackEntry, PlaybackToolStep, RecordStatus, SessionRecordSummary } from "../lib/records";
+
+/**
+ * `pick_directory` 的请求超时。
+ *
+ * 普通命令的 30 秒（`@cornfield/client` 的默认值）在这条命令上是错的：它等的是一次人的操作
+ * ——人在系统弹窗里找到目录、点下去。30 秒到了请求就被判死，而 serve 那边的弹窗还开着，
+ * 用户点完之后什么也不会发生（响应成了无主响应）。
+ *
+ * 也不设成无限：一个不回话的 serve 不该让 UI 永远转下去。十分钟足够人做完一次选择。
+ */
+const PICK_DIRECTORY_TIMEOUT_MS = 10 * 60_000;
 
 /** serve get_state env 条目（pi-wire WireEnvironmentSummary；pendingCronCount 为可选缺省）。 */
 interface WireEnvironmentSummaryDto {
@@ -695,16 +708,29 @@ export class PiClientAdapter implements PiClient {
 	 *
 	 * 不捕获错误：root 被别的 Project 占用 / 输入不成立 / 存储写不进去都必须原样到 UI 显示成错误 ——
 	 * 吞掉它就是在告诉用户「已经声明好了」，而盘上什么也没多。
-	 * `defaultAgentId` 只在真的给了值时才发字段：缺省与空串不是同一件事，不在这里替它二选一。
+	 * 缺省字段一律**不出现**（不是 undefined 占位）：缺省 = 由 serve 从 root 推导，与显式空串不是一回事。
 	 */
-	setProject(project: ProjectRecordDto): Promise<ProjectUpsertDto> {
+	setProject(input: ProjectDeclareInput): Promise<ProjectUpsertDto> {
 		return this.#req<ProjectUpsertDto>({
 			type: "set_project",
-			projectId: project.projectId,
-			name: project.name,
-			root: project.root,
-			...(project.defaultAgentId === undefined ? {} : { defaultAgentId: project.defaultAgentId }),
+			root: input.root,
+			...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+			...(input.name === undefined ? {} : { name: input.name }),
+			...(input.defaultAgentId === undefined ? {} : { defaultAgentId: input.defaultAgentId }),
 		});
+	}
+
+	/**
+	 * 让 serve 那台机器上的人选一个目录（pick_directory）。
+	 *
+	 * 不捕获错误：serve 弹不出来（没有 GUI 会话 / 平台没实现）必须原样到 UI 显示成错误 ——
+	 * 把它吞成一个「取消」，就是在替人说一个他没做过的决定。
+	 */
+	pickDirectory(defaultPath?: string): Promise<PickDirectoryResult> {
+		return this.#req<PickDirectoryDto>(
+			{ type: "pick_directory", ...(defaultPath === undefined ? {} : { defaultPath }) },
+			{ timeoutMs: PICK_DIRECTORY_TIMEOUT_MS },
+		);
 	}
 
 	/** 删掉一个已声明的 Project（delete_project）。没声明过会招错，不静默成功。 */
@@ -1244,8 +1270,8 @@ export class PiClientAdapter implements PiClient {
 
 	// ── 内部 ──
 
-	#req<TResult = unknown>(command: WireCommand): Promise<TResult> {
-		return this.#client.request<TResult>(command).catch((err: unknown) => {
+	#req<TResult = unknown>(command: WireCommand, options?: { timeoutMs?: number }): Promise<TResult> {
+		return this.#client.request<TResult>(command, options).catch((err: unknown) => {
 			console.warn("[web-app] serve command failed", command.type, err);
 			throw err;
 		});

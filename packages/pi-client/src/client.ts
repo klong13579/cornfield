@@ -75,7 +75,8 @@ type PendingRequest = {
 	commandType: string;
 	resolve: (result: unknown) => void;
 	reject: (err: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
+	/** 缺省 = 这条请求不设超时（`timeoutMs: 0`）。 */
+	timer?: ReturnType<typeof setTimeout>;
 };
 
 /**
@@ -178,8 +179,13 @@ export class PiClient {
 	/**
 	 * 发送命令并等待响应。内部自己带 request id。
 	 * 未连接：拒 PiDisconnectedError。服务端 ok:false：拒 PiServerError。超时：拒 PiRequestTimeoutError。
+	 *
+	 * `options.timeoutMs` 覆盖这一次请求的超时：`0` = 不设超时。需要它的场景是「时长由人决定」的命令
+	 * ——让人在一个系统弹窗里选目录，30 秒的服务端超时会在人还没选完的时候就把请求判死。不设超时
+	 * 必须显式写明：默认可变就等于没人知道任何一条命令要等多久。断开时在途请求照样被
+	 * `#rejectAllPending` 拒掉，所以「不设超时」不会真的等一辈子。
 	 */
-	request<TResult = unknown>(command: WireCommand): Promise<TResult> {
+	request<TResult = unknown>(command: WireCommand, options?: { timeoutMs?: number }): Promise<TResult> {
 		if (this.#status !== "open" || !this.#ws) {
 			return Promise.reject(
 				new PiDisconnectedError(`Cannot send "${command.type}": not open (status=${this.#status})`),
@@ -187,27 +193,36 @@ export class PiClient {
 		}
 		const id = this.#nextRequestId();
 		const frame: ClientFrame = { type: "request", id, command: { ...command, id } };
+		const timeoutMs = options?.timeoutMs ?? this.#requestTimeoutMs;
 		return new Promise<TResult>((resolve, reject) => {
-			const timer = this.#clock.setTimeout(() => {
-				const pending = this.#pending.get(id);
-				if (!pending) return;
-				this.#pending.delete(id);
-				pending.reject(new PiRequestTimeoutError(command.type, this.#requestTimeoutMs));
-			}, this.#requestTimeoutMs);
+			const timer =
+				timeoutMs > 0
+					? this.#clock.setTimeout(() => {
+							const pending = this.#pending.get(id);
+							if (!pending) return;
+							this.#pending.delete(id);
+							pending.reject(new PiRequestTimeoutError(command.type, timeoutMs));
+						}, timeoutMs)
+					: undefined;
 			this.#pending.set(id, {
 				commandType: command.type,
 				resolve: v => resolve(v as TResult),
 				reject,
-				timer,
+				...(timer === undefined ? {} : { timer }),
 			});
 			try {
 				this.#ws!.send(JSON.stringify(frame));
 			} catch (err) {
 				this.#pending.delete(id);
-				this.#clock.clearTimeout(timer);
+				this.#clearPendingTimer(timer);
 				reject(err instanceof Error ? err : new Error(String(err)));
 			}
 		});
+	}
+
+	/** 只在真的设过超时时清：`timeoutMs: 0` 的请求没有 timer。 */
+	#clearPendingTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
+		if (timer !== undefined) this.#clock.clearTimeout(timer);
 	}
 
 	/** 订阅所有 push 事件 + 状态变化。重连不影响监听器（保留）。 */
@@ -414,7 +429,7 @@ export class PiClient {
 				const pending = this.#pending.get(frame.id);
 				if (!pending) return; // 无主响应（已超时/已断线拒绝），忽略
 				this.#pending.delete(frame.id);
-				this.#clock.clearTimeout(pending.timer);
+				this.#clearPendingTimer(pending.timer);
 				if (frame.ok) {
 					pending.resolve(frame.result);
 				} else {
@@ -481,7 +496,7 @@ export class PiClient {
 		const pending = Array.from(this.#pending.values());
 		this.#pending.clear();
 		for (const p of pending) {
-			this.#clock.clearTimeout(p.timer);
+			this.#clearPendingTimer(p.timer);
 			p.reject(err);
 		}
 	}

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **目录选择：`dialog:pick-directory` + preload `api.dialog.pickDirectory`**（`src/main.ts`, `src/preload.ts`）：web-app 的路径输入框（Project root / 工作目录）此前只能手打绝对路径 —— 壳里没有任何系统目录选择器（`main.ts` 连 `dialog` 都没 import）。现在主进程用 `dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] })` 暴露 `dialog:pick-directory`，有主窗口时挂在它上面（macOS 上是 sheet，归属清楚）；preload 暴露为 `api.dialog.pickDirectory(defaultPath)`，回 `{ canceled: true }` 或 `{ canceled: false, path }` —— 取消与「选了个空路径」形状不同，不给调用方留一个猜的机会。起始目录取渲染层给的当前输入：`~` 展开后仍指向一个**存在的目录**才用它，否则退到 home（指向不存在的目录时 `defaultPath` 的行为随平台而异，这里自己定）。不做任何语义校验：是不是已声明的 Project root 由 serve 判，preload 不是校验层。
+
 ## [1.2.1] - 2026-09-13
 
 ### Added
