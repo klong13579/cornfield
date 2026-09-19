@@ -1193,6 +1193,13 @@ describe("当前计划区域", () => {
 		},
 	];
 
+	/** 任务行按钮：表头那个折叠钮带 aria-expanded，不是任务行。 */
+	function taskRows(tree: ReactElement): ReactElement[] {
+		return collect(tree).filter(
+			node => node.type === "button" && !("aria-expanded" in (node.props as Record<string, unknown>)),
+		);
+	}
+
 	it("四态分开：未连接 / 快照未到 / 确实没有计划 / 有计划", () => {
 		const base = viewOf({});
 		expect(planAreaOf({ ...base, connected: false, todo: PHASES }).kind).toBe("disconnected");
@@ -1206,12 +1213,14 @@ describe("当前计划区域", () => {
 	it("快照还没到：不拿「没有计划」顶位（那是一个还没到的答案）", () => {
 		const area = planAreaOf({ connected: true, sessionId: "", todo: [] });
 		expect(area.label).not.toContain("没有计划");
-		expect(renderToStaticMarkup(PlanStrip({ area, onToggle: noop }))).not.toContain("完成 0/0");
+		expect(
+			renderToStaticMarkup(PlanStrip({ area, collapsed: true, onToggle: noop, onToggleCollapsed: noop })),
+		).not.toContain("完成 0/0");
 	});
 
 	it("未连接：说清读不到，不画空计划", () => {
 		const area = planAreaOf({ connected: false, sessionId: "sess-1", todo: [] });
-		const html = renderToStaticMarkup(PlanStrip({ area, onToggle: noop }));
+		const html = renderToStaticMarkup(PlanStrip({ area, collapsed: true, onToggle: noop, onToggleCollapsed: noop }));
 		expect(html).toContain("未连接——读不到本会话的计划");
 		expect(html).not.toContain("本次会话还没有计划");
 	});
@@ -1221,11 +1230,13 @@ describe("当前计划区域", () => {
 		expect(planProgressOf([])).toEqual({ done: 0, total: 0, abandoned: 0 });
 	});
 
-	it("有计划：画出相位/进度/来源，未终结的两态点得动，进行中与已放弃是只读读数", () => {
+	it("展开：画出相位/进度/来源，未终结的两态点得动，进行中与已放弃是只读读数", () => {
 		const clicked: Array<[string, number]> = [];
 		const tree = PlanStrip({
 			area: planAreaOf({ connected: true, sessionId: "sess-1", todo: PHASES }),
+			collapsed: false,
 			onToggle: (phaseName, index) => clicked.push([phaseName, index]),
+			onToggleCollapsed: noop,
 		});
 		const html = renderToStaticMarkup(tree);
 		expect(html).toContain("当前计划");
@@ -1235,13 +1246,75 @@ describe("当前计划区域", () => {
 		expect(html).toContain("第一阶段");
 		expect(html).toContain("读任务包");
 
-		const rows = collect(tree).filter(node => node.type === "button");
+		const rows = taskRows(tree);
 		expect(rows).toHaveLength(4);
 		// 只有 pending / completed 点得动（store.toggleTodo 就是在这一对之间来回换）
 		expect(rows.map(row => (row.props as { disabled?: boolean }).disabled)).toEqual([false, false, true, true]);
 
 		(rows[1]!.props as { onClick: () => void }).onClick();
 		expect(clicked).toEqual([["第一阶段", 1]]);
+	});
+
+	it("默认折叠：本会话有计划也不画任务行，表头读数照留", () => {
+		const tree = PlanStrip({
+			area: planAreaOf({ connected: true, sessionId: "sess-1", todo: PHASES }),
+			collapsed: true,
+			onToggle: noop,
+			onToggleCollapsed: noop,
+		});
+		const html = renderToStaticMarkup(tree);
+		// 折叠省的是纵向空间，不是把信息藏了：进度和来源都还在表头上
+		expect(html).toContain("当前计划");
+		expect(html).toContain("完成 1/4");
+		expect(html).toContain("放弃 1");
+		expect(html).toContain("本会话的 Session Todo");
+		expect(html).toContain('aria-expanded="false"');
+		expect(html).not.toContain("第一阶段");
+		expect(html).not.toContain("读任务包");
+		expect(taskRows(tree)).toHaveLength(0);
+	});
+
+	it("展开：任务行才出现，表头就是那个切换入口", () => {
+		const tree = PlanStrip({
+			area: planAreaOf({ connected: true, sessionId: "sess-1", todo: PHASES }),
+			collapsed: false,
+			onToggle: noop,
+			onToggleCollapsed: noop,
+		});
+		expect(renderToStaticMarkup(tree)).toContain('aria-expanded="true"');
+		expect(taskRows(tree)).toHaveLength(4);
+	});
+
+	it("点表头：把折叠交回工作台（组件自己不持有状态）", () => {
+		let toggles = 0;
+		const tree = PlanStrip({
+			area: planAreaOf({ connected: true, sessionId: "sess-1", todo: PHASES }),
+			collapsed: true,
+			onToggle: noop,
+			onToggleCollapsed: () => {
+				toggles += 1;
+			},
+		});
+		fireOnText(tree, "button", "当前计划完成 1/4 · 放弃 1本会话的 Session Todo", "onClick");
+		expect(toggles).toBe(1);
+	});
+
+	it("没有计划可折的三种态：不画折叠控件，两态渲染逐字节相同", () => {
+		const areas = [
+			planAreaOf({ connected: false, sessionId: "sess-1", todo: [] }),
+			planAreaOf({ connected: true, sessionId: "", todo: [] }),
+			planAreaOf({ connected: true, sessionId: "sess-1", todo: [] }),
+		];
+		for (const area of areas) {
+			const expanded = renderToStaticMarkup(
+				PlanStrip({ area, collapsed: false, onToggle: noop, onToggleCollapsed: noop }),
+			);
+			// 画一个点了没用的箭头，比不画它更坏
+			expect(expanded).not.toContain("aria-expanded");
+			expect(
+				renderToStaticMarkup(PlanStrip({ area, collapsed: true, onToggle: noop, onToggleCollapsed: noop })),
+			).toBe(expanded);
+		}
 	});
 });
 

@@ -1,5 +1,5 @@
 import type { TodoPhaseDto, TodoStatusDto } from "@cornfield/wire";
-import { Folder, Menu, MessagesSquare, PanelRight, Smartphone } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, Menu, MessagesSquare, PanelRight, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueueCard } from "../../components/QueueCard";
@@ -25,6 +25,9 @@ import { Transcript } from "./Transcript";
  * 它已经在 store 里、已经走 `set_todos` 写回会话，会话结束即结束（§18）。所以这里只是把它画
  * 出来 + 复用现有的切换入口，**不建第二份计划存储**，也不写进 Todo 工作台或 Agent 板：
  * 那是另外两块板子（§9 / §37）。
+ *
+ * 几何上它跟转录列走（外层 `px-6` + 内层 `max-w-[1100px]`，与 Transcript 同一段），不是自成一
+ * 套宽度：宽度自己定的话，它比会话框窄一截，看起来像另一列东西。
  */
 export type PlanAreaKind = "disconnected" | "waiting" | "empty" | "phases";
 
@@ -80,37 +83,72 @@ const PLAN_TASK_CLASS: Record<TodoStatusDto, string> = {
 	blocked: "text-warning",
 };
 
+/** 折叠后任务列表的 DOM id（`aria-controls` 要指一个真目标；页面里只有一条计划条）。 */
+const PLAN_TASKS_ID = "workspace-plan-tasks";
+
 /**
  * 计划条（受控、无 hook：状态由工作台持有，单测直接调用就能拿到元素树）。
+ *
+ * **默认折叠**：它是本会话的过程读数，不该长期占着输入区上方的纵向空间。折叠态由工作台持有
+ * （`collapsed` + `onToggleCollapsed`），本组件不记忆、不持久化。
+ *
+ * 折叠控件只在 `phases` 这一态出现：未连接 / 快照未到 / 确实没有计划都是单行文案，本来就只占
+ * 一行 —— 给它们画一个箭头，就是让用户去点一个没有东西可折的控件。折叠时**表头读数照留**
+ * （完成 x/y · 放弃 n）：折叠省的是纵向空间，不是把信息藏起来。
  *
  * 只有 `pending` / `completed` 两态可以点：store 的 `toggleTodo` 就是把这两态来回换，
  * 点一个进行中/已放弃的任务会写出用户没要的那次改写。
  */
 export function PlanStrip({
 	area,
+	collapsed,
 	onToggle,
+	onToggleCollapsed,
 }: {
 	area: PlanArea;
+	/** 折叠态（由工作台持有；组件无 hook，单测才能直接调用）。 */
+	collapsed: boolean;
 	onToggle: (phaseName: string, index: number) => void;
+	onToggleCollapsed: () => void;
 }): React.JSX.Element {
 	const progress = planProgressOf(area.phases);
+	const collapsible = area.kind === "phases";
+	const expanded = collapsible && !collapsed;
 	return (
-		<section className="mx-auto mb-1 w-full max-w-[760px] rounded-lg border border-hairline bg-surface-2 px-3 py-2">
-			<div className="flex items-center gap-2">
-				<span className="text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">当前计划</span>
-				{area.kind === "phases" && (
+		<section className="mx-auto mb-1 w-full max-w-[1100px] rounded-lg border border-hairline bg-surface-2 px-3 py-2">
+			{collapsible ? (
+				<button
+					type="button"
+					className="flex w-full items-center gap-2 text-left"
+					aria-expanded={expanded}
+					aria-controls={PLAN_TASKS_ID}
+					title={expanded ? "折叠任务列表" : "展开任务列表"}
+					onClick={onToggleCollapsed}
+				>
+					{expanded ? (
+						<ChevronDown size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
+					) : (
+						<ChevronRight size={13} strokeWidth={1.5} className="shrink-0 text-ink-faint" />
+					)}
+					<span className="text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">当前计划</span>
 					<span className="text-[11px] text-ink-faint">
 						完成 {progress.done}/{progress.total}
 						{progress.abandoned > 0 ? ` · 放弃 ${progress.abandoned}` : ""}
 					</span>
-				)}
-				<span className="flex-1" />
-				<span className="text-[11px] text-ink-faint">本会话的 Session Todo</span>
-			</div>
-			{area.kind !== "phases" ? (
-				<div className="mt-1 text-[12px] text-ink-faint">{area.label}</div>
+					<span className="flex-1" />
+					<span className="text-[11px] text-ink-faint">本会话的 Session Todo</span>
+				</button>
 			) : (
-				<div className="mt-1 max-h-[160px] overflow-y-auto">
+				<div className="flex items-center gap-2">
+					<span className="text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">当前计划</span>
+					<span className="flex-1" />
+					<span className="text-[11px] text-ink-faint">本会话的 Session Todo</span>
+				</div>
+			)}
+			{!collapsible ? (
+				<div className="mt-1 text-[12px] text-ink-faint">{area.label}</div>
+			) : expanded ? (
+				<div id={PLAN_TASKS_ID} className="mt-1 max-h-[160px] overflow-y-auto">
 					{area.phases.map(phase => (
 						<div key={phase.name} className="mb-1 last:mb-0">
 							<div className="text-[11.5px] text-ink-muted">{phase.name}</div>
@@ -133,7 +171,7 @@ export function PlanStrip({
 						</div>
 					))}
 				</div>
-			)}
+			) : null}
 		</section>
 	);
 }
@@ -206,6 +244,8 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 	// 新建会话表单：顶栏那个入口把它打开（不再直接发 new_session——那会跳过「这次要建在哪」）
 	const [newSessionOpen, setNewSessionOpen] = useState(false);
 	const [newSessionDraft, setNewSessionDraft] = useState(EMPTY_NEW_SESSION_DRAFT);
+	// 计划条默认折叠（用户决策），且**不持久化**：每次进工作台都从折叠开始，展开只在本次停留期间有效。
+	const [planCollapsed, setPlanCollapsed] = useState(true);
 	const planArea = planAreaOf(view);
 
 	// 顶栏工作区：跟随当前焦点会话/agent 的工作目录短名（cli 会话 = 其打开目录；agent = agentDir）；
@@ -341,8 +381,16 @@ export function WorkspaceView({ compact = false }: { compact?: boolean }): React
 					/>
 				)}
 
-				{/* 当前计划：本会话自己的 Session Todo（不新建存储，也不写进别的板子） */}
-				<PlanStrip area={planArea} onToggle={(phaseName, index) => store.toggleTodo(phaseName, index)} />
+				{/* 当前计划：本会话自己的 Session Todo（不新建存储，也不写进别的板子）。
+				    外层与 Transcript 同款：px-6 的内缩 + 内层 max-w-[1100px] 的会话列。 */}
+				<div className="px-6">
+					<PlanStrip
+						area={planArea}
+						collapsed={planCollapsed}
+						onToggle={(phaseName, index) => store.toggleTodo(phaseName, index)}
+						onToggleCollapsed={() => setPlanCollapsed(collapsed => !collapsed)}
+					/>
+				</div>
 
 				<QueueCard
 					count={view.queued}

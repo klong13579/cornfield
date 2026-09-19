@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **工作台「当前计划」默认折叠，且几何与会话框对齐**（`src/pages/workspace/WorkspaceView.tsx`）：计划条此前恒展开，本会话跑出 14 条任务就一直占着输入区上方约 200px；现在默认折叠，表头留「完成 x/y · 放弃 n」的读数与展开入口（`aria-expanded` + `aria-controls`），折叠态由工作台持有、**不持久化**（每次进工作台都从折叠开始）。`phases` 之外的三种态（未连接 / 快照未到 / 确实没有计划）本来就只有一行文案，不给它们画折叠控件 —— 一个点了没用的箭头比没有它更坏。同时它的宽度从自成一档的 `max-w-[760px]` 收到与转录列同一段（外层 `px-6` + 内层 `max-w-[1100px]`）：1440 视口下左边缘曾比会话框窄 170px。回归：`src/pages/workspace/WorkspaceView.plan-strip.render.test.ts`（默认折叠那一眼 + 与 Transcript 同款几何）、`test/app-shell-nav.test.ts` 的「当前计划区域」（折叠/展开两态、表头是唯一入口、三种无计划态不画控件）。
+
 ## [1.3.0] - 2026-09-17
 
 ### Changed
