@@ -25,6 +25,7 @@ import type {
 import type { AgentTodoDto } from "../src/results/agent-todos";
 import type { AgentCreateDto, AgentCreateInput } from "../src/results/agents";
 import type { CronCreateInput, CronUpdateInput } from "../src/results/cron";
+import type { PickDirectoryDto } from "../src/results/directory";
 import type {
 	ProjectDeleteDto,
 	ProjectListDto,
@@ -167,12 +168,14 @@ type _ListProjects = WireCommandOfType<"list_projects">;
 type _AssertListProjects = _ListProjects extends { type: "list_projects"; sessionId?: string } ? true : never;
 const _listProjectsShape: _AssertListProjects = true;
 
+// 声明/更新：`root` 必填，`projectId` / `name` **可选** —— 缺省 = serve 从 root 的目录名推导
+// （`projects-wire` 的 `projectIdentity`）。这条断言钉的就是那个「只给 root 也是合法输入」。
 type _SetProject = WireCommandOfType<"set_project">;
 type _AssertSetProject = _SetProject extends {
 	type: "set_project";
-	projectId: string;
-	name: string;
 	root: string;
+	projectId?: string;
+	name?: string;
 	defaultAgentId?: string;
 }
 	? true
@@ -190,6 +193,17 @@ const _projectUpsertDtoShape: _AssertProjectUpsertDto = true;
 
 type _AssertProjectDeleteDto = ProjectDeleteDto extends { projectId: string } ? true : never;
 const _projectDeleteDtoShape: _AssertProjectDeleteDto = true;
+
+// 目录选择：起位置建议可选；答复里「选了」必须带 path、「取消」没有 path。
+type _PickDirectory = WireCommandOfType<"pick_directory">;
+type _AssertPickDirectory = _PickDirectory extends { type: "pick_directory"; defaultPath?: string } ? true : never;
+const _pickDirectoryShape: _AssertPickDirectory = true;
+
+// 两个分支都要能赋给 DTO：少了任一个，调用方就没法把「取消」与「选好了」分开说。
+type _AssertPickDirectoryPicked = { canceled: false; path: string } extends PickDirectoryDto ? true : never;
+const _pickDirectoryPickedShape: _AssertPickDirectoryPicked = true;
+type _AssertPickDirectoryCanceled = { canceled: true } extends PickDirectoryDto ? true : never;
+const _pickDirectoryCanceledShape: _AssertPickDirectoryCanceled = true;
 
 type _ListAgentTodos = WireCommandOfType<"list_agent_todos">;
 type _AssertListAgentTodos = _ListAgentTodos extends { type: "list_agent_todos"; sessionId?: string } ? true : never;
@@ -465,6 +479,8 @@ const COMMAND_TYPES = [
 	"get_session_messages",
 	// 改列表里历史会话的名字（按会话文件定位，与 set_session_name 分工：那条只能改挂着的那个）
 	"rename_session",
+	// 桌面壳的原生目录选择器
+	"pick_directory",
 	"fs_list",
 	"fs_read",
 	"fs_read_image",

@@ -94,6 +94,7 @@ import { dropAgentTodo, listAgentTodos, writeAgentTodo } from "./agent-todos-wir
 import { listAgentArtifacts, listSessionArtifacts } from "./artifacts";
 import { aggregateDiagnosis } from "./diagnosis-aggregation";
 import { getDiagnosisReport, listDiagnosisReports, runSimpleDiagnosis } from "./diagnosis-runner";
+import { pickDirectory } from "./directory-picker";
 import { readEvolvedSkills } from "./evolution-skills-wire";
 import { readGitChanges } from "./git-wire";
 import { WireHostToolBridge } from "./host-tool-bridge";
@@ -613,10 +614,11 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 				case "set_project": {
 					try {
 						// 写面不挂会话、不 lazy attach：声明一个 Project 与哪个 agent 附着无关。
+						// 缺省字段一律**不出现**（不是 undefined 占位）：缺省 = 由 root 推导，与显式空串不是一回事。
 						const input = {
-							projectId: command.projectId,
-							name: command.name,
 							root: command.root,
+							...(command.projectId === undefined ? {} : { projectId: command.projectId }),
+							...(command.name === undefined ? {} : { name: command.name }),
 							...(command.defaultAgentId === undefined ? {} : { defaultAgentId: command.defaultAgentId }),
 						};
 						done(await declareProject(input));
@@ -632,6 +634,19 @@ export async function createWireCore(options: WireServerOptions): Promise<WireCo
 					} catch (err) {
 						// 没声明过就是没删掉 → ok:false（不当成一次成功的空删除）
 						fail(`delete_project failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					return;
+				}
+				case "pick_directory": {
+					// 宿主对话框，不挂会话也不 attach：要选的是本机上的某一处，与哪个 agent 附着无关。
+					// 命中率高的时候人要想几秒甚至几分钟，所以这条命令的答复会慢于一次普通请求：客户端把它的
+					// 请求超时放宽到分钟级（web-app 的 PICK_DIRECTORY_TIMEOUT_MS），serve 这边照旧并发处理别的帧。
+					try {
+						done(await pickDirectory(command.defaultPath));
+					} catch (err) {
+						// 没有 GUI 会话 / 平台没实现 / 选择器起不来 → ok:false + 原文原因。
+						// 不能降级成 canceled：那是在替人说他做了一个他根本没做过的决定。
+						fail(`pick_directory failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					return;
 				}

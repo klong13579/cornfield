@@ -3,6 +3,7 @@ import type { ImageContent } from "@cornfield/ai";
 import type { AgentTodoDto } from "./results/agent-todos";
 import type { AgentCreateInput } from "./results/agents";
 import type { CronCreateInput, CronUpdateInput } from "./results/cron";
+import type { ProjectDeclareInput } from "./results/projects";
 import type { DelegateChildInput } from "./results/session-tree";
 
 /**
@@ -299,11 +300,18 @@ export type MultiplexCommand =
 	 * Project registry 是客户端 scope，不挂会话，所以本命令没有 `sessionId`：写入不需要会话上下文，
 	 * 写完之后要看的会话归属由下一次 `list_projects` 算。
 	 *
+	 * `projectId` / `name` 缺省时由 serve 从 root 的目录名推导（缺省 = 字段不出现；显式空串是错误，
+	 * 与 `defaultAgentId` 同一套口径）。推导只能在 serve 侧：目录名是**跑 serve 那台机器**的路径语义
+	 * （`path.basename`，Windows 的分隔符与 macOS 不同），而「这个 root 是不是已经被别的 Project 占用」
+	 * 要按 symlink 归一比较 —— 客户端手上两样都没有，在那里再写一套只会在不同平台上给出不同答案。
+	 * 推导出的 id 与已有 Project 撞名时加 `-2` / `-3` 后缀（root 相同则复用原 Project 的 id 与 name，
+	 * 重复声明同一个目录是更新，不是新建）。
+	 *
 	 * 权威在存储：一个 root 只能被一个 Project 声明（root 按 symlink 归一比较），
 	 * root 已被别的 Project 占用 → ok:false，不是静默改写别人的声明。声明成功回存储真正落盘的
-	 * 那一份（root 是归一后的路径）。
+	 * 那一份（root 是归一后的路径；缺省推导出的 `projectId` / `name` 也从这一份里读）。
 	 */
-	| { id?: string; type: "set_project"; projectId: string; name: string; root: string; defaultAgentId?: string }
+	| ({ id?: string; type: "set_project" } & ProjectDeclareInput)
 	/**
 	 * 删掉一个已声明的 Project（ProjectDeleteDto）。
 	 *
@@ -311,6 +319,20 @@ export type MultiplexCommand =
 	 * 早就不在，就是在拿一个不是这次调用的结果冒充这次调用的结果。
 	 */
 	| { id?: string; type: "delete_project"; projectId: string }
+	/**
+	 * 让**跑 serve 的那台机器**上的人选一个目录（PickDirectoryDto）。
+	 *
+	 * 这不是 `fs_*` 那条面：它不受会话 workspace roots 约束 —— 用户要选的目录本来就在工作面之外，
+	 * 那正是选它的意义 —— 也没有任何列目录的能力经过这里：serve 只把用户在那个系统弹窗里亲手选中的
+	 * **一个绝对路径**带回来。
+	 *
+	 * 取消是 ok:true + `canceled:true`；弹不出来（serve 没有 GUI 会话 / 平台还没实现）是 ok:false +
+	 * 原文原因，**不得**降级成 canceled。调用方据此把「人取消了」与「人没被问到」分开说。
+	 *
+	 * `defaultPath` 只是一个起始位置建议：serve 只在一个**存在的目录**上用它，否则退到 home
+	 * （指向不存在路径时系统选择器的行为随平台而异）。
+	 */
+	| { id?: string; type: "pick_directory"; defaultPath?: string }
 	// Agent Todo（T10A）：Agent 级 Todo 板（owner = Agent，Project 可选绑定）
 	/**
 	 * 列出一个 Agent 的整块 Todo 板（AgentTodoListDto）。
@@ -530,12 +552,14 @@ export type WireExtensionCommand =
 	 */
 	| { id?: string; type: "listen_list" }
 	/**
-	 * 产物列表（R-ARTIFACTS）：从该 agent 最近会话 JSONL 的工具调用（write / edit /
-	 * puppeteer screenshot）提取写出文件，返回可预览产物（html / image / markdown / text）。
-	 * 路径约束与 fs_read 同（会话的 workspace roots 边界）。
+	 * 产物列表（R-ARTIFACTS）：一本会话账，两个来源合一，返回可预览产物
+	 * （html / image / markdown / text）。每条产物的 `source` 说明是谁放进来的：
+	 * - `agent`：该 agent 最近会话 JSONL 的工具调用（write / edit / puppeteer screenshot）写出的文件；
+	 * - `user`：用户发给该会话的文件（目前是贴/选进来的图，在会话 artifacts 目录的 uploads/）。
+	 * 路径约束两个来源相同，与 fs_read 同（会话的 workspace roots 边界）。
 	 * 响应 { artifacts: ArtifactDto[] }；静态预览走 /preview/<agentId>/<relpath>（serve 端路由）。
 	 *
-	 * sessionFile（可选）：定向到单个会话文件，只提取该会话的产物（按会话隔离视图，
+	 * sessionFile（可选）：定向到单个会话文件，只取该会话的产物（按会话隔离视图，
 	 * 前端产物 tab 随当前会话切换）；缺省 = agent 维度（最近 N 个会话混合）。
 	 */
 	| { id?: string; type: "list_artifacts"; sessionId?: string; sessionFile?: string }

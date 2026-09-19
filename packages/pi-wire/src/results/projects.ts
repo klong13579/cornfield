@@ -24,6 +24,24 @@ export interface ProjectRecordDto {
 }
 
 /**
+ * 声明或更新一个 Project 的入参（`set_project`）。
+ *
+ * `root` 必填且必须是**跑 serve 那台机器**上的绝对路径（相对路径会被 `path.resolve` 解成 serve 进程
+ * 自己的 cwd，凭空把一个目录声明成项目）。
+ *
+ * `projectId` / `name` 可以不给：缺省 = serve 从 root 的目录名推导（撞名时加 `-2` / `-3`，root 相同则
+ * 复用原 Project 的身份）。推导放在 serve 而不是客户端 —— 目录名是那台机器的路径语义，而「这个 root
+ * 是否已被别的 Project 占用」要按 symlink 归一比较，客户端手上两样都没有。
+ * 缺省与空串不是一回事：字段不出现 = 推导，显式空串是错误。
+ */
+export interface ProjectDeclareInput {
+	root: string;
+	projectId?: string;
+	name?: string;
+	defaultAgentId?: string;
+}
+
+/**
  * 会话归属的来源，与 WP1 `ProjectSource` 同形（`agent-domain/types.ts`）：
  *
  *   - `"session"` —— 会话自己的记录说了算（`SessionHeader.projectId`，装配时由调用方解出）；

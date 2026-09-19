@@ -21,12 +21,22 @@
  * 写面（`set_project` / `delete_project`）同样只搬存储的判决：谁占用 root、版本、读写失败都由
  * 存储说了算，这里只补上「调用方给进来的形状本身不成立」这一层（见 `projectInputError`），
  * 并把「删一个本来就不在的 Project」当成错误、而不是一次成功的空删除。
+ *
+ * 调用方不写 `projectId` / `name` 时由这里从 root 的目录名推导（`projectIdentity`）。放在这里而不是
+ * 客户端：目录名是**跑 serve 那台机器**的路径语义，而「这个 root 是不是已经被别的 Project 占用」要按
+ * symlink 归一比较 —— 两样都只有 serve 手上有。
  */
 
 import * as path from "node:path";
 
 import type { ProjectDeleteDto, ProjectListDto, ProjectRecordDto, ProjectUpsertDto } from "@cornfield/wire";
-import { loadProjects, projectsFilePath, removeProject, upsertProject } from "../agent-domain/project-store";
+import {
+	loadProjects,
+	matchProjectByRoot,
+	projectsFilePath,
+	removeProject,
+	upsertProject,
+} from "../agent-domain/project-store";
 import type { ProjectRecord } from "../agent-domain/types";
 import { resolveSessionWorkspace, type SessionWorkspaceSource } from "../session/session-workspace";
 
@@ -72,15 +82,18 @@ export async function readProjectContext(query?: SessionProjectQuery): Promise<P
  * 不做任何静默改写：调用方给的名字就按原样落盘、原样回（要不要 trim 是调用方的事）。
  */
 export async function declareProject(input: {
-	projectId: string;
-	name: string;
+	/** 缺省 = 从 root 的目录名推导（见 `projectIdentity`）。 */
+	projectId?: string;
+	/** 缺省 = 跟随 projectId。 */
+	name?: string;
 	root: string;
 	defaultAgentId?: string;
 }): Promise<ProjectUpsertDto> {
 	const invalid = projectInputError(input);
 	if (invalid) throw new Error(invalid);
 
-	const record: ProjectRecord = { projectId: input.projectId, name: input.name, root: input.root };
+	const identity = projectIdentity(input, await loadProjects());
+	const record: ProjectRecord = { projectId: identity.projectId, name: identity.name, root: input.root };
 	if (input.defaultAgentId !== undefined) record.defaultAgentId = input.defaultAgentId;
 	await upsertProject(record);
 
@@ -109,21 +122,78 @@ export async function dropProject(projectId: string): Promise<ProjectDeleteDto> 
 }
 
 /**
+ * 缺省身份：把「只给了一个 root」补成一条完整的声明。
+ *
+ * 三条规则，各自对应一件不能猜错的事：
+ *   - **同一个目录再声明一次是更新**：root 相同（按 symlink 归一）就复用原来那一条的 `projectId`，
+ *     否则第二次点「声明」会在注册表里多出一个 `<目录名>-2`，而用户以为自己在更新同一个项目；
+ *   - **目录名撞了要避让**：`projectId` 是存储的键，直接拿目录名当键会把另一个目录已经声明过的
+ *     Project **覆盖掉**（`upsertProject` 就是按 id 覆盖）。所以撞名时加 `-2` / `-3` 后缀，
+ *     不覆盖别人的声明，也不把用户堵在一个他改不了的输入框前；
+ *   - **名字跟随 id，但已有记录的名字优先**：给一个已声明的 root 换地方时不该顺手把用户起的名字
+ *     改成目录名。
+ *
+ * 显式给的值一律原样用（调用方是权威），本函数只补缺省。
+ */
+export function projectIdentity(
+	input: { projectId?: string; name?: string; root: string },
+	declared: readonly ProjectRecord[],
+): { projectId: string; name: string } {
+	const explicitId = input.projectId?.trim() ?? "";
+	const explicitName = input.name?.trim() ?? "";
+
+	const byRoot = matchProjectByRoot(declared, input.root);
+	const projectId =
+		explicitId !== ""
+			? explicitId
+			: (byRoot?.projectId ?? freeProjectId(path.basename(path.resolve(input.root)), declared));
+	const existing = declared.find(project => project.projectId === projectId);
+
+	return { projectId, name: explicitName !== "" ? explicitName : (existing?.name ?? projectId) };
+}
+
+/**
+ * 一个还没被占用的 `projectId`：目录名在前，撞名时依次试 `<目录名>-2` / `-3` …。
+ *
+ * 试到空位为止（集合有限，循环一定终止）；不抛「重名」错让用户去改一个已经没有输入框的 id。
+ */
+function freeProjectId(base: string, declared: readonly ProjectRecord[]): string {
+	if (base === "" || base === "." || base === "..") {
+		throw new Error(
+			`cannot derive a project id from the root directory name (got "${base}"): ` +
+				"the filesystem root has no name. Pick a folder inside it.",
+		);
+	}
+	const taken = new Set(declared.map(project => project.projectId));
+	if (!taken.has(base)) return base;
+	for (let n = 2; ; n += 1) {
+		const candidate = `${base}-${n}`;
+		if (!taken.has(candidate)) return candidate;
+	}
+}
+
+/**
  * 调用方输入不成立时的判决文本；输入成立时返回 undefined。
  *
  * 这几条不是存储的义务，而是「这个命令的入参形状」：存储会照单全收 —— 空的 projectId 是一个
  * 永远匹配不上、也读不回来的键；空的 root 会被 `path.resolve` 解析成 serve 进程自己的 cwd，
  * 凭空把一个目录声明成项目。所以宁可 ok:false，也不写一条谁也读不懂的声明。
- * 空串的 `defaultAgentId` 同理：缺省表示「没有默认 Agent」，空串两不像，不能被当成缺省读掉。
+ *
+ * 缺省（字段不出现）与空串是两件事，三个字段同一套口径：缺省有明确含义（projectId/name 由 root 推导，
+ * defaultAgentId = 没有默认 Agent），空串两不像，不能被静默读成缺省。
  */
 function projectInputError(input: {
-	projectId: string;
-	name: string;
+	projectId?: string;
+	name?: string;
 	root: string;
 	defaultAgentId?: string;
 }): string | undefined {
-	if (input.projectId.trim() === "") return "projectId must not be empty.";
-	if (input.name.trim() === "") return "name must not be empty.";
+	if (input.projectId !== undefined && input.projectId.trim() === "") {
+		return "projectId must not be empty; omit the field to derive it from the root directory name.";
+	}
+	if (input.name !== undefined && input.name.trim() === "") {
+		return "name must not be empty; omit the field to derive it from the project id.";
+	}
 	if (input.root.trim() === "") return "root must not be empty.";
 	if (!path.isAbsolute(input.root)) {
 		return `root must be an absolute path (got "${input.root}"); a relative root would resolve against the serve process cwd.`;

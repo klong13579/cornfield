@@ -754,6 +754,8 @@ export async function runWireStdioMode(session: AgentSession): Promise<never> {
 			case "fs_list":
 			case "fs_read":
 			case "fs_read_image":
+			// 系统目录选择框是 serve 的能力（要有 GUI 会话）：stdio 子进程与它无关，也不该代理它。
+			case "pick_directory":
 			case "gateway_status":
 			case "get_stats":
 			case "get_memory":

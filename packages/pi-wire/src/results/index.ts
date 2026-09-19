@@ -8,6 +8,7 @@ export * from "./artifacts";
 export * from "./config-scope";
 export * from "./cron";
 export * from "./diagnosis";
+export * from "./directory";
 export * from "./events";
 export * from "./git";
 export * from "./listen";
