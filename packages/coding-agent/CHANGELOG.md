@@ -4,6 +4,8 @@
 
 ### Added
 
+- **python 共享网关孤儿回收**（`src/ipy/gateway-coordinator.ts`、`test/core/python-gateway-orphan-reap.test.ts`）：`acquireSharedGateway` 在锁内扫一遘 `ps -eo pid,ppid,args`，回收同时满足三条件的进程——argv 含 `-m kernel_gateway`、PPID=1（拉它的人已经没了）、且 config root 下任何 profile 的 `gateway.json` 都没记录它的 pid；三条缺一不杀，**记录集枚举失败就整个跳过**（“没扫到”不等于“可以杀”，误杀会打断别人正在用的会话）。回收用 SIGTERM（Jupyter 自己的退出路径比 SIGKILL 干净）。真机实测回收 16 个孤儿（最老 8 天）。配套：`gateway.users` 读时剔除死 pid——它此前只增不减（实测 36 个 pid 里 35 个是死进程），而 `shutdownSharedGateway` 靠这份名单判断“还有没有人在用”，死 pid 堆着会让网关永不关闭。
+
 - **LSP `workspace/configuration` 的应答落一行通用 debug**（`src/lsp/client.ts`）：`logger.debug("LSP configuration request answered", { server, sections })`，取在 `sendResponse` **之后**（这条出现即表示答案已经上线），**只记 section 名不记值**（`settings` 里可能有凭据）。
   - 为什么需要它：语言服务通过 `workspace/configuration` **向客户端拉配置**（不是客户端推），所以「服务端在做出某个决定之前到底问没问到配置」在客户端侧是个可观测点 —— 而此前 `client.ts` 里**一条 logger 调用都没有**，这个点取不到。第一个用例是验证 `lsp/defaults.json` 里那条 rust-analyzer `cachePriming.enable=false` 到底有没生效：如果 RA 是在决定要不要预热**之后**才拉配置，那条就是「配置在那儿、从不生效」的死配置，而它连降级都没有，靠读代码看不出来。
   - 默认 info 级看不到，需 `PI_LOG_LEVEL=debug`。
@@ -20,6 +22,8 @@
   - `project_context` 工具不再读 `<projectRoot>/TODO.md` 并报给模型（并把 `todo` 字段从 `ProjectContextDetails` 删掉）：报一份不再维护的存档，模型没有第二个信号能分辨它是过期的。
   - 系统提示的「任务追踪纪律」改为：多步任务用会话内 `todo` 工具；长期任务在任务板；`TODO.md` 是留档，不读也不写。
   - 边界：已存在的 `TODO.md` 文件一份都没删（原件留档）；`Project TODO.md`（`projectRoot/TODO.md`，`project-todo` skill 维护）是另一个概念，本轮未动；生效于**新会话**（上下文在会话建立时装）。
+
+- **`pi://` 的文档索引改为按需加载**（`src/internal-urls/pi-protocol.ts`、`test/internal-urls/pi-protocol.test.ts`）：1.63MB 的 `docs-index.generated` 从静态 import 改成首次读到 `pi://` 时才 `import()`（与 `tools/browser.ts` 加载 puppeteer 同一写法，仓库禁止内联 import 但不禁止这种“唯一入口 + 注释说明”的延迟加载）。动机：每个 cornfield 进程都把这个索引搬进堆，而 gateway 子进程和一次性 print 运行从不读文档。实测模块记录 54.14 → 50.32MB（**−3.82MB/进程**，heapUsed −2.1MB），换算系数 ≈ 源码体积 ×2.3。另外：改动前全仓没有任何测试覆盖 `pi://`，本次补 8 个用例（列目录 / 读文件 / 嵌套路径 / 惰性加载幂等 / 两种报错分支 / 绝对路径与路径穿越拒绝）。
 
 - **附件图片落盘：`prompt.images` 之外给 agent 一个可读的路径**（`src/server/wire-server.ts`, `test/wire-server-prompt-images.integration.test.ts`）：带图的消息此前只把图片当 inline base64 发出去——它能不能到模型取决于 provider 有没有透传（实测某 provider 没透传，模型回的是「没收到图，给我个本地路径」，见 `docs/web-app-agents-t3/after.dom.txt`），而 `inspect_image` / `read` 只认磁盘路径（`tools/inspect-image.ts` 的 `loadImageInput({ path })`）。现在 5 个带 `images` 的命令（`prompt` / `steer` / `follow_up` / `abort_and_prompt` / `retry_from`）统一经过一个 helper：每张图先归一成 `inspect_image` 认得的格式（BMP/SVG 等转 PNG），写进会话 artifacts 目录的 `uploads/uploaded-<UTC 秒>-<内容 hash 前 8 位>.<ext>`，再把 `[image: <绝对路径> (mime, 字节)]` 追加进消息文本（与 gateway 的 `[file: <路径> (mime, 大小)]` 同一形态）。inline base64 保留，视觉模型那条路不回退。
   - **落盘失败不静默**：转不了 / 存不下 / 会话没有 artifacts 目录，都在消息里写明「inspect_image cannot read this attachment」——不然模型会对着一个不存在的附件硬编。

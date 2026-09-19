@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { createServer } from "node:net";
 import * as path from "node:path";
-import { $flag, getClientDir, isEnoent, logger, procmgr } from "@cornfield/utils";
+import { $flag, getClientDir, getConfigRootDir, isEnoent, logger, procmgr } from "@cornfield/utils";
 import type { Subprocess } from "bun";
 import { Settings } from "../config/settings";
 import { getOrCreateSnapshot } from "../utils/shell-snapshot";
@@ -17,6 +17,25 @@ const GATEWAY_LOCK_RETRY_MS = 50;
 const GATEWAY_LOCK_STALE_MS = GATEWAY_STARTUP_TIMEOUT_MS * 2;
 const GATEWAY_LOCK_HEARTBEAT_MS = 5000;
 const HEALTH_CHECK_TIMEOUT_MS = 3000;
+
+/**
+ * Where a profile's recorded gateway can live, relative to the config root.
+ *
+ * A profile is a client dir (`getClientDir()` — `~/.cornfield/agent` by
+ * default, or whatever `CORNFIELD_CLIENT_DIR` points at). Agent homes
+ * (`~/.cornfield/agents/<id>/`) and pre-migration backups each keep their own
+ * `python-gateway/` under the same root, so a sweep that only looked at the
+ * current client dir would happily kill a sibling profile's live gateway.
+ *
+ * Bounded on purpose: three shallow globs, not a walk of the whole config root
+ * (the session tree alone is thousands of directories).
+ */
+const PROFILE_GATEWAY_INFO_GLOBS = [
+	`${GATEWAY_DIR_NAME}/${GATEWAY_INFO_FILE}`,
+	`agent/${GATEWAY_DIR_NAME}/${GATEWAY_INFO_FILE}`,
+	`*/${GATEWAY_DIR_NAME}/${GATEWAY_INFO_FILE}`,
+	`agents/*/${GATEWAY_DIR_NAME}/${GATEWAY_INFO_FILE}`,
+];
 
 export interface GatewayInfo {
 	url: string;
@@ -176,7 +195,14 @@ async function withGatewayLock<T>(handler: () => Promise<T>): Promise<T> {
 }
 
 async function readGatewayInfo(): Promise<GatewayInfo | null> {
-	const infoPath = getGatewayInfoPath();
+	return await readGatewayInfoFile(getGatewayInfoPath());
+}
+
+/** Parse a `gateway.json` at an explicit path — used by the orphan sweep to
+ *  read *other* profiles' records, not just this one's. Any unreadable or
+ *  malformed file is `null`: a profile we cannot read is a profile we cannot
+ *  prove safe to kill. */
+async function readGatewayInfoFile(infoPath: string): Promise<GatewayInfo | null> {
 	try {
 		const content = await Bun.file(infoPath).text();
 		const parsed = JSON.parse(content) as Partial<GatewayInfo>;
@@ -219,7 +245,15 @@ async function readGatewayUsers(): Promise<number[]> {
 		const raw = await Bun.file(usersPath).text();
 		const parsed = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((p): p is number => typeof p === "number" && Number.isFinite(p));
+		// Drop pids that no longer exist. Without this the file is append-only in
+		// practice: a process that dies without reaching `shutdownSharedGateway`
+		// (SIGKILL, OOM, terminal closed) leaves its pid behind forever, and every
+		// subsequent read carries the corpse. Observed 2026-09-19: 36 pids, of
+		// which 16 gateway processes were the only ones still alive.
+		return parsed.filter(
+			(p): p is number =>
+				typeof p === "number" && Number.isFinite(p) && (p === process.pid || procmgr.isPidRunning(p)),
+		);
 	} catch {
 		return [];
 	}
@@ -357,9 +391,132 @@ async function killGateway(pid: number, context: string): Promise<void> {
 	}
 }
 
+// ── Orphan sweep ─────────────────────────────────────────────────────
+//
+// The shared-gateway design keeps exactly one gateway per machine per profile,
+// reachable only through its `gateway.json`. That single handle is also its
+// weakness: when the file is lost (moved aside by a migration, overwritten by
+// a racing start, deleted with the client dir) the gateway keeps running with
+// nothing left to reach it or to stop it, and the next session happily spawns
+// another one. Observed 2026-09-19: 16 orphaned `kernel_gateway` processes,
+// the oldest 8 days old, every one of them PPID=1 with no info file pointing
+// at it.
+//
+// The sweep runs under the acquire lock (so no other process can be mid-start)
+// and only touches processes for which all three of these hold:
+//   1. `-m kernel_gateway` in argv — it is one of ours;
+//   2. PPID 1 — the process that spawned it is gone, so no live owner exists;
+//   3. no `gateway.json` anywhere in the config root records its pid.
+// If the recorded-pid set cannot be enumerated, the sweep does nothing.
+
+/**
+ * Pure selection half of the sweep: which pids from a `ps -eo pid,ppid,args`
+ * dump are orphaned Python kernel gateways?
+ *
+ * Exported for the contract test — the rules are the whole safety story here.
+ */
+export function selectOrphanKernelGateways(psOutput: string, referencedPids: ReadonlySet<number>): number[] {
+	const orphans: number[] = [];
+	for (const raw of psOutput.split("\n")) {
+		const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(raw);
+		if (!match) continue;
+		const pid = Number(match[1]);
+		const ppid = Number(match[2]);
+		const args = match[3] ?? "";
+		if (!Number.isFinite(pid) || ppid !== 1) continue;
+		if (pid === process.pid) continue;
+		if (referencedPids.has(pid)) continue;
+		if (!/-m\s+kernel_gateway(?:\s|$)/.test(args)) continue;
+		orphans.push(pid);
+	}
+	return orphans;
+}
+
+/**
+ * Every pid recorded in any profile's `gateway.json` under the config root
+ * (plus this client dir's own record).
+ *
+ * Returns `null` when the enumeration itself failed — the caller must not read
+ * a partial set as "these are the only live gateways", because that reading is
+ * what kills someone else's session.
+ */
+async function collectReferencedGatewayPids(): Promise<Set<number> | null> {
+	const pids = new Set<number>();
+	const candidates = new Set<string>([getGatewayInfoPath()]);
+	const root = getConfigRootDir();
+	try {
+		for (const pattern of PROFILE_GATEWAY_INFO_GLOBS) {
+			for await (const match of new Bun.Glob(pattern).scan({ cwd: root, onlyFiles: true })) {
+				candidates.add(path.join(root, match));
+			}
+		}
+	} catch (err) {
+		logger.warn("Python gateway orphan sweep: profile enumeration failed, skipping", {
+			error: err instanceof Error ? err.message : String(err),
+		});
+		return null;
+	}
+	for (const file of candidates) {
+		const info = await readGatewayInfoFile(file);
+		if (info) pids.add(info.pid);
+	}
+	return pids;
+}
+
+/**
+ * Terminate Python kernel gateway processes nothing references any more.
+ *
+ * `referencedPids` is an injection point for the contract test; production
+ * callers pass nothing and let the sweep enumerate the records itself.
+ * Returns the pids it signalled (SIGTERM — the gateway's own shutdown path is
+ * cleaner than SIGKILL for a Jupyter process holding kernels).
+ */
+export async function reapOrphanKernelGateways(referencedPids?: ReadonlySet<number>): Promise<number[]> {
+	const referenced = referencedPids ?? (await collectReferencedGatewayPids());
+	if (referenced === null) return [];
+
+	let psOutput: string;
+	try {
+		const result = Bun.spawnSync(["ps", "-eo", "pid,ppid,args"]);
+		if (result.exitCode !== 0) return [];
+		psOutput = result.stdout.toString();
+	} catch (err) {
+		logger.debug("Python gateway orphan sweep: ps unavailable", {
+			error: err instanceof Error ? err.message : String(err),
+		});
+		return [];
+	}
+
+	const killed: number[] = [];
+	for (const pid of selectOrphanKernelGateways(psOutput, referenced)) {
+		logger.warn("Reaping orphaned Python kernel gateway", { pid });
+		try {
+			process.kill(pid, "SIGTERM");
+			killed.push(pid);
+		} catch (err) {
+			logger.debug("Python gateway orphan sweep: kill failed", {
+				pid,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+	return killed;
+}
+
 export async function acquireSharedGateway(cwd: string): Promise<AcquireResult | null> {
 	try {
 		return await withGatewayLock(async () => {
+			// Sweep first, while we hold the lock: no other process can be mid-start,
+			// and our own record (written below) is not needed to protect the
+			// gateway we are about to reuse or spawn — the sweep only touches
+			// processes nothing records any more. Best-effort: a failed sweep must
+			// never fail the acquisition.
+			await reapOrphanKernelGateways().catch(err => {
+				logger.warn("Python gateway orphan sweep failed", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+
 			const existingInfo = await logger.time("acquireSharedGateway:readInfo", readGatewayInfo);
 			if (existingInfo) {
 				if (await logger.time("acquireSharedGateway:isAlive", isGatewayAlive, existingInfo)) {
