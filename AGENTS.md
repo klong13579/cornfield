@@ -106,6 +106,16 @@ Skipping step 1+2 makes "live test" silently exercise the **old** binary, maskin
 
 **Native addon (`packages/natives/native/*.node`)** is a gitignored build artifact, so it does **not** travel with a merge or a pull. After merging or pulling anything that touches `crates/pi-natives` (or its `Cargo.toml` / `Cargo.lock`), run `bun run build:native` **in that checkout** before running tests or the CLI. The failure mode is not a build error — it is a runtime error: code that references a newer native export dereferences `undefined` on a stale addon (measured: `SearchEngine` missing from an addon built before PCRE2 landed made every `search` call throw). The build reuses an isolated `target/napi-build/<triple>-<variant>` directory and regenerates `index.js` / `index.d.ts`; if those tracked generated files diff afterwards, the committed copies were stale.
 
+### LSP server multiplexing (drey)
+
+`typescript-language-server` is shared across sessions instead of being spawned per session (`packages/coding-agent/src/lsp/drey.ts` + `multiplexer.ts`). Measured before the change: one tls per session at 1.1–4.0GB `vmmap` footprint, **two** `tsserver` processes per tls, four sessions ≈ 12.5GB on this repo. Operational facts:
+
+- The daemon is started by cornfield **detached**, with stdio going to `~/.cornfield/logs/drey.log` — that log is where client connects, backend spawns and backend deaths are recorded. `ps -Ao pid,ppid,args | awk '/drey/'` shows it; `drey status` lists backends per workspace root with attached client counts.
+- **`drey stop` stops the daemon**; backends it spawned can survive that (observed once) — check for an orphaned `typescript-language-server` whose parent is gone before assuming the tree is clean. Backends idle-evict after 30 min by default.
+- `CORNFIELD_DISABLE_DREY=1` bypasses the shim entirely (direct spawn, no sharing) — the escape hatch when LSP looks wrong. `rust-analyzer` keeps using lspmux; the two are routed by `resolveLspCommand()`.
+- Known upstream rough edges (drey 0.1.9, verified 2026-09-19): two clients connecting in the *same instant* create two backends instead of sharing (staggered starts are fine), and a backend occasionally exits on client disconnect — drey respawns it, and a surviving client keeps getting correct answers across an abrupt (`SIGKILL`) peer death.
+- Diagnostics still force a recompute per request: `refreshFile()` sends a full-text `didChange`, so a session that joins a document another session already has open does receive its own publish.
+
 ## Architecture & Data Flow
 
 ### Boot sequence (coding-agent)
