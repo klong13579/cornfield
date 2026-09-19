@@ -17,12 +17,12 @@ import { createHashRouter, Navigate, type RouteObject, useNavigate, useParams } 
 import { AppShell } from "./layout/AppShell";
 import { NotFoundView } from "./layout/NotFoundView";
 import { getPanels, type PanelDef, panelHandle, registerPanel } from "./layout/panel-registry";
-import { MockGalleryView } from "./pages/mock/MockGalleryView";
 import { AgentDetailView } from "./pages/agents/AgentDetailView";
 import { AgentsView } from "./pages/agents/AgentsView";
 import { HomeView } from "./pages/home/HomeView";
 import { InsightsView } from "./pages/insights/InsightsView";
 import { MemoryView } from "./pages/memory/MemoryView";
+import { MockGalleryView } from "./pages/mock/MockGalleryView";
 import { CatalogView } from "./pages/models/CatalogView";
 import { ModelsView } from "./pages/models/ModelsView";
 import { ProvidersView } from "./pages/models/ProvidersView";
