@@ -1,4 +1,14 @@
-import { List, Network, PanelLeftClose, PanelLeftOpen, Plus, Search, Star } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronRight,
+	List,
+	Network,
+	PanelLeftClose,
+	PanelLeftOpen,
+	Plus,
+	Search,
+	Star,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionRecordSummary } from "../../lib/records";
 import { useMediaQuery } from "../../lib/use-media-query";
@@ -10,8 +20,8 @@ import { SessionTree } from "./SessionTree";
 /**
  * 会话侧栏（S3，FR-1 会话工作区）—— 300px 会话列表：
  * - 新会话按钮 + 搜索过滤
- * - 会话按 Agent 分组（session.agent → agent 显示名映射）
- * - pin 收藏（localStorage 本地持久化，组内置顶）
+ * - 会话按 Agent 分组（session.agent → agent 显示名映射），组**默认折叠**，点组头展哪一组
+ * - pin 收藏（localStorage 本地持久化）→ 「置顶」组，恒展开
  *
  * 分组只有一根轴：**谁在服务这条会话**。曾经按 `source`（cli / agent）分成两个 tab，而 serve 侧的
  * source 是按 agentId 判的（default 恒等于 cli，`wire-server.ts` 的 `list_sessions`）——于是
@@ -87,6 +97,11 @@ export interface SessionGroup {
 	rows: SidebarRow[];
 }
 
+/** 渲染用的组：Agent 组带折叠位；当前会话（恒 1 行）与置顶恒展开。 */
+export interface RenderGroup extends SessionGroup {
+	collapsible: boolean;
+}
+
 /**
  * 分组（纯函数：无 React、无 store）：行的顺序就是组的顺序 —— Map 保留插入顺序，
  * 而行已经按「pin 置顶 → startedAt 倒序」排过，分组不该把它重排一遍。于是组头跟着组内最新
@@ -115,6 +130,130 @@ export function groupSessions(
 	return [...map.values()];
 }
 
+/**
+ * 把 pin 过的行从列表里**搬出来**（不是复制）：同一行只出现在一处。
+ *
+ * pin 是**视图偏好**，不是分组轴 —— 所以它不进 `groupSessions`，在渲染层单独成组。
+ * 组默认折叠，pin 过的行留在各自的 Agent 组里就等于被折叠藏起来，pin 这个功能也就废了。
+ *
+ * 当前会话那一行不参与：它的 id 是附件地址（如 `default`），不是一个会话 id —— 不得被 pin 表里
+ * 同名字符串认领走（认领走之后「当前会话」组会空掉，而那行是回实时的唯一入口）。
+ */
+export function splitPinned(
+	rows: readonly SidebarRow[],
+	pinned: ReadonlySet<string>,
+): { pinned: SidebarRow[]; rest: SidebarRow[] } {
+	const pinnedRows: SidebarRow[] = [];
+	const rest: SidebarRow[] = [];
+	for (const row of rows) {
+		if (!isCurrent(row) && pinned.has(row.id)) pinnedRows.push(row);
+		else rest.push(row);
+	}
+	return { pinned: pinnedRows, rest };
+}
+
+/**
+ * 折叠态行的容器 id（`aria-controls` 要指一个真目标）。
+ *
+ * 直接拼 key（Map 键，本来就唯一且稳定）：**不做字符替换** —— 把 `:` 洗成 `-` 会让
+ * `agent:a:b` 与 `agent:a-b` 撞成同一个 id，`aria-controls` 于是指向别人的行容器。id 里带冒号是
+ * 合法的（HTML 只禁空白），这里也没人用 CSS 选择器去够它。
+ */
+export function groupRowsId(key: string): string {
+	return `session-group-rows-${key}`;
+}
+
+/**
+ * 组头此刻展开没有。三支：
+ * - 没有折叠位的组（当前会话 / 置顶）恒展开；
+ * - 过滤中一律展开 —— 过滤剔掉了不命中的行，命中却藏在折叠里等于没命中；
+ * - 其余看用户点没点过（默认折叠：展开态是**点出来的**，不是默认值）。
+ */
+export function isGroupOpen(
+	group: { key: string; collapsible: boolean },
+	state: { expanded: ReadonlySet<string>; filtering: boolean },
+): boolean {
+	if (!group.collapsible) return true;
+	if (state.filtering) return true;
+	return state.expanded.has(group.key);
+}
+
+export interface SessionGroupHeaderProps {
+	label: string;
+	count: number;
+	/** 这个组留了折叠位（左边那个箭头）。当前会话 / 置顶没有。 */
+	collapsible: boolean;
+	/** 此刻是否展开。 */
+	open: boolean;
+	/** 行的容器 id，给 `aria-controls` 用。 */
+	rowsId: string;
+	/** 有 = 组头是开关；没有 = 纯标题（不可折叠，或正过滤中一律展开）。 */
+	onToggle?: (() => void) | undefined;
+}
+
+/**
+ * 组头（纯展示，导出供静态渲染断言）。
+ *
+ * 两种画法：可点的是**开关**（`aria-expanded` + `aria-controls` 指到行的容器），不可点的只是
+ * 一行标题 —— 一个点了没反应的箭头比没有它更坏。过滤中组头退回纯标题（那时点折叠没有意义），
+ * 但左边的箭头照画：让它消失会把整个列表左移一档。
+ */
+export function SessionGroupHeader({
+	label,
+	count,
+	collapsible,
+	open,
+	rowsId,
+	onToggle,
+}: SessionGroupHeaderProps): React.JSX.Element {
+	const content = (
+		<>
+			{collapsible ? (
+				open ? (
+					<ChevronDown size={12} strokeWidth={1.5} className="shrink-0" />
+				) : (
+					<ChevronRight size={12} strokeWidth={1.5} className="shrink-0" />
+				)
+			) : null}
+			<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
+			{label}
+			<span className="ml-auto font-mono text-[10px] text-ink-faint">{count}</span>
+		</>
+	);
+	const className =
+		"flex w-full items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase";
+	if (!onToggle) return <div className={className}>{content}</div>;
+	return (
+		<button
+			type="button"
+			className={`${className} text-left hover:text-ink`}
+			aria-expanded={open}
+			aria-controls={rowsId}
+			title={open ? `折叠 ${label}` : `展开 ${label}`}
+			onClick={onToggle}
+		>
+			{content}
+		</button>
+	);
+}
+
+/**
+ * 渲染用的组列表：**当前会话（恒 1 行，永远第一）→ 置顶 → 各 Agent 组**。
+ *
+ * 当前会话排第一是有代价的结论：那一行是回实时的唯一入口（见 `sessionRowAction`），
+ * pin 出来的东西不得把它顶下去。
+ *
+ * 可折叠的只有 Agent 组：当前会话与置顶不给折叠位 —— 一个点了没用的箭头比没有它更坏。
+ */
+export function renderGroups(groups: readonly SessionGroup[], pinnedRows: readonly SidebarRow[]): RenderGroup[] {
+	const current = groups.find(group => group.key === "current");
+	return [
+		...(current ? [{ ...current, collapsible: false }] : []),
+		...(pinnedRows.length > 0 ? [{ key: "pinned", label: "置顶", rows: [...pinnedRows], collapsible: false }] : []),
+		...groups.filter(group => group.key !== "current").map(group => ({ ...group, collapsible: true })),
+	];
+}
+
 export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElement> } = {}): React.JSX.Element {
 	const view = useSession();
 	const store = useSessionStore();
@@ -126,6 +265,8 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 	const [query, setQuery] = useState("");
 	const [sessions, setSessions] = useState<SessionRecordSummary[]>([]);
 	const [pinned, setPinned] = useState<Set<string>>(loadPinned);
+	/** 展开着的组（key）。空 = 全折叠 —— 默认态是折叠，展开是用户点出来的。**不持久化**（与「当前计划」条同款约定：每次进工作台都从折叠开始）。 */
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
 	/** 历史会话索引（list_sessions 真数据）；未连接/失败保持空列表，UI 空态 */
 	useEffect(() => {
@@ -194,8 +335,21 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 		return [...current.filter(c => !q || c.name.toLowerCase().includes(q)), ...sorted];
 	}, [sessions, view.sessionId, view.sessionName, view.historySessionFile, query, pinned]);
 
-	// 按 Agent 分组（谁在服务这条会话）；组序跟着组内最新一行走
-	const groups = useMemo(() => groupSessions(rows, { agentLabel }), [rows, agentLabel]);
+	// pin 过的行搬进「置顶」组；其余按 Agent 分组（谁在服务这条会话），组序跟着组内最新一行走
+	const { pinned: pinnedRows, rest: unpinnedRows } = useMemo(() => splitPinned(rows, pinned), [rows, pinned]);
+	const groups = useMemo(() => groupSessions(unpinnedRows, { agentLabel }), [unpinnedRows, agentLabel]);
+	/** 过滤中：组一律展开（命中藏在折叠里等于没命中），组头也不再是开关。 */
+	const filtering = query.trim().length > 0;
+	const renderedGroups = useMemo(() => renderGroups(groups, pinnedRows), [groups, pinnedRows]);
+
+	const toggleGroup = (key: string) => {
+		setExpandedGroups(prev => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	};
 
 	return (
 		<aside
@@ -288,31 +442,44 @@ export function SessionSidebar({ elementRef }: { elementRef?: React.Ref<HTMLElem
 							)}
 							{/* 会话列表 */}
 							<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-								{groups.length === 0 && (
+								{renderedGroups.length === 0 && (
 									<div className="px-2 py-10 text-center text-[12px] text-ink-faint">
 										{view.connected ? "暂无历史会话" : "未连接——会话索引不可用"}
 									</div>
 								)}
-								{groups.map(g => (
-									<div key={g.key} className="mb-1">
-										<div className="flex items-center gap-1.5 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-ink-faint uppercase">
-											<span className="h-[7px] w-[7px] shrink-0 rounded-[3px] bg-success" />
-											{g.label}
-											<span className="ml-auto font-mono text-[10px] text-ink-faint">{g.rows.length}</span>
-										</div>
-										{g.rows.map(row => (
-											<SessionRow
-												key={row.id}
-												row={row}
-												pinned={pinned.has(row.id)}
-												active={!isCurrent(row) && row.id === view.sessionId}
-												projectLabel={isCurrent(row) ? undefined : projectNameOf(row)}
-												onTogglePin={() => togglePin(row.id)}
-												onClick={sessionRowAction(row, store)}
+								{renderedGroups.map(group => {
+									const open = isGroupOpen(group, { expanded: expandedGroups, filtering });
+									const rowsId = groupRowsId(group.key);
+									// 过滤中组头退回纯标题（那时点折叠没有意义），也不再用它当开关
+									const toggle = group.collapsible && !filtering ? () => toggleGroup(group.key) : undefined;
+									return (
+										<div key={group.key} className="mb-1">
+											<SessionGroupHeader
+												label={group.label}
+												count={group.rows.length}
+												collapsible={group.collapsible}
+												open={open}
+												rowsId={rowsId}
+												{...(toggle ? { onToggle: toggle } : {})}
 											/>
-										))}
-									</div>
-								))}
+											{open && (
+												<div id={rowsId}>
+													{group.rows.map(row => (
+														<SessionRow
+															key={row.id}
+															row={row}
+															pinned={pinned.has(row.id)}
+															active={!isCurrent(row) && row.id === view.sessionId}
+															projectLabel={isCurrent(row) ? undefined : projectNameOf(row)}
+															onTogglePin={() => togglePin(row.id)}
+															onClick={sessionRowAction(row, store)}
+														/>
+													))}
+												</div>
+											)}
+										</div>
+									);
+								})}
 							</div>
 						</>
 					)}
